@@ -39,7 +39,7 @@ class UserSchema(SQLAlchemyAutoSchema):
     id = auto_field(dump_only=True)
     username = auto_field()
     email = auto_field()
-    balance = auto_field(description="Balance in Satoshis") # Keep as integer
+    balance = auto_field(metadata={"description": "Balance in Satoshis"}) # Keep as integer
     deposit_wallet_address = auto_field(dump_only=True)
     is_admin = auto_field(dump_only=True)
     is_active = auto_field(dump_only=True)
@@ -47,7 +47,7 @@ class UserSchema(SQLAlchemyAutoSchema):
     last_login_at = auto_field(dump_only=True)
 
     # Example custom field: balance in BTC (string for display)
-    balance_btc = fields.Method("get_balance_btc", dump_only=True, description="Balance in BTC (display only)")
+    balance_btc = fields.Method("get_balance_btc", dump_only=True, metadata={"description": "Balance in BTC (display only)"})
 
     def get_balance_btc(self, obj):
         # Avoid division by zero
@@ -117,8 +117,8 @@ class GameSessionSchema(SQLAlchemyAutoSchema):
     bonus_active = auto_field(dump_only=True)
     bonus_spins_remaining = auto_field(dump_only=True)
     bonus_multiplier = auto_field(dump_only=True)
-    amount_wagered = auto_field(dump_only=True, description="Total wagered in Satoshis")
-    amount_won = auto_field(dump_only=True, description="Total won in Satoshis")
+    amount_wagered = auto_field(dump_only=True, metadata={"description": "Total wagered in Satoshis"})
+    amount_won = auto_field(dump_only=True, metadata={"description": "Total won in Satoshis"})
     num_spins = auto_field(dump_only=True)
     session_start = auto_field(dump_only=True)
     session_end = auto_field(dump_only=True)
@@ -127,13 +127,13 @@ class GameSessionSchema(SQLAlchemyAutoSchema):
     blackjack_table = fields.Nested('BlackjackTableBasicSchema', dump_only=True) # Basic info
 
 class SpinRequestSchema(Schema):
-    bet_amount = fields.Int(required=True, validate=Range(min=1), description="Bet amount in Satoshis")
+    bet_amount = fields.Int(required=True, validate=Range(min=1), metadata={"description": "Bet amount in Satoshis"})
     # game_session_id is no longer needed, derived from user's active session
 
 class SpinSchema(Schema):
     # Represents the data stored for a spin (part of SlotSpin)
-    bet_amount = fields.Int(required=True, description="Bet amount in Satoshis")
-    win_amount = fields.Int(required=True, description="Win amount in Satoshis")
+    bet_amount = fields.Int(required=True, metadata={"description": "Bet amount in Satoshis"})
+    win_amount = fields.Int(required=True, metadata={"description": "Win amount in Satoshis"})
     spin_result = fields.List(fields.List(fields.Int()), required=True)
     winning_lines = fields.List(fields.Dict(), required=False, allow_none=True) # Detailed win lines info
     is_bonus_spin = fields.Bool(required=True)
@@ -147,14 +147,14 @@ class SlotSpinSchema(SQLAlchemyAutoSchema):
      id = auto_field(dump_only=True)
      game_session_id = auto_field(dump_only=True)
      spin_result = auto_field()
-     win_amount = auto_field(description="Win amount in Satoshis")
-     bet_amount = auto_field(description="Bet amount in Satoshis")
+     win_amount = auto_field(metadata={"description": "Win amount in Satoshis"})
+     bet_amount = auto_field(metadata={"description": "Bet amount in Satoshis"})
      is_bonus_spin = auto_field(dump_only=True)
      spin_time = auto_field(dump_only=True)
 
 # --- Transaction Schemas ---
 class WithdrawSchema(Schema):
-    amount_sats = fields.Int(required=True, validate=Range(min=1), data_key="amount", description="Amount to withdraw in Satoshis") # Use data_key if frontend sends 'amount'
+    amount_sats = fields.Int(required=True, validate=Range(min=1), data_key="amount", metadata={"description": "Amount to withdraw in Satoshis"}) # Use data_key if frontend sends 'amount'
     withdraw_wallet_address = fields.Str(required=True, validate=Length(min=26, max=62)) # Basic Bitcoin address length validation
 
 class DepositSchema(Schema):
@@ -162,9 +162,9 @@ class DepositSchema(Schema):
     bonus_code = fields.Str(required=False, validate=Length(min=1, max=50))
 
 class BalanceTransferSchema(Schema):
-    from_user_id = fields.Int(required=False, allow_none=True, description="Source User ID (null for system)")
-    to_user_id = fields.Int(required=True, description="Destination User ID")
-    amount_sats = fields.Int(required=True, validate=lambda x: x != 0, description="Amount in Satoshis (positive for credit, negative for debit from system)")
+    from_user_id = fields.Int(required=False, allow_none=True, metadata={"description": "Source User ID (null for system)"})
+    to_user_id = fields.Int(required=True, metadata={"description": "Destination User ID"})
+    amount_sats = fields.Int(required=True, validate=lambda x: x != 0, metadata={"description": "Amount in Satoshis (positive for credit, negative for debit from system)"})
     description = fields.Str(required=False, validate=Length(max=255), load_default="Admin balance transfer")
     transaction_type = fields.Str(load_default='transfer', validate=OneOf(['transfer', 'credit', 'debit', 'adjustment', 'bonus']))
 
@@ -177,7 +177,7 @@ class TransactionSchema(SQLAlchemyAutoSchema):
 
     id = auto_field(dump_only=True)
     user_id = auto_field(dump_only=True)
-    amount = auto_field(description="Transaction amount in Satoshis (can be negative)")
+    amount = auto_field(metadata={"description": "Transaction amount in Satoshis (can be negative)"})
     transaction_type = auto_field()
     status = auto_field()
     details = auto_field()
@@ -199,7 +199,7 @@ class SlotSymbolSchema(SQLAlchemyAutoSchema):
         exclude = ("slot",) # Avoid circular ref
 
     id = auto_field(dump_only=True)
-    symbol_internal_id = auto_field(description="ID used within the slot (1, 2, ...)")
+    symbol_internal_id = auto_field(metadata={"description": "ID used within the slot (1, 2, ...)"})
     name = auto_field()
     img_link = auto_field()
     value_multiplier = auto_field()
@@ -213,7 +213,7 @@ class SlotBetSchema(SQLAlchemyAutoSchema):
         exclude = ("slot",) # Avoid circular ref
 
      id = auto_field(dump_only=True)
-     bet_amount = auto_field(description="Allowed bet amount in Satoshis")
+     bet_amount = auto_field(metadata={"description": "Allowed bet amount in Satoshis"})
 
 class SlotBasicSchema(SQLAlchemyAutoSchema):
      # Minimal schema for nesting inside GameSession etc.
@@ -243,14 +243,14 @@ class SlotSchema(SQLAlchemyAutoSchema):
     description = auto_field()
     num_rows = auto_field()
     num_columns = auto_field()
-    num_symbols = auto_field(description="Total distinct symbols defined")
-    wild_symbol_id = auto_field(description="Internal ID of the Wild symbol")
-    scatter_symbol_id = auto_field(description="Internal ID of the Scatter symbol")
+    num_symbols = auto_field(metadata={"description": "Total distinct symbols defined"})
+    wild_symbol_id = auto_field(metadata={"description": "Internal ID of the Wild symbol"})
+    scatter_symbol_id = auto_field(metadata={"description": "Internal ID of the Scatter symbol"})
     bonus_type = auto_field()
     bonus_subtype = auto_field()
-    bonus_multiplier = auto_field(description="Multiplier during bonus rounds")
-    bonus_spins_trigger_count = auto_field(description="Number of scatters to trigger bonus")
-    bonus_spins_awarded = auto_field(description="Number of free spins awarded")
+    bonus_multiplier = auto_field(metadata={"description": "Multiplier during bonus rounds"})
+    bonus_spins_trigger_count = auto_field(metadata={"description": "Number of scatters to trigger bonus"})
+    bonus_spins_awarded = auto_field(metadata={"description": "Number of free spins awarded"})
     short_name = auto_field()
     asset_directory = auto_field()
     rtp = auto_field()
@@ -274,11 +274,13 @@ class BonusCodeSchema(SQLAlchemyAutoSchema):
         Length(min=3, max=50),
         Regexp(r'^[A-Z0-9]+$', error="Code must be uppercase letters and numbers only.")
     ])
-    description = auto_field(validate=Length(max=500))
+    description = auto_field(validate=Length(max=500)) # Marshmallow-SQLAlchemy auto_field might not directly take 'description'.
+                                                     # If 'description' is a model field, its description comes from the model.
+                                                     # For Schema-level description, use metadata on the field if not auto-generated.
     type = auto_field(required=True, validate=validate.OneOf(['deposit', 'registration', 'free_spins', 'other']))
     subtype = auto_field(required=True, validate=validate.OneOf(['percentage', 'fixed', 'spins']))
     # Amount validation happens in the route based on subtype
-    amount = fields.Float(required=True, description="Percentage value (e.g., 10.5 for 10.5%) or fixed Satoshi amount")
+    amount = fields.Float(required=True, metadata={"description": "Percentage value (e.g., 10.5 for 10.5%) or fixed Satoshi amount"})
     max_uses = fields.Int(allow_none=True, validate=Range(min=1))
     uses_remaining = fields.Int(dump_only=True, allow_none=True)
     expires_at = fields.DateTime(allow_none=True)
@@ -306,11 +308,11 @@ class BonusCodeListSchema(PaginationSchema):
 
 # --- WinLine Schema (For Spin Response) ---
 class WinLineSchema(Schema):
-    line_index = fields.Field(required=True, description="Payline index (integer) or 'scatter'")
-    symbol_id = fields.Int(required=True, description="Internal ID of the winning symbol")
-    count = fields.Int(required=True, description="Number of matching symbols")
-    positions = fields.List(fields.List(fields.Int()), required=True, description="List of [row, col] positions")
-    win_amount = fields.Int(required=True, description="Win amount for this line in Satoshis")
+    line_index = fields.Field(required=True, metadata={"description": "Payline index (integer) or 'scatter'"})
+    symbol_id = fields.Int(required=True, metadata={"description": "Internal ID of the winning symbol"})
+    count = fields.Int(required=True, metadata={"description": "Number of matching symbols"})
+    positions = fields.List(fields.List(fields.Int()), required=True, metadata={"description": "List of [row, col] positions"})
+    win_amount = fields.Int(required=True, metadata={"description": "Win amount for this line in Satoshis"})
 
 # --- Blackjack Schemas ---
 class BlackjackTableBasicSchema(SQLAlchemyAutoSchema):
@@ -323,9 +325,9 @@ class BlackjackTableBasicSchema(SQLAlchemyAutoSchema):
 
     id = auto_field(dump_only=True)
     name = auto_field()
-    description = auto_field()
-    min_bet = auto_field(description="Minimum bet in Satoshis")
-    max_bet = auto_field(description="Maximum bet in Satoshis")
+    description = auto_field() # Assuming description is a model field
+    min_bet = auto_field(metadata={"description": "Minimum bet in Satoshis"})
+    max_bet = auto_field(metadata={"description": "Maximum bet in Satoshis"})
 
 class BlackjackTableSchema(SQLAlchemyAutoSchema):
     class Meta:
@@ -335,9 +337,9 @@ class BlackjackTableSchema(SQLAlchemyAutoSchema):
 
     id = auto_field(dump_only=True)
     name = auto_field()
-    description = auto_field()
-    min_bet = auto_field(description="Minimum bet in Satoshis")
-    max_bet = auto_field(description="Maximum bet in Satoshis")
+    description = auto_field() # Assuming description is a model field
+    min_bet = auto_field(metadata={"description": "Minimum bet in Satoshis"})
+    max_bet = auto_field(metadata={"description": "Maximum bet in Satoshis"})
     deck_count = auto_field()
     rules = auto_field()
     is_active = auto_field()
@@ -347,15 +349,15 @@ class BlackjackTableSchema(SQLAlchemyAutoSchema):
 class BlackjackCardSchema(Schema):
     suit = fields.Str(required=True, validate=OneOf(['hearts', 'diamonds', 'clubs', 'spades']))
     value = fields.Str(required=True, validate=OneOf(['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']))
-    is_face_down = fields.Bool(required=False, default=False)
+    is_face_down = fields.Bool(required=False, load_default=False) # Changed missing to load_default
 
 class BlackjackHandDataSchema(Schema):
     cards = fields.Nested(BlackjackCardSchema, many=True, required=True)
     total = fields.Int(required=True)
     is_busted = fields.Bool(required=True)
     is_blackjack = fields.Bool(required=True)
-    is_doubled = fields.Bool(required=False, default=False)
-    is_split = fields.Bool(required=False, default=False)
+    is_doubled = fields.Bool(required=False, load_default=False) # Changed default to load_default
+    is_split = fields.Bool(required=False, load_default=False)   # Changed default to load_default
     result = fields.Str(required=False, validate=OneOf(['win', 'lose', 'push', 'blackjack']))
 
 class BlackjackHandSchema(SQLAlchemyAutoSchema):
@@ -369,9 +371,9 @@ class BlackjackHandSchema(SQLAlchemyAutoSchema):
     user_id = auto_field(dump_only=True)
     table_id = auto_field(dump_only=True)
     session_id = auto_field(dump_only=True)
-    initial_bet = auto_field(description="Initial bet in Satoshis")
-    total_bet = auto_field(description="Total bet in Satoshis (includes doubles, splits)")
-    win_amount = auto_field(description="Win amount in Satoshis")
+    initial_bet = auto_field(metadata={"description": "Initial bet in Satoshis"})
+    total_bet = auto_field(metadata={"description": "Total bet in Satoshis (includes doubles, splits)"})
+    win_amount = auto_field(metadata={"description": "Win amount in Satoshis"})
     player_cards = auto_field()
     dealer_cards = auto_field()
     player_hands = auto_field()
@@ -402,9 +404,9 @@ class BlackjackActionSchema(SQLAlchemyAutoSchema):
 
 class JoinBlackjackSchema(Schema):
     table_id = fields.Int(required=True, validate=Range(min=1))
-    bet_amount = fields.Int(required=True, validate=Range(min=1), description="Bet amount in Satoshis")
+    bet_amount = fields.Int(required=True, validate=Range(min=1), metadata={"description": "Bet amount in Satoshis"})
 
 class BlackjackActionRequestSchema(Schema):
     hand_id = fields.Int(required=True, validate=Range(min=1))
     action_type = fields.Str(required=True, validate=OneOf(['hit', 'stand', 'double', 'split']))
-    hand_index = fields.Int(required=True, validate=Range(min=0), default=0)
+    hand_index = fields.Int(required=True, validate=Range(min=0)) # Removed load_default for required field

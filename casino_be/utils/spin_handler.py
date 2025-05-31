@@ -1,11 +1,32 @@
 import random
+import json
+import os
 from datetime import datetime, timezone
-from models import db, SlotSpin, SlotSymbol
+from models import db, SlotSpin, GameSession, User, Transaction # Added GameSession, User, Transaction
+# SlotSymbol might not be directly used if all config comes from JSON, but keep for now
 
 # --- Configuration ---
-MIN_MATCH_FOR_PAYLINE_WIN = 3
-MIN_MATCH_FOR_SCATTER_WIN = 3
-SCATTER_PAY_MULTIPLIER_BASE = 2 # Multiplier per scatter symbol (e.g., 3 scatters = bet * 3 * base)
+# Constants like MIN_MATCH_FOR_PAYLINE_WIN will likely come from gameConfig.json or be implicitly handled by payout tables.
+# MIN_MATCH_FOR_SCATTER_WIN also likely from config.
+# SCATTER_PAY_MULTIPLIER_BASE will be replaced by config.
+
+
+# Base path for slot configurations
+SLOT_CONFIG_BASE_PATH = "public/slots" # Adjust if your structure is different, e.g., "casino_be/static/slots"
+
+def load_game_config(slot_short_name):
+    """Loads the game configuration JSON file for a given slot."""
+    # Construct path like "public/slots/slot1/gameConfig.json"
+    config_path = os.path.join(SLOT_CONFIG_BASE_PATH, slot_short_name, "gameConfig.json")
+    if not os.path.exists(config_path):
+        # Fallback: try checking if slot_short_name is a direct path or stored in slot.asset_directory
+        # This part depends on how slot.asset_directory is structured.
+        # For now, assume slot_short_name is the directory name under SLOT_CONFIG_BASE_PATH
+        raise FileNotFoundError(f"Game configuration not found for slot '{slot_short_name}' at {config_path}")
+
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    return config
 
 def handle_spin(user, slot, game_session, bet_amount_sats):
     """
@@ -24,380 +45,505 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
     Raises:
         ValueError: If the bet amount is invalid or user has insufficient balance (redundant check).
     """
-    # --- Pre-Spin Validation ---
-    if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
-        raise ValueError("Invalid bet amount. Must be a positive integer (satoshis).")
+    """
+    Handles the logic for a single slot machine spin using gameConfig.json.
+    """
+    try:
+        # --- Load Game Configuration ---
+        game_config = load_game_config(slot.short_name)
 
-    # Redundant balance check (already done in route), but good for safety
-    if user.balance < bet_amount_sats:
-        raise ValueError("Insufficient balance for this bet.")
+        # Extract key configurations
+        cfg_layout = game_config.get('game', {}).get('layout', {})
+        cfg_symbols_map = {s['id']: s for s in game_config.get('game', {}).get('symbols', [])}
+        cfg_paylines = cfg_layout.get('paylines', [])
+        cfg_rows = cfg_layout.get('rows', 3)
+        cfg_columns = cfg_layout.get('columns', 5)
+        cfg_wild_symbol_id = game_config.get('game', {}).get('wild_symbol_id')
+        cfg_scatter_symbol_id = game_config.get('game', {}).get('scatter_symbol_id')
+        cfg_bonus_features = game_config.get('game', {}).get('bonus_features', {})
 
-    # --- Determine Spin Type and Deduct Bet ---
-    is_bonus_spin = False
-    current_multiplier = 1.0
+        # --- Pre-Spin Validation ---
+        if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
+            raise ValueError("Invalid bet amount. Must be a positive integer (satoshis).")
 
-    if game_session.bonus_active and game_session.bonus_spins_remaining > 0:
-        is_bonus_spin = True
-        current_multiplier = game_session.bonus_multiplier
-        game_session.bonus_spins_remaining -= 1
-        # Don't deduct bet during a bonus spin
-    else:
-        # This is a normal spin, deduct the bet
-        user.balance -= bet_amount_sats
-        # Log the wager transaction? Maybe aggregate later.
+        if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0) :
+            raise ValueError("Insufficient balance for this bet.")
 
-    # --- Generate Spin Result ---
-    # Fetch symbols for weighting (could be cached or preloaded)
-    symbols = slot.symbols # Assumes eager loading via lazy='joined'
-    if not symbols:
-        raise RuntimeError(f"No symbols found for slot ID {slot.id}. Cannot generate spin.")
+        # --- Determine Spin Type and Deduct Bet ---
+        is_bonus_spin = False
+        current_spin_multiplier = 1.0 # Multiplier for the current spin's winnings
 
-    # Note: num_symbols in Slot table should match len(symbols)
-    spin_result_grid = generate_spin_grid(slot.num_rows, slot.num_columns, symbols, slot.wild_symbol_id, slot.scatter_symbol_id)
+        if game_session.bonus_active and game_session.bonus_spins_remaining > 0:
+            is_bonus_spin = True
+            current_spin_multiplier = game_session.bonus_multiplier # Use session's bonus multiplier
+            game_session.bonus_spins_remaining -= 1
+            # Bet is not deducted during a bonus spin
+            actual_bet_this_spin = 0
+        else:
+            user.balance -= bet_amount_sats
+            actual_bet_this_spin = bet_amount_sats
+            # Create Wager Transaction
+            wager_tx = Transaction(
+                user_id=user.id,
+                amount=-bet_amount_sats, # Negative for wager
+                type='wager',
+                description=f'Slot wager: {slot.name} - Spin ID to be linked',
+                game_session_id=game_session.id
+            )
+            db.session.add(wager_tx)
+            # game_session.transactions.append(wager_tx) # Add to session if relationship is set up
 
-    # --- Calculate Wins ---
-    paylines = define_paylines(slot.num_rows, slot.num_columns) # Get payline definitions
-    win_info = calculate_win(
-        spin_result_grid,
-        paylines,
-        symbols, # Pass full symbol objects
-        bet_amount_sats,
-        slot.wild_symbol_id,
-        slot.scatter_symbol_id
-    )
-
-    win_amount_sats = win_info['total_win_sats']
-    winning_lines = win_info['winning_lines'] # List of WinLineSchema structure
-
-    # --- Apply Bonus Multiplier ---
-    if is_bonus_spin:
-        win_amount_sats = int(win_amount_sats * current_multiplier) # Apply multiplier to the win
-
-    # --- Check for Bonus Trigger (on non-bonus spins) ---
-    bonus_triggered = False
-    if not is_bonus_spin:
-        bonus_triggered = check_bonus_trigger(
-            spin_result_grid,
-            slot.scatter_symbol_id,
-            slot.bonus_type,
-            slot.bonus_spins_trigger_count
+        # --- Generate Spin Result ---
+        # slot.symbols still provides the available symbols from DB.
+        # We'll use cfg_symbols_map for properties like multipliers, is_wild, is_scatter
+        # The generate_spin_grid function might need to be aware of symbol IDs from config
+        spin_result_grid = generate_spin_grid(
+            cfg_rows,
+            cfg_columns,
+            slot.symbols, # List of SlotSymbol ORM objects
+            cfg_wild_symbol_id,
+            cfg_scatter_symbol_id,
+            cfg_symbols_map # Pass the config symbols map for weighting or other properties
         )
 
-    # --- Update Session State ---
-    # Start bonus if triggered and not already active
-    if bonus_triggered and not game_session.bonus_active:
-        game_session.bonus_active = True
-        # Reset spins/multiplier based on slot config
-        game_session.bonus_spins_remaining = slot.bonus_spins_awarded
-        game_session.bonus_multiplier = slot.bonus_multiplier # Use the slot's configured bonus multiplier
-        current_multiplier = game_session.bonus_multiplier # Update current multiplier for response data
-    # End bonus if active and spins run out
-    elif game_session.bonus_active and game_session.bonus_spins_remaining <= 0:
-        game_session.bonus_active = False
-        game_session.bonus_multiplier = 1.0 # Reset multiplier
-        current_multiplier = 1.0 # Update current multiplier for response data
+        # --- Calculate Wins ---
+        # calculate_win will now use cfg_paylines and cfg_symbols_map
+        win_info = calculate_win(
+            spin_result_grid,
+            cfg_paylines,
+            cfg_symbols_map, # Use the symbol data from config
+            bet_amount_sats, # This is the total bet for the spin
+            cfg_wild_symbol_id,
+            cfg_scatter_symbol_id,
+            cfg_bonus_features.get('free_spins', {}).get('multiplier', 1.0) if is_bonus_spin else 1.0
+            # Pass bet_amount_sats, num_paylines for per-line calculation
+        )
 
-    # Update session aggregates
-    game_session.num_spins += 1
-    if not is_bonus_spin: # Only count wager on non-bonus spins
-        game_session.amount_wagered += bet_amount_sats
-    game_session.amount_won += win_amount_sats
+        win_amount_sats = win_info['total_win_sats']
+        winning_lines = win_info['winning_lines']
 
-    # --- Update User Balance ---
-    if win_amount_sats > 0:
-        user.balance += win_amount_sats
-        # Log win transaction?
+        # Apply current spin multiplier (e.g., from active free spins bonus)
+        # Note: win_info from calculate_win should be raw win, multiplier applied here or inside if it's complex
+        if is_bonus_spin and current_spin_multiplier > 1.0:
+            win_amount_sats = int(win_amount_sats * current_spin_multiplier)
+            # Update individual winning line amounts if necessary
+            for line in winning_lines:
+                if line.get('win_amount', 0) > 0 : # Check if 'win_amount' exists and is positive
+                    line['win_amount'] = int(line['win_amount'] * current_spin_multiplier)
 
-    # --- Create Spin Record ---
-    new_spin = SlotSpin(
-        game_session_id=game_session.id,
-        spin_result=spin_result_grid,
-        win_amount=win_amount_sats,
-        bet_amount=bet_amount_sats if not is_bonus_spin else 0, # Record 0 bet for bonus spins
-        is_bonus_spin=is_bonus_spin,
-        spin_time=datetime.now(timezone.utc)
-    )
-    db.session.add(new_spin)
-    # Note: Commit happens in the calling route (app.py)
 
-    # --- Return Results ---
-    return {
-        "spin_result": spin_result_grid,
-        "win_amount_sats": win_amount_sats,
-        "winning_lines": winning_lines,
-        "bonus_triggered": bonus_triggered,
-        "bonus_active": game_session.bonus_active,
-        "bonus_spins_remaining": game_session.bonus_spins_remaining if game_session.bonus_active else 0,
-        "bonus_multiplier": current_multiplier, # Return the multiplier active during THIS spin
-        "game_session": game_session, # Pass back session object for route to serialize
-        "user": user # Pass back user object for route to serialize
-    }
+        # --- Check for Bonus Trigger (on non-bonus spins) ---
+        bonus_triggered_this_spin = False
+        newly_awarded_spins = 0
+        new_bonus_multiplier = 1.0
 
-def generate_spin_grid(rows, columns, symbols, wild_symbol_internal_id, scatter_symbol_internal_id):
+        if not is_bonus_spin: # Bonus can only be triggered on a normal spin
+            bonus_trigger_info = check_bonus_trigger(
+                spin_result_grid,
+                cfg_scatter_symbol_id,
+                cfg_bonus_features
+            )
+            if bonus_trigger_info['triggered']:
+                bonus_triggered_this_spin = True
+                newly_awarded_spins = bonus_trigger_info.get('spins_awarded', 0)
+                new_bonus_multiplier = bonus_trigger_info.get('multiplier', 1.0)
+
+
+        # --- Update Session State for Bonus ---
+        if bonus_triggered_this_spin:
+            if not game_session.bonus_active: # Starting a new bonus
+                game_session.bonus_active = True
+                game_session.bonus_spins_remaining = newly_awarded_spins
+                game_session.bonus_multiplier = new_bonus_multiplier
+            else: # Re-trigger or additional spins during an active bonus
+                game_session.bonus_spins_remaining += newly_awarded_spins
+                # Optionally, decide if multiplier updates or accumulates, based on game rules
+                # For now, assume it takes the new multiplier if retriggered, or keeps existing if just adding spins.
+                if new_bonus_multiplier != game_session.bonus_multiplier and newly_awarded_spins > 0 :
+                     game_session.bonus_multiplier = new_bonus_multiplier # Or max(game_session.bonus_multiplier, new_bonus_multiplier)
+
+        elif game_session.bonus_active and game_session.bonus_spins_remaining <= 0:
+            # Bonus ended
+            game_session.bonus_active = False
+            game_session.bonus_multiplier = 1.0 # Reset multiplier
+
+
+        # --- Update Session Aggregates ---
+        game_session.num_spins += 1
+        if not is_bonus_spin:
+            game_session.amount_wagered = (game_session.amount_wagered or 0) + actual_bet_this_spin # Ensure amount_wagered is not None
+        game_session.amount_won = (game_session.amount_won or 0) + win_amount_sats # Ensure amount_won is not None
+
+        # --- Update User Balance & Win Transaction ---
+        if win_amount_sats > 0:
+            user.balance += win_amount_sats
+            win_tx = Transaction(
+                user_id=user.id,
+                amount=win_amount_sats,
+                type='win',
+                description=f'Slot win: {slot.name} - Spin ID to be linked',
+                game_session_id=game_session.id
+            )
+            db.session.add(win_tx)
+            # game_session.transactions.append(win_tx)
+
+        # --- Create Spin Record ---
+        # Ensure spin_result_grid is JSON serializable (list of lists of ints)
+        new_spin = SlotSpin(
+            game_session_id=game_session.id,
+            spin_result=spin_result_grid, # Should be [[int, ...], ...]
+            win_amount=win_amount_sats,
+            bet_amount=actual_bet_this_spin,
+            is_bonus_spin=is_bonus_spin,
+            spin_time=datetime.now(timezone.utc),
+            multiplier_used=current_spin_multiplier if is_bonus_spin else 1.0
+        )
+        db.session.add(new_spin)
+        db.session.flush() # Flush to get new_spin.id for transaction linking
+
+        # Link transactions to this spin if created
+        if not is_bonus_spin and 'wager_tx' in locals():
+            wager_tx.slot_spin_id = new_spin.id
+        if win_amount_sats > 0 and 'win_tx' in locals():
+            win_tx.slot_spin_id = new_spin.id
+
+        # --- Return Results ---
+        # Ensure all satoshi amounts are integers
+        return {
+            "spin_result": spin_result_grid,
+            "win_amount_sats": int(win_amount_sats),
+            "winning_lines": winning_lines, # Ensure this is serializable
+            "bonus_triggered": bonus_triggered_this_spin,
+            "bonus_active": game_session.bonus_active,
+            "bonus_spins_remaining": game_session.bonus_spins_remaining if game_session.bonus_active else 0,
+            "bonus_multiplier": game_session.bonus_multiplier if game_session.bonus_active else 1.0,
+            "user_balance_sats": int(user.balance),
+            "session_stats": { # Consistent with other game types potentially
+                "num_spins": game_session.num_spins,
+                "amount_wagered_sats": int(game_session.amount_wagered or 0),
+                "amount_won_sats": int(game_session.amount_won or 0),
+            }
+        }
+    except FileNotFoundError as e:
+        # Log error appropriately
+        # raise ValueError(f"Game configuration error: {e}") # Or handle more gracefully
+        # For now, re-raise as ValueError for the route to catch
+        # In a real app, you might want a more specific exception type.
+        db.session.rollback() # Rollback any DB changes if config fails
+        raise ValueError(str(e))
+    except ValueError as e: # Catch specific errors like insufficient balance
+        db.session.rollback()
+        raise e # Re-raise it for the route to handle
+    except Exception as e:
+        db.session.rollback()
+        # Log the exception e
+        # Consider what to return or raise. A generic error for the user.
+        raise RuntimeError(f"An unexpected error occurred during the spin: {str(e)}") # Use str(e) for cleaner message
+
+
+def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter_symbol_config_id, config_symbols_map):
     """
     Generates a grid of symbol internal IDs based on weighted probabilities.
     Symbols list contains SlotSymbol objects.
     """
-    if not symbols:
-        return [[1 for _ in range(columns)] for _ in range(rows)] # Fallback
+    """
+    Generates a grid of symbol IDs.
+    Uses symbol IDs from `config_symbols_map` (which are the internal IDs).
+    Weighting can be complex; for now, use simple random choice or weights from config if available.
+    `db_symbols` (SlotSymbol ORM objects) are used to get the list of possible symbol_internal_ids for this slot.
+    `config_symbols_map` is a dictionary from gameConfig.json: { <symbol_id_int>: {props...} }
+    """
+    if not db_symbols: # Should come from slot.symbols
+        # Fallback to a simple grid if no symbols are defined for the slot in DB.
+        # This indicates a setup issue.
+        return [[config_symbols_map.keys()[0] if config_symbols_map else 1 for _ in range(columns)] for _ in range(rows)]
 
-    symbol_ids = [s.symbol_internal_id for s in symbols]
-    num_distinct_symbols = len(symbol_ids)
+    # Get all symbol internal IDs that are actually configured for this slot via the SlotSymbol table
+    # These are the `symbol_internal_id` values.
+    valid_symbol_ids_for_slot = [s.symbol_internal_id for s in db_symbols]
 
-    # --- Simple Weighting Example ---
-    # Give lower probability to wild and scatter, slightly higher to high-value symbols
-    # This needs significant tuning based on desired RTP and volatility.
-    # TODO: Load weights from Slot configuration or a dedicated weighting table.
+    # Filter these further: only include symbols that also exist in the gameConfig.json's symbol list.
+    # This ensures we only spin symbols that have defined properties (like multipliers, etc.)
+    spinable_symbol_ids = [sid for sid in valid_symbol_ids_for_slot if sid in config_symbols_map]
+
+    if not spinable_symbol_ids:
+        # This is a critical configuration error: Slot has symbols in DB, but they don't map to gameConfig.json
+        raise ValueError("No spinable symbols found. Check slot DB symbol configuration against gameConfig.json.")
+
+    # --- Weighting ---
+    # Attempt to get weights from config_symbols_map if they exist, e.g. symbol_obj.get('weight', 1.0)
+    # For now, using uniform weights.
+    # TODO: Implement configurable symbol weighting based on `gameConfig.json` (e.g., a 'weight' property in each symbol definition)
+
     weights = []
-    total_value = sum(s.value_multiplier or 0 for s in symbols if s.value_multiplier)
-    avg_value = total_value / len([s for s in symbols if s.value_multiplier]) if total_value > 0 else 1
+    symbols_for_choice = []
 
-    for symbol in symbols:
-        s_id = symbol.symbol_internal_id
-        value = symbol.value_multiplier or 0
+    for s_id in spinable_symbol_ids:
+        symbol_config = config_symbols_map.get(s_id)
+        if symbol_config:
+            # Example: use a 'spawn_weight' or 'reel_weight' from config if available
+            # weight = symbol_config.get('reel_weight', 1.0)
+            # For now, assume equal weight for simplicity, but favor non-special symbols slightly more in a real scenario.
+            # This current simple weighting does not consider reel strips or advanced slot math.
+            is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
+            is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
 
-        if s_id == wild_symbol_internal_id:
-            weights.append(0.5) # Lower weight for wild
-        elif s_id == scatter_symbol_internal_id:
-            weights.append(0.4) # Lower weight for scatter
-        elif value > avg_value * 1.5: # Higher value symbols
-             weights.append(1.5)
-        else: # Standard symbols
-            weights.append(1.0)
+            if is_wild:
+                weights.append(symbol_config.get('weight', 0.5)) # Default example weight
+            elif is_scatter:
+                weights.append(symbol_config.get('weight', 0.4)) # Default example weight
+            else:
+                weights.append(symbol_config.get('weight', 1.0)) # Default example weight
+            symbols_for_choice.append(s_id)
 
-    # Normalize weights
     total_weight = sum(weights)
-    if total_weight == 0: # Prevent division by zero if all weights are 0
-        weights = [1.0 / num_distinct_symbols] * num_distinct_symbols
+    if total_weight == 0 or not symbols_for_choice: # Prevent division by zero or empty choices
+         if not symbols_for_choice: # if symbols_for_choice is empty, fall back to spinable_symbol_ids with uniform weight
+             if not spinable_symbol_ids: # Should have been caught earlier
+                  raise ValueError("Cannot generate spin grid: No symbols available for choice and no spinable_symbol_ids.")
+             symbols_for_choice = spinable_symbol_ids
+             weights = [1.0] * len(symbols_for_choice)
+             total_weight = float(len(symbols_for_choice))
+         else: # weights were all zero, distribute uniformly
+             weights = [1.0 / len(symbols_for_choice) for _ in symbols_for_choice]
     else:
         weights = [w / total_weight for w in weights]
-    # --- End Weighting Example ---
 
-    # Generate grid using weighted random choice
+
     grid = []
     for r in range(rows):
-        row_symbols = []
-        for c in range(columns):
-            chosen_symbol_id = random.choices(symbol_ids, weights=weights, k=1)[0]
-            row_symbols.append(chosen_symbol_id)
+        row_symbols = random.choices(symbols_for_choice, weights=weights, k=columns)
         grid.append(row_symbols)
-
     return grid
 
 
-def define_paylines(rows, columns):
-    """
-    Defines standard paylines for common grid sizes.
-    Returns a list of lists, where each inner list contains [row, col] coordinates.
-    """
-    # TODO: Load paylines from Slot configuration or database table.
-    if rows == 3 and columns == 5:
-        # Common 20-25 paylines for a 3x5 slot (example uses 10)
-        return [
-            # Horizontal Lines
-            [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]],  # Line 0: Top row
-            [[1, 0], [1, 1], [1, 2], [1, 3], [1, 4]],  # Line 1: Middle row
-            [[2, 0], [2, 1], [2, 2], [2, 3], [2, 4]],  # Line 2: Bottom row
-            # Diagonal / V Shapes
-            [[0, 0], [1, 1], [2, 2], [1, 3], [0, 4]],  # Line 3: V shape
-            [[2, 0], [1, 1], [0, 2], [1, 3], [2, 4]],  # Line 4: Inverted V
-            # Zigzag Shapes
-            [[0, 0], [0, 1], [1, 2], [2, 3], [2, 4]],  # Line 5
-            [[2, 0], [2, 1], [1, 2], [0, 3], [0, 4]],  # Line 6
-            [[1, 0], [0, 1], [0, 2], [0, 3], [1, 4]],  # Line 7 (Shallow U)
-            [[1, 0], [2, 1], [2, 2], [2, 3], [1, 4]],  # Line 8 (Deep U)
-            # More complex shapes
-            [[0, 0], [1, 1], [0, 2], [1, 3], [0, 4]],  # Line 9 (W shape type)
-            # Add more paylines up to 20 or 25...
-        ]
-    # Add patterns for other grid sizes if supported
-    elif rows == 4 and columns == 5:
-        # Define paylines for 4x5 grid...
-        return [] # Placeholder
-    else:
-        # Default or error for unsupported sizes
-        return []
+# Removed define_paylines - it will come from game_config.layout.paylines
 
-def get_payout_multiplier(symbol_internal_id, consecutive_count, symbols):
+def get_symbol_payout(symbol_id, count, config_symbols_map, is_scatter=False):
     """
     Determines the payout multiplier based on the symbol and count.
     This should ideally query a payout table (SlotPayout model).
     Using a simplified placeholder logic here.
     """
-    # TODO: Replace with database lookup (SlotPayout table)
-    # Payouts usually depend on symbol AND count (e.g., 3x, 4x, 5x)
-
-    symbol = next((s for s in symbols if s.symbol_internal_id == symbol_internal_id), None)
-    if not symbol or not symbol.value_multiplier:
-        return 0.0 # No payout for this symbol
-
-    base_multiplier = symbol.value_multiplier
-
-    # Example exponential increase (adjust formula based on desired payouts)
-    if consecutive_count == 3:
-        return base_multiplier * 1.0
-    elif consecutive_count == 4:
-        return base_multiplier * 2.5
-    elif consecutive_count == 5:
-        return base_multiplier * 5.0
-    # Add more cases if columns > 5
-    else:
-        return 0.0 # No win for less than 3 consecutive
-
-
-def calculate_win(grid, paylines, symbols, bet_amount_sats, wild_symbol_internal_id, scatter_symbol_internal_id):
     """
-    Calculates total win amount and identifies winning lines based on the grid and paylines.
+    Gets the payout multiplier for a given symbol ID and count from the config.
+    `config_symbols_map` is the map of symbol objects from gameConfig.json.
+    If `is_scatter` is true, it looks for 'payouts'; otherwise, 'value_multipliers'.
+    """
+    symbol_config = config_symbols_map.get(symbol_id)
+    if not symbol_config:
+        return 0.0
 
-    Args:
-        grid (list[list[int]]): The grid of symbol internal IDs.
-        paylines (list[list[list[int]]]): List of payline coordinates.
-        symbols (list[SlotSymbol]): List of SlotSymbol objects for the slot.
-        bet_amount_sats (int): The bet amount in Satoshis.
-        wild_symbol_internal_id (int | None): The internal ID of the wild symbol.
-        scatter_symbol_internal_id (int | None): The internal ID of the scatter symbol.
+    if is_scatter:
+        # Scatter payouts are typically direct multipliers of total bet
+        payout_map = symbol_config.get('payouts', {}) # e.g., {"3": 5, "4": 15, "5": 50}
+    else:
+        # Payline symbol multipliers are for bet_per_line
+        payout_map = symbol_config.get('value_multipliers', {}) # e.g., {"3": 10, "4": 50, "5": 200}
 
-    Returns:
-        dict: Contains 'total_win_sats' and 'winning_lines' (list of WinLineSchema dicts).
+    # `count` must be a string for dict lookup as per example gameConfig
+    multiplier = payout_map.get(str(count), 0.0)
+
+    # Ensure multiplier is float or int
+    try:
+        # Ensure that we handle cases where multiplier might be an empty string or None from config
+        if multiplier is None or str(multiplier).strip() == "":
+            return 0.0
+        return float(multiplier)
+    except ValueError:
+        return 0.0
+
+
+def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wild_symbol_id, scatter_symbol_id): # Removed current_spin_multiplier
+    """Calculates total win amount and identifies winning lines using config.
+    `config_paylines` is game_config.game.layout.paylines
+    `config_symbols_map` is game_config.game.symbols (mapped by id)
+    `total_bet_sats` is the total amount bet for the entire spin.
+    `wild_symbol_id` is the internal ID from config.
+    `scatter_symbol_id` is the internal ID from config.
     """
     total_win_sats = 0
-    winning_lines_data = []
+    winning_lines_data = [] # Store detailed info about each win
     num_rows = len(grid)
     num_cols = len(grid[0]) if num_rows > 0 else 0
 
     # --- Payline Wins ---
-    for line_idx, payline_coords in enumerate(paylines):
-        line_symbols = []
-        line_positions = []
+    # Bet per line calculation:
+    num_active_paylines = len(config_paylines) # Assuming all defined paylines are played
+    if num_active_paylines == 0:
+        bet_per_line_sats = 0 # Avoid division by zero; though should not happen with valid config
+    else:
+        # Ensure integer division, handle potential rounding if necessary (though satoshis should be precise)
+        bet_per_line_sats = total_bet_sats // num_active_paylines
+        # It's possible that total_bet_sats is not perfectly divisible.
+        # Game design should specify how this is handled (e.g. user bets per line, or total bet must be multiple of lines)
+        # For now, we assume total_bet_sats is what's wagered, and bet_per_line is derived.
 
-        # Get symbols and positions along the payline
-        for r, c in payline_coords:
+    for payline_config in config_paylines:
+        payline_id = payline_config.get("id", "unknown_line")
+        payline_positions = payline_config.get("positions", []) # List of [row, col]
+
+        line_symbols_on_grid = [] # Actual symbol IDs on this payline from the spin grid
+        actual_positions_on_line = [] # Coordinates of these symbols
+
+        for r, c in payline_positions:
             if 0 <= r < num_rows and 0 <= c < num_cols:
-                symbol_id = grid[r][c]
-                line_symbols.append(symbol_id)
-                line_positions.append([r, c])
-            else:
-                # Payline coordinate out of bounds (should not happen with valid config)
-                line_symbols.append(None) # Use None as placeholder
-                line_positions.append(None)
+                symbol_on_grid = grid[r][c]
+                line_symbols_on_grid.append(symbol_on_grid)
+                actual_positions_on_line.append([r,c])
+            else: # Should not happen with valid config
+                line_symbols_on_grid.append(None) # Placeholder for out-of-bounds
+                actual_positions_on_line.append(None)
 
-        # Check for wins starting from the left-most reel
-        first_symbol = line_symbols[0]
-        if first_symbol is None or first_symbol == scatter_symbol_internal_id:
-            continue # Paylines don't start with scatter or out-of-bounds
+        # Determine winning symbol and count for this line (left-to-right)
+        first_symbol_on_line = line_symbols_on_grid[0]
+        if first_symbol_on_line is None or first_symbol_on_line == scatter_symbol_id:
+            continue # Paylines typically don't start with scatter or empty positions
 
-        consecutive_count = 0
         match_symbol_id = None
-        winning_positions_on_line = []
+        consecutive_count = 0
+        winning_symbol_positions = []
 
-        # Determine the symbol to match (handle wild at start)
-        if first_symbol == wild_symbol_internal_id:
-            # Find first non-wild symbol to determine matching type
-            first_non_wild_idx = -1
-            for i in range(1, len(line_symbols)):
-                if line_symbols[i] is not None and line_symbols[i] != wild_symbol_internal_id and line_symbols[i] != scatter_symbol_internal_id:
-                    match_symbol_id = line_symbols[i]
-                    first_non_wild_idx = i
+        # Handle if the line starts with a wild symbol
+        if first_symbol_on_line == wild_symbol_id:
+            # Wilds substitute for other symbols. Need to find the first non-wild to determine the matching symbol.
+            # Then count initial wilds + subsequent matching symbols or wilds.
+            temp_match_symbol_id = None
+            wilds_at_start = 0
+            for i in range(len(line_symbols_on_grid)):
+                s_id = line_symbols_on_grid[i]
+                if s_id == wild_symbol_id:
+                    wilds_at_start += 1
+                    winning_symbol_positions.append(actual_positions_on_line[i])
+                elif s_id != scatter_symbol_id : # Found the symbol to match
+                    temp_match_symbol_id = s_id
+                    consecutive_count = wilds_at_start + 1
+                    winning_symbol_positions.append(actual_positions_on_line[i])
+                    match_symbol_id = temp_match_symbol_id
                     break
-            if match_symbol_id is None: # Line consists only of wilds (and maybe scatters)
-                 # Treat as win of highest paying standard symbol? Or specific wild payout?
-                 # For simplicity, let's assign a high-value symbol or skip if no rule defined.
-                 # Find highest value symbol:
-                 highest_value_symbol = max((s for s in symbols if s.value_multiplier and s.symbol_internal_id != scatter_symbol_internal_id), key=lambda x: x.value_multiplier, default=None)
-                 if highest_value_symbol:
-                    match_symbol_id = highest_value_symbol.symbol_internal_id
-                 else:
-                    continue # No standard symbols to match wild against
+                else: # Scatter or None, breaks payline continuity for this potential match
+                    break
 
-            # Count consecutive wilds up to the first non-wild (or end of line)
-            consecutive_count = first_non_wild_idx if first_non_wild_idx != -1 else len(line_symbols)
-            winning_positions_on_line.extend(line_positions[:consecutive_count])
-
+            if match_symbol_id is None and wilds_at_start > 0: # Line is all wilds (or wilds then scatter/None)
+                # If game rules allow all-wild lines, determine payout for wild symbol itself
+                # Wild symbol must have its own entry in 'value_multipliers' in config
+                symbol_config = config_symbols_map.get(wild_symbol_id)
+                if symbol_config and symbol_config.get('value_multipliers'):
+                    match_symbol_id = wild_symbol_id
+                    consecutive_count = wilds_at_start
+                else: # Wilds don't form their own win, or line too short
+                    continue
         else:
-            # First symbol is a standard symbol
-            match_symbol_id = first_symbol
+            # Line starts with a regular symbol
+            match_symbol_id = first_symbol_on_line
             consecutive_count = 1
-            winning_positions_on_line.append(line_positions[0])
+            winning_symbol_positions.append(actual_positions_on_line[0])
+
+        # Continue counting from the position after initial sequence
+        # If first symbol was wild and found a match, `consecutive_count` is already set.
+        # `i` should start from `consecutive_count` index in `line_symbols_on_grid`.
+        if match_symbol_id: # Proceed if a potential winning line is identified
+            for i in range(consecutive_count, len(line_symbols_on_grid)):
+                current_symbol_on_grid = line_symbols_on_grid[i]
+                if current_symbol_on_grid == match_symbol_id or current_symbol_on_grid == wild_symbol_id:
+                    consecutive_count += 1
+                    winning_symbol_positions.append(actual_positions_on_line[i])
+                else:
+                    break # Sequence broken
+
+        # Get payout for the matched sequence
+        # The minimum match count is implicitly handled by what's defined in value_multipliers (e.g. no "1" or "2")
+        payout_multiplier = get_symbol_payout(match_symbol_id, consecutive_count, config_symbols_map, is_scatter=False)
+
+        if payout_multiplier > 0:
+            # Line win = bet_per_line * symbol_multiplier
+            # Ensure bet_per_line_sats is used here.
+            line_win_sats = int(bet_per_line_sats * payout_multiplier)
+
+            # Apply spin multiplier if any (e.g. from free spins bonus)
+            # This is now handled outside, after all raw wins are calculated.
+            # line_win_sats = int(line_win_sats * current_spin_multiplier)
 
 
-        # Continue counting matches from the next position
-        start_index = consecutive_count # Start checking after the initial sequence
-        for i in range(start_index, len(line_symbols)):
-            current_symbol = line_symbols[i]
-            if current_symbol == match_symbol_id or current_symbol == wild_symbol_internal_id:
-                consecutive_count += 1
-                winning_positions_on_line.append(line_positions[i])
-            else:
-                break # Sequence broken
-
-        # Check if the count meets minimum requirement and calculate payout
-        if consecutive_count >= MIN_MATCH_FOR_PAYLINE_WIN:
-            payout_multiplier = get_payout_multiplier(match_symbol_id, consecutive_count, symbols)
-            if payout_multiplier > 0:
-                # Calculate win based on bet per line (if applicable) or total bet
-                # Assuming bet_amount_sats is the total bet for the spin
-                # Win = Bet * Multiplier (adjust if Bet is per line)
-                line_win_sats = int(bet_amount_sats * payout_multiplier)
+            if line_win_sats > 0:
                 total_win_sats += line_win_sats
-
                 winning_lines_data.append({
-                    "line_index": line_idx,
-                    "symbol_id": match_symbol_id,
+                    "line_id": payline_id, # From payline config
+                    "symbol_id": match_symbol_id, # The symbol that formed the win (not wild, unless wild itself pays)
                     "count": consecutive_count,
-                    "positions": winning_positions_on_line,
-                    "win_amount": line_win_sats
+                    "positions": winning_symbol_positions, # List of [r,c] coordinates
+                    "win_amount_sats": line_win_sats
                 })
 
     # --- Scatter Wins ---
-    scatter_positions = []
-    scatter_count = 0
-    if scatter_symbol_internal_id is not None:
-        for r in range(num_rows):
-            for c in range(num_cols):
-                if grid[r][c] == scatter_symbol_internal_id:
-                    scatter_count += 1
-                    scatter_positions.append([r, c])
+    scatter_positions_on_grid = []
+    scatter_count_on_grid = 0
+    if scatter_symbol_id is not None: # Check if a scatter symbol is configured
+        for r_idx, row in enumerate(grid):
+            for c_idx, symbol_in_cell in enumerate(row):
+                if symbol_in_cell == scatter_symbol_id:
+                    scatter_count_on_grid += 1
+                    scatter_positions_on_grid.append([r_idx, c_idx])
 
-        if scatter_count >= MIN_MATCH_FOR_SCATTER_WIN:
-            # Scatter win calculation (e.g., Bet * Count * BaseMultiplier)
-            # TODO: Refine scatter payout logic - load from config/DB?
-            scatter_payout_multiplier = get_payout_multiplier(scatter_symbol_internal_id, scatter_count, symbols) # Check if scatters have direct payout values
-            if scatter_payout_multiplier > 0:
-                 scatter_win_sats = int(bet_amount_sats * scatter_payout_multiplier)
-            else:
-                 # Fallback: use simple count * base multiplier if no direct payout defined
-                 scatter_win_sats = int(bet_amount_sats * scatter_count * SCATTER_PAY_MULTIPLIER_BASE)
+    # Get scatter payout based on count
+    # Scatter payouts are typically multiples of the *total bet*
+    scatter_payout_multiplier = get_symbol_payout(scatter_symbol_id, scatter_count_on_grid, config_symbols_map, is_scatter=True)
 
+    if scatter_payout_multiplier > 0:
+        scatter_win_sats = int(total_bet_sats * scatter_payout_multiplier)
+        # scatter_win_sats = int(scatter_win_sats * current_spin_multiplier) # Apply spin multiplier - also handled outside now
+
+        if scatter_win_sats > 0:
             total_win_sats += scatter_win_sats
             winning_lines_data.append({
-                "line_index": "scatter", # Special identifier for scatter wins
-                "symbol_id": scatter_symbol_internal_id,
-                "count": scatter_count,
-                "positions": scatter_positions,
-                "win_amount": scatter_win_sats
+                "line_id": "scatter", # Special identifier for scatter wins
+                "symbol_id": scatter_symbol_id,
+                "count": scatter_count_on_grid,
+                "positions": scatter_positions_on_grid,
+                "win_amount_sats": scatter_win_sats
             })
 
     return {
-        "total_win_sats": total_win_sats,
+        "total_win_sats": total_win_sats, # Raw total, multiplier applied in main handle_spin
         "winning_lines": winning_lines_data
     }
 
-def check_bonus_trigger(grid, scatter_symbol_internal_id, bonus_type, trigger_count):
-    """Checks if conditions are met to trigger a bonus round."""
-    if not bonus_type or not scatter_symbol_internal_id:
-        return False # No bonus configured or no scatter symbol
+
+def check_bonus_trigger(grid, scatter_symbol_id, config_bonus_features):
+    """
+    Checks if conditions are met to trigger a bonus round based on gameConfig.json.
+    `config_bonus_features` is game_config.game.bonus_features.
+    Returns a dict with 'triggered': bool, and other bonus details if triggered.
+    """
+    # Example for free_spins, extend for other bonus types
+    free_spins_config = config_bonus_features.get('free_spins')
+    if not free_spins_config or not scatter_symbol_id:
+        return {'triggered': False}
+
+    trigger_sym_id = free_spins_config.get('trigger_symbol_id')
+    if trigger_sym_id != scatter_symbol_id: # Ensure config matches primary scatter_id for clarity
+        # Or handle cases where a different symbol triggers bonus. For now, assume it's the main scatter.
+        # Log a warning if they don't match?
+        pass
+
+    min_scatter_to_trigger = free_spins_config.get('trigger_count')
+    if not min_scatter_to_trigger:
+        return {'triggered': False}
 
     scatter_count = 0
     for row in grid:
-        for symbol_id in row:
-            if symbol_id == scatter_symbol_internal_id:
+        for symbol_id_in_cell in row:
+            if symbol_id_in_cell == scatter_symbol_id: # Use the passed scatter_symbol_id from game root
                 scatter_count += 1
 
-    # Standard trigger: >= required number of scatters
-    if bonus_type in ["free_spins", "standard"] and scatter_count >= trigger_count:
-        return True
+    if scatter_count >= min_scatter_to_trigger:
+        return {
+            'triggered': True,
+            'type': 'free_spins', # Or derive from config key
+            'spins_awarded': free_spins_config.get('spins_awarded', 0),
+            'multiplier': free_spins_config.get('multiplier', 1.0)
+            # Add other bonus parameters if needed
+        }
 
-    # Add conditions for other bonus types if needed
-
-    return False
+    return {'triggered': False}
 

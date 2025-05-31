@@ -6,59 +6,59 @@
 # This implementation is for demonstration purposes ONLY.
 
 import os
-from bitcoin import SelectParams
-from bitcoin.wallet import CBitcoinSecret, P2PKHBitcoinAddress
+# Removed old bitcoin library imports
+# import bitcoin
+# from bitcoin import CBitcoinSecret, P2PKHBitcoinAddress
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Import necessary components from bitcoinlib
+# We expect python-bitcoinlib to be installed in the environment.
+try:
+    from bitcoinlib.keys import Key
+    # BitcoinParams or specific network params like MainNetParams are not strictly needed
+    # if network selection is done by passing string to Key() constructor.
+except ImportError as e:
+    logger.error(f"Failed to import from bitcoinlib. Ensure python-bitcoinlib is installed. Error: {e}")
+    # To allow app to load for other purposes if bitcoin utils are not critical path,
+    # we can define a stub here, but the function itself will fail more gracefully.
+    Key = None
+
 def generate_bitcoin_wallet():
     """
-    Generates a new Bitcoin private key and its corresponding P2PKH address.
+    Generates a new Bitcoin private key and its corresponding P2PKH address using python-bitcoinlib.
 
     Returns:
         tuple: (address: str, private_key_wif: str) or (None, None) if error occurs.
-               Address is the public Bitcoin address.
+               Address is the public Bitcoin address (P2PKH).
                Private key is in Wallet Import Format (WIF).
     """
+    if Key is None: # Check if Key failed to import
+        logger.error("bitcoinlib.keys.Key could not be imported. Cannot generate wallet.")
+        return None, None
+
     try:
-        # Select the Bitcoin network ('mainnet' or 'testnet')
-        # Use 'testnet' for development/testing to avoid using real Bitcoin
-        # network = 'testnet' if os.environ.get('FLASK_ENV') == 'development' else 'mainnet'
-        network = 'mainnet' # Set explicitly for now, configure properly based on env
-        SelectParams(network)
-        logger.info(f"Generating Bitcoin wallet on network: {network}")
+        # Network can be 'bitcoin' (mainnet) or 'testnet'.
+        # For this casino, 'bitcoin' (mainnet) is implied.
+        network_name = 'bitcoin'
 
-        # Generate 32 random bytes for the private key secret
-        # Using os.urandom for cryptographic randomness
-        secret_bytes = os.urandom(32)
+        # Create a new private key.
+        # bitcoinlib generates a new random key by default.
+        # Compressed public keys are standard and default in bitcoinlib for new keys.
+        private_key = Key(network=network_name)
 
-        # Create the private key object
-        # The True argument compresses the corresponding public key, which is standard practice
-        private_key = CBitcoinSecret.from_secret_bytes(secret_bytes, compressed=True)
+        # Get the P2PKH address. script_type='p2pkh' is default for .address()
+        address_str = private_key.address(script_type='p2pkh')
 
-        # Derive the public key from the private key
-        public_key = private_key.pub
+        # Get the private key in WIF format
+        private_key_wif_str = private_key.wif()
 
-        # Generate the P2PKH (Pay-to-Public-Key-Hash) address from the public key
-        public_address = P2PKHBitcoinAddress.from_pubkey(public_key)
-
-        # Convert to string representation
-        address_str = str(public_address)
-        private_key_wif_str = str(private_key) # WIF format
-
-        logger.info(f"Generated new Bitcoin address: {address_str}")
-        # Avoid logging private keys even in debug mode in real applications
-        # logger.debug(f"Generated private key (WIF): {private_key_wif_str}")
-
+        logger.info(f"Generated new Bitcoin address using bitcoinlib: {address_str} on network: {network_name}")
         return address_str, private_key_wif_str
 
-    except ImportError:
-        logger.error("The 'bitcoin' library is not installed. Cannot generate wallet.")
-        logger.error("Install it using: pip install bitcoin")
-        return None, None
     except Exception as e:
-        logger.error(f"An error occurred during Bitcoin wallet generation: {e}", exc_info=True)
+        logger.error(f"An error occurred during Bitcoin wallet generation using bitcoinlib: {e}", exc_info=True)
         return None, None
 
 # Example usage (for testing purposes):
