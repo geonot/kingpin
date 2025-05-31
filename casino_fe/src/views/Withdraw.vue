@@ -16,14 +16,13 @@
       </div>
 
       <!-- Success/Error Messages -->
+      <!-- Error/Success Message Display -->
+      <error-message :error="errorObject" @dismiss="errorObject = null" class="mb-4" />
       <div v-if="successMessage" class="mb-4 p-4 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100 border border-green-300 dark:border-green-600 rounded-md">
         {{ successMessage }}
       </div>
-      <div v-if="errorMessage" class="mb-4 p-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100 border border-red-300 dark:border-red-600 rounded-md">
-        {{ errorMessage }}
-      </div>
 
-      <form @submit.prevent="submitWithdrawal" class="space-y-6">
+      <form @submit.prevent="handleWithdraw" class="space-y-6">
         <div>
           <label for="withdrawAmountBtc" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Amount to Withdraw (BTC)</label>
           <input
@@ -80,18 +79,20 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useStore } from 'vuex';
-import { formatSatsToBtc, formatBtcToSats } from '@utils/currencyFormatter'; // Assuming utility function exists
+import { formatSatsToBtc, formatBtcToSats } from '@utils/currencyFormatter';
+import ErrorMessage from '@components/ErrorMessage.vue'; // Import ErrorMessage
 
 const store = useStore();
-const user = computed(() => store.state.user);
+const currentUser = computed(() => store.getters.currentUser); // Use getter
+const balance = computed(() => currentUser.value?.balance ?? 0); // Use getter for balance display
 
 const withdrawAmountBtc = ref('');
 const withdrawAmountSats = ref(0);
 const withdrawAddress = ref('');
 const isLoading = ref(false);
-const errorMessage = ref('');
+const errorObject = ref(null); // For ErrorMessage component
 const successMessage = ref('');
-const formErrors = ref({}); // For field-specific errors
+const formErrors = ref({});
 
 const updateSatsAmount = () => {
   formErrors.value.amount = ''; // Clear error on input
@@ -138,38 +139,47 @@ const validateForm = () => {
 
 const isValidForm = computed(() => {
     // Check if fields are filled (basic check for button disabling)
-    return withdrawAmountSats.value > 0 && withdrawAddress.value.length > 0;
+    return withdrawAmountSats.value > 0 && withdrawAddress.value.length > 0 && Object.keys(formErrors.value).length === 0;
 });
 
 
-const submitWithdrawal = async () => {
-  errorMessage.value = '';
+const handleWithdraw = async () => {
+  errorObject.value = null;
   successMessage.value = '';
 
   if (!validateForm()) {
-      return; // Stop if validation fails
+      // Optionally set a general error if specific field errors aren't enough
+      if (Object.keys(formErrors.value).length > 0) {
+          const firstErrorKey = Object.keys(formErrors.value)[0];
+           errorObject.value = { status_message: `Please correct the highlighted fields. Error with: ${formErrors.value[firstErrorKey]}` };
+       } else {
+           errorObject.value = { status_message: "Please ensure all fields are correctly filled." };
+       }
+      return;
   }
 
   isLoading.value = true;
   try {
     const response = await store.dispatch('withdraw', {
-      amount_sats: withdrawAmountSats.value, // Send amount in Satoshis
+      amount_sats: withdrawAmountSats.value,
       withdraw_wallet_address: withdrawAddress.value,
     });
 
     if (response.status) {
-      successMessage.value = response.status_message || 'Withdrawal request successful!';
-      // Optionally clear form
+      successMessage.value = response.status_message || 'Withdrawal request successful! It will be processed shortly.';
       withdrawAmountBtc.value = '';
       withdrawAmountSats.value = 0;
       withdrawAddress.value = '';
-      // Balance is updated via Vuex mutation triggered by the action
+      // Balance is updated by the Vuex action.
     } else {
-      errorMessage.value = response.status_message || 'Withdrawal failed. Please try again.';
+      errorObject.value = response; // Expects { status_message: '...' }
+      if (!errorObject.value?.status_message) {
+         errorObject.value = { status_message: 'Withdrawal failed. Please try again.' };
+      }
     }
-  } catch (error) {
-    console.error('Withdrawal error:', error);
-    errorMessage.value = 'An unexpected error occurred. Please try again later.';
+  } catch (err) {
+    console.error('Withdrawal system error:', err);
+    errorObject.value = { status_message: 'An unexpected error occurred during withdrawal. Please try again later.' };
   } finally {
     isLoading.value = false;
   }

@@ -2,7 +2,7 @@
   <div class="container mx-auto mt-10 max-w-lg px-4">
     <h2 class="text-3xl font-bold text-center mb-8 text-gray-800 dark:text-gray-100">Deposit Funds</h2>
 
-     <div v-if="!user" class="text-center p-6 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 rounded-md shadow">
+     <div v-if="!currentUser" class="text-center p-6 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 rounded-md shadow">
       Please log in to view your deposit address.
     </div>
 
@@ -11,13 +11,20 @@
 
       <div class="my-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-md inline-block">
         <p class="font-mono text-lg md:text-xl break-all text-royal-blue dark:text-light-purple font-semibold">
-          {{ user.deposit_wallet_address }}
+          {{ currentUser.deposit_wallet_address }}
         </p>
       </div>
 
        <button @click="copyAddress" class="ml-2 p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors" title="Copy Address">
            <i :class="copyIcon" class="fas fa-lg"></i>
       </button>
+
+      <!-- Error Message Display -->
+      <error-message :error="errorObject" @dismiss="errorObject = null" class="mt-4 text-left" />
+      <!-- Success Message Display -->
+      <div v-if="successMessage" class="mt-3 text-sm text-green-600 dark:text-green-400 p-3 bg-green-50 dark:bg-green-900 rounded-md text-left">
+        {{ successMessage }}
+      </div>
 
       <!-- Placeholder for QR Code - Generate dynamically or fetch if available -->
       <div class="mt-6 mb-8 flex justify-center">
@@ -45,8 +52,8 @@
             placeholder="Enter Bonus Code"
           />
           <button
-             @click="applyBonusCode"
-            :disabled="!bonusCode || isLoadingBonus"
+             @click="handleApplyBonusCode"
+            :disabled="!bonusCode.trim() || isLoadingBonus"
              class="w-full sm:w-auto inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-gold hover:bg-dark-gold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
              >
              <svg v-if="isLoadingBonus" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -56,15 +63,13 @@
             {{ isLoadingBonus ? 'Applying...' : 'Apply Code' }}
           </button>
         </div>
-         <p v-if="bonusMessage" :class="['mt-3 text-sm', isBonusError ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400']">
-            {{ bonusMessage }}
-         </p>
+        <!-- Error/Success moved above QR code -->
       </div>
 
       <p class="text-lg text-gray-700 dark:text-gray-300 mt-10">
         Your current balance:
-        <strong class="text-royal-blue dark:text-light-purple">{{ formatSatsToBtc(user.balance) }} BTC</strong>
-        ({{ user.balance.toLocaleString() }} Sats)
+        <strong class="text-royal-blue dark:text-light-purple">{{ formatSatsToBtc(balance) }} BTC</strong>
+        ({{ balance.toLocaleString() }} Sats)
       </p>
     </div>
   </div>
@@ -73,57 +78,58 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useStore } from 'vuex';
-import { formatSatsToBtc } from '@utils/currencyFormatter'; // Currency utility
-// If using qrcode.vue: import QrcodeVue from 'qrcode.vue';
+import { formatSatsToBtc } from '@utils/currencyFormatter';
+import ErrorMessage from '@components/ErrorMessage.vue';
 
 const store = useStore();
-const user = computed(() => store.state.user);
+const currentUser = computed(() => store.getters.currentUser);
+const balance = computed(() => currentUser.value?.balance ?? 0); // Use currentUser for balance
 
 const bonusCode = ref('');
 const isLoadingBonus = ref(false);
-const bonusMessage = ref('');
-const isBonusError = ref(false);
-const copyIcon = ref('fa-copy'); // FontAwesome copy icon
+const errorObject = ref(null); // For ErrorMessage component
+const successMessage = ref('');
+const copyIcon = ref('fa-copy');
 
 const copyAddress = async () => {
-    if (!user.value?.deposit_wallet_address) return;
+    if (!currentUser.value?.deposit_wallet_address) return;
     try {
-        await navigator.clipboard.writeText(user.value.deposit_wallet_address);
-        copyIcon.value = 'fa-check'; // Change icon to checkmark
+        await navigator.clipboard.writeText(currentUser.value.deposit_wallet_address);
+        copyIcon.value = 'fa-check';
         setTimeout(() => {
-             copyIcon.value = 'fa-copy'; // Revert icon after 2 seconds
+             copyIcon.value = 'fa-copy';
         }, 2000);
     } catch (err) {
         console.error('Failed to copy address: ', err);
-        // Optionally show an error message to the user
+        errorObject.value = { status_message: "Failed to copy address. Your browser might not support this feature or permissions are denied." };
     }
 };
 
-const applyBonusCode = async () => {
-  if (!bonusCode.value || isLoadingBonus.value) return;
+const handleApplyBonusCode = async () => {
+  if (!bonusCode.value.trim() || isLoadingBonus.value) return;
 
   isLoadingBonus.value = true;
-  bonusMessage.value = '';
-  isBonusError.value = false;
+  errorObject.value = null;
+  successMessage.value = '';
 
   try {
     const response = await store.dispatch('applyBonusCode', {
-      bonus_code: bonusCode.value,
+      bonus_code: bonusCode.value.trim().toUpperCase(), // Trim and uppercase bonus code
     });
 
     if (response.status) {
-      bonusMessage.value = response.status_message || 'Bonus code applied successfully!';
-      isBonusError.value = false;
+      successMessage.value = response.status_message || 'Bonus code applied successfully!';
       bonusCode.value = ''; // Clear input on success
-      // Balance update is handled by the store mutation
+      // Balance is updated by the Vuex action via mutation if backend confirms it
     } else {
-      bonusMessage.value = response.status_message || 'Failed to apply bonus code.';
-      isBonusError.value = true;
+      errorObject.value = response; // Expects { status_message: '...' }
+      if (!errorObject.value?.status_message) {
+         errorObject.value = { status_message: 'Failed to apply bonus code.' };
+      }
     }
-  } catch (error) {
-    console.error('Bonus code application error:', error);
-    bonusMessage.value = 'An unexpected error occurred while applying the bonus code.';
-    isBonusError.value = true;
+  } catch (err) {
+    console.error('Bonus code application system error:', err);
+    errorObject.value = { status_message: 'An unexpected error occurred while applying the bonus code.' };
   } finally {
     isLoadingBonus.value = false;
   }

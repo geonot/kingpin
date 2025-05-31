@@ -9,10 +9,8 @@
       </div>
       <form class="mt-8 space-y-6" @submit.prevent="handleRegister">
 
-        <!-- General Error Message -->
-         <div v-if="errorMessage" class="p-3 bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-600 text-red-700 dark:text-red-100 rounded-md text-sm">
-            {{ errorMessage }}
-         </div>
+        <!-- General API Error Message -->
+        <error-message :error="apiError" @dismiss="apiError = null" class="mb-4" />
 
         <div class="rounded-md shadow-sm -space-y-px">
           <div>
@@ -109,6 +107,7 @@ import { ref, reactive, computed } from 'vue';
 import { useStore } from 'vuex';
 import { useRouter } from 'vue-router';
 import { validate as validateEmail } from 'email-validator';
+import ErrorMessage from '@components/ErrorMessage.vue'; // Import ErrorMessage component
 
 const store = useStore();
 const router = useRouter();
@@ -119,8 +118,8 @@ const form = reactive({
   password: '',
   confirmPassword: '',
 });
-const formErrors = reactive({});
-const errorMessage = ref(''); // General backend error
+const formErrors = reactive({}); // For field-specific client-side validation errors
+const apiError = ref(null); // For general errors from the API, expects an object
 const isLoading = ref(false);
 const passwordHints = ref([]);
 
@@ -221,10 +220,20 @@ const isFormValid = computed(() => {
 
 // --- Form Submission ---
 const handleRegister = async () => {
-  errorMessage.value = ''; // Clear previous general errors
+  apiError.value = null; // Clear previous general API errors
+  // Clear field-specific errors that might have been set from a previous API attempt
+  Object.keys(formErrors).forEach(key => delete formErrors[key]);
+
   if (!validateAll()) {
-       console.log("Form validation failed", formErrors);
-       return; // Don't submit if frontend validation fails
+       console.log("Client-side form validation failed", formErrors);
+       // Optionally set a general apiError if formErrors isn't enough feedback
+       if (Object.keys(formErrors).length > 0) {
+           const firstErrorKey = Object.keys(formErrors)[0];
+           apiError.value = { status_message: `Please correct the highlighted fields. Error with: ${firstErrorKey}` };
+       } else {
+           apiError.value = { status_message: "Please ensure all fields are correctly filled." };
+       }
+       return;
   }
 
   isLoading.value = true;
@@ -233,25 +242,39 @@ const handleRegister = async () => {
     const response = await store.dispatch('register', {
       username: form.username.trim(),
       email: form.email.trim(),
-      password: form.password, // Send password as is
+      password: form.password,
     });
 
-    if (response.status) {
-      // Redirect to slots page or home on successful registration
-      router.push('/slots');
+    if (response.status && response.access_token) { // Successful registration includes tokens
+      // Login action (which includes fetchUserProfile) is typically called by store's register action on success.
+      // Or, if register action only returns tokens, dispatch login/fetchUserProfile here.
+      // Assuming store's register action handles setting tokens and fetching user.
+      router.push('/slots'); // Or to a welcome/verify email page
     } else {
-      // Display backend error message
-      errorMessage.value = response.status_message || 'Registration failed. Please try again.';
-      // Check if error relates to specific fields (e.g., username exists)
-      if (errorMessage.value.toLowerCase().includes('username')) {
-          formErrors.username = errorMessage.value;
-      } else if (errorMessage.value.toLowerCase().includes('email')) {
-           formErrors.email = errorMessage.value;
+      // Display backend error message via ErrorMessage component
+      apiError.value = response; // Store the whole response object
+      if (!apiError.value?.status_message) {
+         apiError.value = { status_message: 'Registration failed. Please try again.' };
+      }
+      // Optionally, try to map backend error to specific fields if backend provides structured errors
+      // For example, if response.errors is an object like { username: ['Username taken'] }
+      if (response.errors) {
+        for (const field in response.errors) {
+          if (formErrors.hasOwnProperty(field)) {
+            formErrors[field] = response.errors[field].join ? response.errors[field].join(' ') : response.errors[field];
+          }
+        }
+      } else if (apiError.value.status_message) { // If only a general message, check for keywords
+          if (apiError.value.status_message.toLowerCase().includes('username')) {
+              formErrors.username = apiError.value.status_message;
+          } else if (apiError.value.status_message.toLowerCase().includes('email')) {
+              formErrors.email = apiError.value.status_message;
+          }
       }
     }
-  } catch (error) {
-    console.error('Registration error:', error);
-    errorMessage.value = 'An unexpected error occurred. Please try again later.';
+  } catch (err) {
+    console.error('Registration system error:', err);
+    apiError.value = { status_message: 'An unexpected error occurred during registration. Please try again later.' };
   } finally {
     isLoading.value = false;
   }

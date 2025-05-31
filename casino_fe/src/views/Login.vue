@@ -37,9 +37,8 @@
         </div>
 
         <!-- Error Message -->
-         <div v-if="errorMessage" class="p-3 bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-600 text-red-700 dark:text-red-100 rounded-md text-sm">
-            {{ errorMessage }}
-         </div>
+         <!-- Error Message Component -->
+         <error-message :error="error" @dismiss="error = null" class="mb-4" />
 
         <div class="flex items-center justify-between">
           <div class="flex items-center">
@@ -88,18 +87,20 @@
 <script setup>
 import { ref } from 'vue';
 import { useStore } from 'vuex';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router'; // Import useRoute
+import ErrorMessage from '@components/ErrorMessage.vue'; // Import ErrorMessage component
 
 const store = useStore();
 const router = useRouter();
+const route = useRoute(); // Get current route instance
 
 const username = ref('');
 const password = ref('');
-const errorMessage = ref('');
+const error = ref(null); // Will hold error object { status_message: '...' } or null
 const isLoading = ref(false);
 
 const handleLogin = async () => {
-  errorMessage.value = ''; // Clear previous errors
+  error.value = null; // Clear previous errors
   isLoading.value = true;
 
   try {
@@ -108,15 +109,18 @@ const handleLogin = async () => {
       password: password.value,
     });
 
-    if (response.status) {
-      // Redirect to slots page or dashboard on successful login
-      router.push('/slots');
+    if (response.status && response.access_token) { // Check for status true and presence of token
+      const redirectPath = route.query.redirect || '/slots'; // Get redirect path or default
+      router.push(redirectPath);
     } else {
-      errorMessage.value = response.status_message || 'Login failed. Please check your credentials.';
+      error.value = response; // Store the whole error response object
+      if (!error.value?.status_message) { // Fallback message
+        error.value = { status_message: 'Login failed. Please check your credentials.'};
+      }
     }
-  } catch (error) {
-    console.error('Login error:', error);
-    errorMessage.value = 'An unexpected error occurred. Please try again later.';
+  } catch (err) {
+    console.error('Login system error:', err);
+    error.value = { status_message: 'An unexpected error occurred. Please try again later.' };
   } finally {
     isLoading.value = false;
   }
