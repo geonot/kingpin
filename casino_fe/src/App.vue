@@ -62,48 +62,9 @@ export default {
 </script>
 
 <style>
-/* Global styles and transitions */
-body {
-  margin: 0;
-  font-family: 'Poppins', sans-serif; /* Use Poppins as primary */
-}
-
-/* Router transition styles */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* Improved Scrollbar (Optional) */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
-.dark ::-webkit-scrollbar-track {
-  background: #2d2d44; /* Darker track for dark mode */
-}
-.dark ::-webkit-scrollbar-thumb {
-  background: #555; /* Slightly lighter thumb */
-}
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #777;
-}
+/* Styles specific to App.vue root element can remain if necessary, */
+/* but global styles like body, scrollbar, transitions were moved to assets/styles.css */
+/* Example: might have some padding/margin adjustments for #app itself if not covered by Tailwind classes */
 </style>
 
 

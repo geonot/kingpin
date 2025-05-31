@@ -22,13 +22,10 @@
     </div>
 
     <!-- Error message -->
-    <div v-else-if="error" class="bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-100 px-6 py-4 rounded-md my-8 shadow">
-      <strong class="font-bold">Oops!</strong>
-      <span class="block sm:inline ml-2">{{ error }}</span>
-    </div>
+    <error-message :error="errorObject" @dismiss="errorObject = null" class="my-8" />
 
     <!-- Empty state -->
-    <div v-else-if="filteredTables.length === 0" class="text-center my-20 py-10 bg-gray-50 dark:bg-gray-800 rounded-lg shadow">
+    <div v-if="!loading && !errorObject && filteredTables.length === 0" class="text-center my-20 py-10 bg-gray-50 dark:bg-gray-800 rounded-lg shadow">
       <i class="fas fa-ghost text-5xl text-gray-400 dark:text-gray-500 mb-4"></i>
       <p v-if="search" class="text-xl text-gray-600 dark:text-gray-300">
         No tables found matching "<strong>{{ search }}</strong>".
@@ -85,15 +82,16 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useStore } from 'vuex';
-import { formatSatsToBtc } from '@utils/currencyFormatter'; // Assuming this utility exists
+import { formatSatsToBtc } from '@utils/currencyFormatter';
+import ErrorMessage from '@components/ErrorMessage.vue'; // Import ErrorMessage
 
 const store = useStore();
 const search = ref('');
 const loading = ref(true);
-const error = ref(null);
+const errorObject = ref(null); // Changed from error to errorObject
 
 // Access state using computed
-const tables = computed(() => store.state.tables);
+const tables = computed(() => store.getters.getTables); // Use getter
 
 // Filtered tables based on search input
 const filteredTables = computed(() => {
@@ -111,16 +109,18 @@ const filteredTables = computed(() => {
 
 // Fetch tables when component is mounted
 onMounted(async () => {
+  loading.value = true;
+  errorObject.value = null;
   try {
-    loading.value = true;
-    error.value = null;
-    // Only fetch if not already loaded, or implement cache expiry
-    if (!store.state.tablesLoaded) {
-        await store.dispatch('fetchTables');
+    // fetchTables action now returns an object like { status, tables, status_message }
+    const response = await store.dispatch('fetchTables');
+    if (!response.status) {
+      errorObject.value = response; // Store the error object { status, status_message }
     }
-  } catch (err) {
-    error.value = 'Failed to load table games. Please refresh the page or try again later.';
-    console.error('Error loading tables:', err);
+    // Tables are committed to store by the action itself if successful
+  } catch (err) { // Catch unexpected errors during dispatch
+    console.error('System error loading tables:', err);
+    errorObject.value = { status_message: 'Failed to load table games due to a system error.' };
   } finally {
     loading.value = false;
   }

@@ -9,7 +9,7 @@
 </div>
 
 <!-- Error Message Display -->
-<error-message v-if="isErrorVisible" :message="errorMessage" @dismiss="clearErrorMessage" class="mb-4" />
+<error-message :error="errorObject" @dismiss="clearErrorObject" class="mb-4" />
 
 <!-- Game Container -->
 <div class="slot-container relative bg-gradient-to-b from-gray-800 to-black dark:from-neutral-800 dark:to-black rounded-lg shadow-2xl p-1 md:p-2">
@@ -55,8 +55,7 @@ const game = shallowRef(null);
 const gameSessionId = ref(null);
 const isLoading = ref(true);
 const loadingMessage = ref('Joining game...');
-const errorMessage = ref(null);
-const isErrorVisible = ref(false);
+const errorObject = ref(null); // For ErrorMessage.vue component
 const slotInfo = ref(null); // To store details about the current slot
 const isSpinning = ref(false); // Prevent concurrent spins
 
@@ -65,412 +64,265 @@ const SESSION_STORAGE_KEY = 'slotGameSessionId';
 const SLOT_ID_STORAGE_KEY = 'currentSlotId';
 
 const user = computed(() => store.state.user);
-const userBalance = computed(() => store.state.user?.balance ?? 0);
+const userBalance = computed(() => store.state.user?.balance ?? 0); // Used for registry
 const isAuthenticated = computed(() => store.getters.isAuthenticated);
+// Assuming sound/turbo settings are in Vuex state, e.g., store.state.settings.soundEnabled
+const soundEnabled = computed(() => store.state.soundSettings?.enabled ?? true);
+const turboEnabled = computed(() => store.state.turboSettings?.enabled ?? false);
 
-const clearErrorMessage = () => {
-errorMessage.value = null;
-isErrorVisible.value = false;
+
+const clearErrorObject = () => {
+  errorObject.value = null;
 };
 
-const fetchSlotDetails = async (slotId) => {
-// Check if slots are loaded, if not fetch them
-if (!store.state.slotsLoaded) {
-try {
-await store.dispatch('fetchSlots');
-} catch (err) {
-console.error("Failed to fetch slot list:", err);
-// Handle error appropriately, maybe redirect or show static error
-}
-}
-// Find the specific slot from the store
-slotInfo.value = store.getters.getSlotById(slotId);
-if (!slotInfo.value) {
-console.error(`Slot with ID ${slotId} not found in store.`);
-errorMessage.value = 'Could not load slot information. Please try again.';
-isErrorVisible.value = true;
-// Optionally redirect back
-// router.push('/slots');
-}
-};
-
-const joinGame = async (slotId) => {
-    isLoading.value = true;
-    loadingMessage.value = 'Joining game session...';
-    clearErrorMessage();
-    
-    // Store the current slot ID in localStorage
-    localStorage.setItem(SLOT_ID_STORAGE_KEY, slotId.toString());
-    
-    // Check if we have an existing session ID in localStorage
-    const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
-    
-    if (existingSessionId && isAuthenticated.value) {
-        // Instead of verifying with a separate API call, we'll just try to use the existing session
-        // If any API calls fail with a session error, we'll create a new session then
-        gameSessionId.value = existingSessionId;
-        console.log('Attempting to reuse existing game session:', gameSessionId.value);
-        isLoading.value = false;
-        return;
-    }
-    
-    // Create a new session
-    try {
-        const response = await store.dispatch('joinGame', {
-            slot_id: slotId,
-            game_type: 'slot' // Explicitly set game_type
-        });
-        
-        if (response.status && response.session_id) {
-            gameSessionId.value = response.session_id;
-            // Store the session ID in localStorage
-            localStorage.setItem(SESSION_STORAGE_KEY, response.session_id);
-            console.log('Joined new game session:', gameSessionId.value);
-        } else {
-            throw new Error(response.status_message || 'Failed to join game session.');
-        }
-    } catch (error) {
-        console.error('Error joining game:', error);
-        errorMessage.value = `Failed to join game: ${error.message}. Please ensure you are logged in and try again.`;
-        isErrorVisible.value = true;
-        isLoading.value = false; // Stop loading on error
-        // Potentially redirect if join fails critically
-        // router.push('/slots');
-        throw error; // Re-throw to prevent Phaser initialization
-    }
-};
-
-const startPhaserGame = (slotId) => {
-if (game.value) {
-console.warn("Phaser game already exists. Destroying previous instance.");
-game.value.destroy(true);
-game.value = null;
-}
-
-loadingMessage.value = 'Loading game assets...';
-
-// Ensure the parent element exists
-const parentElement = document.getElementById('phaser-slot-machine');
-if (!parentElement) {
-console.error("Phaser parent element 'phaser-slot-machine' not found.");
-errorMessage.value = "Internal error: Could not initialize game display.";
-isErrorVisible.value = true;
-isLoading.value = false;
-return;
-}
-
-// Merge Phaser config with dynamic data
-const mergedConfig = {
-  ...phaserConfig,
-  parent: 'phaser-slot-machine', // Explicitly set parent container ID
-  callbacks: {
-    preBoot: (bootingGame) => {
-      // Set the slotId in the registry before any scenes start
-      bootingGame.registry.set('slotId', slotId);
-      console.log(`Pre-boot: Setting slotId ${slotId} in registry`);
-    },
-    postBoot: (bootedGame) => {
-      // Pass additional data to Phaser scenes via game registry or globals
-      bootedGame.registry.set('userBalance', userBalance.value);
-      bootedGame.registry.set('slotConfig', slotInfo.value); // Pass fetched slot info
-      bootedGame.registry.set('initialBet', slotInfo.value?.bets?.[0]?.bet_amount || 10); // Example: default to first bet option
-      console.log('Phaser game booted. Initial data set.');
-      isLoading.value = false; // Hide loading overlay once Phaser is ready
-    }
+const fetchSlotDetailsAndConfig = async (slotId) => {
+  const fetchedSlotInfo = await store.dispatch('fetchSlotConfig', slotId);
+  if (fetchedSlotInfo && typeof fetchedSlotInfo === 'object' && !fetchedSlotInfo.status_message) {
+    slotInfo.value = fetchedSlotInfo;
+  } else {
+    console.error(`Slot with ID ${slotId} not found or fetch failed.`);
+    errorObject.value = fetchedSlotInfo || { status_message: 'Could not load slot configuration.'};
+    // router.push('/slots'); // Optionally redirect
   }
 };
 
 
-console.log("Initializing Phaser game...");
-// Assign to shallowRef's value property
-game.value = new Phaser.Game(mergedConfig);
+const joinGameAndInitPhaser = async (slotId) => {
+    isLoading.value = true;
+    loadingMessage.value = 'Joining game session...';
+    clearErrorObject();
+    
+    localStorage.setItem(SLOT_ID_STORAGE_KEY, slotId.toString());
+    const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
 
-// Optional: Listen for Phaser errors
-game.value.events.on('error', (error) => {
-console.error('Phaser Error:', error);
-errorMessage.value = "An error occurred within the game.";
-isErrorVisible.value = true;
-// Handle Phaser error, maybe destroy game or show overlay
-});
-};
-
-const handleSpinRequest = async ({ bet }) => {
-if (isSpinning.value) {
-console.warn('Spin request ignored, already spinning.');
-return;
-}
-if (!isAuthenticated.value) {
-errorMessage.value = "Please log in to play.";
-isErrorVisible.value = true;
-return;
-}
-isSpinning.value = true;
-clearErrorMessage();
-// Optionally show a subtle loading state on the spin button in UIScene via EventBus?
-// EventBus.$emit('spinStateChanged', { spinning: true });
-
-console.log(`Handling spin request. Bet: ${bet} Sats`);
-
-try {
-await spin(bet);
-} catch(error) {
-// Error already handled within spin() or by global error handler
-console.error("Spin request failed:", error);
-} finally {
-isSpinning.value = false;
-// EventBus.$emit('spinStateChanged', { spinning: false });
-}
-};
-
-const spin = async (betAmountSats) => {
-if (!gameSessionId.value) {
-errorMessage.value = 'No active game session. Please rejoin the game.';
-isErrorVisible.value = true;
-throw new Error('No game session ID for spin');
-}
-if (betAmountSats <= 0) {
-errorMessage.value = 'Invalid bet amount.';
-isErrorVisible.value = true;
-throw new Error('Invalid bet amount');
-}
-if (userBalance.value < betAmountSats) {
-errorMessage.value = 'Insufficient balance for this bet.';
-isErrorVisible.value = true;
-// Send event to Phaser UI to potentially disable spin button
-EventBus.$emit('uiUpdate', { balanceInsufficient: true });
-throw new Error('Insufficient balance');
-}
-
-try {
-const payload = {
-bet_amount: betAmountSats,
-// game_session_id is derived on backend from JWT/user
-};
-console.log('Dispatching spin action with payload:', payload);
-
-        // IMPORTANT: We're NOT updating the store balance here anymore
-        // The balance deduction happens in handleBalanceDeduction
-        // The win amount addition happens in handleSpinAnimationComplete
-        
-        // Make the API call but don't update the balance yet
-        const response = await axios.post('/api/spin', payload, {
-            headers: {
-                'Authorization': `Bearer ${store.state.userSession}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        const data = response.data;
-        console.log('Received spin response:', data);
-
-        if (data.status) {
-            // Send result to Phaser GameScene to animate reels
-            // Ensure GameScene exists and is ready
-            const gameScene = game.value?.scene.getScene('GameScene');
-            if (gameScene && gameScene.scene.isActive()) {
-                 gameScene.handleSpinResult(data); // Call method in GameScene
+    if (existingSessionId && isAuthenticated.value) {
+        gameSessionId.value = existingSessionId;
+        console.log('Attempting to reuse existing game session:', gameSessionId.value);
+    } else {
+        try {
+            const response = await store.dispatch('joinGame', { slot_id: slotId, game_type: 'slot' });
+            if (response.status && response.session_id) {
+                gameSessionId.value = response.session_id;
+                localStorage.setItem(SESSION_STORAGE_KEY, response.session_id);
             } else {
-                 console.error('GameScene not found or inactive, cannot display spin result.');
-                 errorMessage.value = 'Game error: Could not display spin result.';
-                 isErrorVisible.value = true;
-                 
-                 // If we can't display the animation, update the balance immediately with full amount
-                 store.commit('updateUserBalance', data.user.balance);
-                 EventBus.$emit('uiUpdate', {
-                    balance: data.user.balance
-                 });
+                throw new Error(response.status_message || 'Failed to join game session.');
             }
-            
-            return data;
-
-        } else {
-            errorMessage.value = data.status_message || 'Spin request failed. Please try again.';
-            isErrorVisible.value = true;
-            // Potentially update UI state in Phaser
-            EventBus.$emit('spinError', { message: errorMessage.value });
-            throw new Error(errorMessage.value);
+        } catch (err) {
+            console.error('Error joining game:', err);
+            errorObject.value = { status_message: `Failed to join game: ${err.message}. Ensure you are logged in.` };
+            isLoading.value = false;
+            throw err;
         }
-    } catch (error) {
-        console.error('Error during spin dispatch:', error);
-        
-        // Check if the error is related to an invalid session
-        if (error.response?.status === 404 &&
-            (error.response?.data?.status_message?.includes('No active game session') ||
-             error.response?.data?.status_message?.includes('session'))) {
-            
-            console.log('Session error detected, attempting to create a new session');
-            
-            try {
-                // Get the slot ID from localStorage or route params
-                const slotId = Number(localStorage.getItem(SLOT_ID_STORAGE_KEY) || route.params.id);
-                
-                // Create a new session
-                await joinGame(slotId);
-                
-                // Retry the spin with the new session
-                console.log('New session created, retrying spin');
-                return await spin(betAmountSats);
-            } catch (sessionError) {
-                console.error('Failed to create new session:', sessionError);
-                errorMessage.value = 'Session expired. Failed to create a new session.';
-                isErrorVisible.value = true;
-                EventBus.$emit('spinError', { message: errorMessage.value });
-                throw sessionError;
-            }
-        }
-        
-        // For other errors
-        if (!errorMessage.value) {
-            errorMessage.value = 'Spin failed due to a network or server error.';
-        }
-        isErrorVisible.value = true;
-        EventBus.$emit('spinError', { message: errorMessage.value });
-        throw error; // Re-throw for handleSpinRequest's finally block
+    }
+    
+    // If slotInfo is available (implies config is loaded), start Phaser
+    if (slotInfo.value) {
+        startPhaserGame(slotId);
+    } else {
+        // This case should ideally be prevented by ensuring slotInfo is loaded before calling this
+        console.error("Slot info not available before starting Phaser.");
+        errorObject.value = { status_message: "Slot configuration missing, cannot start game."};
+        isLoading.value = false;
     }
 };
 
-// Handle balance deduction when spin button is clicked
-const handleBalanceDeduction = (betAmount) => {
-    if (userBalance.value >= betAmount) {
-        // Calculate new balance after deduction
-        const newBalance = userBalance.value - betAmount;
-        
-        // Update store with deducted balance
-        store.commit('updateUserBalance', newBalance);
-        
-        // Update UI with deducted balance
-        EventBus.$emit('uiUpdate', {
-            balance: newBalance
-        });
-        
-        console.log(`Deducted ${betAmount} from balance, new balance: ${newBalance}`);
+const startPhaserGame = (slotId) => {
+  if (game.value) {
+    console.warn("Phaser game already exists. Destroying previous instance.");
+    game.value.destroy(true); game.value = null;
+  }
+  loadingMessage.value = 'Loading game assets...';
+  const parentElement = document.getElementById('phaser-slot-machine');
+  if (!parentElement) {
+    console.error("Phaser parent element 'phaser-slot-machine' not found.");
+    errorObject.value = { status_message: "Internal error: Could not initialize game display." };
+    isLoading.value = false; return;
+  }
+
+  const mergedConfig = {
+    ...phaserConfig,
+    parent: 'phaser-slot-machine',
+    callbacks: {
+      preBoot: (bootingGame) => {
+        bootingGame.registry.set('slotId', slotId);
+      },
+      postBoot: (bootedGame) => {
+        bootedGame.registry.set('userBalance', userBalance.value); // Use computed prop
+        bootedGame.registry.set('slotConfigData', slotInfo.value); // Full config from Vuex
+        bootedGame.registry.set('soundEnabled', soundEnabled.value);
+        bootedGame.registry.set('turboEnabled', turboEnabled.value);
+        bootedGame.registry.set('eventBus', EventBus); // Provide EventBus to Phaser
+        console.log('Phaser game booted. Initial data set in registry.');
+        isLoading.value = false;
+      }
     }
+  };
+  game.value = new Phaser.Game(mergedConfig);
+  game.value.events.on('error', (err) => {
+    console.error('Phaser Error:', err);
+    errorObject.value = { status_message: "A game error occurred." };
+  });
 };
 
-// Handle spin animation completion - add win amount to balance
-const handleSpinAnimationComplete = (response) => {
-    if (response && response.status) {
-        // Only add the win amount to the current balance
-        const winAmount = response.win_amount || 0;
-        
-        if (winAmount > 0) {
-            // Get current balance and add win amount
-            const currentBalance = store.state.user?.balance || 0;
-            const newBalance = currentBalance + winAmount;
-            
-            // Update store with new balance including win
-            store.commit('updateUserBalance', newBalance);
-            
-            // Update UI with new balance and win amount
-            EventBus.$emit('uiUpdate', {
-                balance: newBalance,
-                winAmount: winAmount
-            });
-            
-            console.log(`Added win amount ${winAmount} to balance, new balance: ${newBalance}`);
-        } else {
-            console.log('No win amount to add to balance');
-        }
+// Phaser to Vue Event Handlers
+const handlePhaserSpinResult = (result) => {
+    console.log("Vue: PhaserSpinResult received", result);
+    if (result.user) {
+        store.commit('updateUserBalance', result.user.balance);
     }
+    // Potentially update other UI elements based on win, lines etc.
 };
-// Fetch the user's current profile from the backend
-const fetchUserData = async () => {
+const handlePhaserBalanceInsufficient = () => {
+    console.log("Vue: PhaserBalanceInsufficient received");
+    errorObject.value = { status_message: "Insufficient balance for the bet." };
+};
+const handlePhaserError = (message) => {
+    console.log("Vue: PhaserError received", message);
+    errorObject.value = { status_message: message || "An error occurred in the game." };
+};
+const handlePhaserRequestBalanceUpdate = async () => {
+    console.log("Vue: PhaserRequestBalanceUpdate received");
     try {
-        // Fetch the user's profile to get the current balance
-        await store.dispatch('fetchUserProfile');
-        console.log('User profile fetched, balance:', userBalance.value);
-        return true;
-    } catch (error) {
-        console.error('Error fetching user profile:', error);
-        errorMessage.value = 'Failed to fetch user profile. Please refresh the page.';
-        isErrorVisible.value = true;
-        return false;
+        await store.dispatch('fetchUserProfile'); // Fetches and commits new balance
+        // Phaser UIScene should listen for 'vueBalanceUpdated' or directly read from registry if updated there.
+        EventBus.emit('vueBalanceUpdated', { balance: store.getters.currentUser?.balance });
+    } catch (err) {
+        console.error("Vue: Error fetching user profile for balance update:", err);
     }
 };
+
+// Vue to Phaser Command Emitter (example, if Vue UI triggers spin)
+// const triggerPhaserSpin = (betAmount) => {
+//   if (game.value) {
+//     EventBus.emit('vueSpinCommand', { betAmount });
+//   }
+// };
 
 // --- Lifecycle Hooks ---
 onMounted(async () => {
-    if (!isAuthenticated.value) {
-        // Redirect to login if not authenticated
-        router.push({ name: 'Login', query: { redirect: route.fullPath } });
-        return;
+  if (!isAuthenticated.value) {
+    router.push({ name: 'Login', query: { redirect: route.fullPath } });
+    return;
+  }
+  const slotIdNum = Number(route.params.id);
+  if (isNaN(slotIdNum)) {
+    errorObject.value = { status_message: 'Invalid Slot ID.' };
+    isLoading.value = false; return;
+  }
+
+  clearErrorObject();
+  isLoading.value = true;
+  loadingMessage.value = 'Loading slot configuration...';
+
+  try {
+    await store.dispatch('fetchUserProfile'); // Ensure user balance is fresh
+    await fetchSlotDetailsAndConfig(slotIdNum); // Fetches config and stores in slotInfo
+
+    if (slotInfo.value && !errorObject.value) { // If config loaded successfully
+      await joinGameAndInitPhaser(slotIdNum); // Joins game, then starts Phaser
+    } else {
+      isLoading.value = false; // Config loading failed
     }
-
-    const slotId = Number(route.params.id);
-    if (isNaN(slotId)) {
-        errorMessage.value = 'Invalid Slot ID.';
-        isErrorVisible.value = true;
-        isLoading.value = false;
-        return;
+  } catch (err) {
+    console.error("Slot page initialization failed:", err);
+    if (!errorObject.value) { // Ensure some error is shown
+        errorObject.value = { status_message: 'Failed to initialize slot game.' };
     }
+    isLoading.value = false;
+  }
 
-    try {
-        // First fetch the user's profile to get the current balance
-        const profileFetched = await fetchUserData();
-        if (!profileFetched) {
-            isLoading.value = false;
-            return;
-        }
-
-        await fetchSlotDetails(slotId); // Fetch details first
-        if (slotInfo.value) { // Proceed only if slot info loaded
-            await joinGame(slotId); // Then join the game session
-            startPhaserGame(slotId); // Finally start Phaser
-            // Register event listener for spin requests from Phaser UI
-            EventBus.$on('spinRequest', handleSpinRequest);
-            // Register event listener for spin requests from Phaser UI
-            EventBus.$on('spinRequest', handleSpinRequest);
-            // Register event listener for spin animation completion
-            EventBus.$on('spinAnimationComplete', handleSpinAnimationComplete);
-            // Register event listener for balance deduction request
-            EventBus.$on('getBalanceForDeduction', handleBalanceDeduction);
-        } else {
-             // Error handled within fetchSlotDetails
-             isLoading.value = false;
-        }
-
-    } catch (error) {
-        // Errors during fetch/join are already handled and displayed
-        console.error("Initialization failed:", error);
-        isLoading.value = false; // Ensure loading stops on failure
-    }
+  // Register Event Bus Listeners (Phaser to Vue)
+  EventBus.on('phaserSpinResult', handlePhaserSpinResult);
+  EventBus.on('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
+  EventBus.on('phaserError', handlePhaserError);
+  EventBus.on('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
+  // Listener for spin command from Phaser UI
+  EventBus.on('spinCommand', handlePhaserSpinCommand);
 });
 
-const endGameSession = async () => {
-    if (gameSessionId.value) {
-        try {
-            console.log("Ending game session:", gameSessionId.value);
-            await store.dispatch('endSession');
-            gameSessionId.value = null;
-            
-            // Clear the session ID from localStorage
-            localStorage.removeItem(SESSION_STORAGE_KEY);
-        } catch (error) {
-            console.error("Failed to end game session:", error);
-            // Don't block unmounting even if this fails
-            
-            // Still clear the session ID from localStorage to prevent issues
-            localStorage.removeItem(SESSION_STORAGE_KEY);
+// This function is called when Phaser's UI requests a spin
+const handlePhaserSpinCommand = async (payload) => {
+    if (isSpinning.value) {
+        console.warn("Vue: Spin command ignored, already spinning.");
+        EventBus.emit('spinReject', { message: 'Already spinning.' }); // Inform Phaser
+        return;
+    }
+    if (!isAuthenticated.value) {
+        errorObject.value = { status_message: "Please log in to play." };
+        EventBus.emit('spinError', { message: 'User not authenticated.' }); // Inform Phaser
+        return;
+    }
+
+    const betAmount = payload.betAmount; // Assuming payload from Phaser is { betAmount: XXX }
+    if (userBalance.value < betAmount) {
+        errorObject.value = { status_message: 'Insufficient balance.' };
+        EventBus.emit('phaserBalanceInsufficient'); // Inform Phaser specifically
+        return;
+    }
+
+    isSpinning.value = true;
+    clearErrorObject();
+    // Inform Phaser that spin is starting (e.g., for UI updates in Phaser)
+    EventBus.emit('vueSpinInitiated', { betAmount });
+
+    console.log(`Vue: Dispatching spin action with bet: ${betAmount}`);
+    try {
+        // The Vuex 'spin' action makes the API call and updates user balance in store on success.
+        const response = await store.dispatch('spin', { bet_amount: betAmount });
+
+        if (response.status) {
+            // The Vuex action should have updated the user's balance.
+            // The API response (containing spin_result, win_amount etc.) is passed to Phaser.
+            // Phaser's GameScene should listen for an event like 'vueSpinResult' to start animations.
+            EventBus.emit('vueSpinResult', response);
+        } else {
+            // Error from Vuex action (e.g., API error)
+            errorObject.value = response;
+            EventBus.emit('spinError', { message: response.status_message || "Spin failed." }); // Inform Phaser
         }
+    } catch (err) {
+        console.error("Vue: Error during spin action dispatch:", err);
+        const message = err.status_message || "An unexpected error occurred during spin.";
+        errorObject.value = { status_message: message };
+        EventBus.emit('spinError', { message }); // Inform Phaser
+    } finally {
+        isSpinning.value = false;
+        // Inform Phaser spin has concluded (either success or fail)
+        EventBus.emit('vueSpinConcluded');
     }
 };
 
-onBeforeUnmount(async () => {
-    console.log("Destroying Phaser game instance and cleaning up event listeners.");
-    // Remove event listeners
-    EventBus.$off('spinRequest', handleSpinRequest);
-    EventBus.$off('spinAnimationComplete', handleSpinAnimationComplete);
-    EventBus.$off('getBalanceForDeduction', handleBalanceDeduction);
 
-    // End the game session
-    await endGameSession();
-
-    // Destroy Phaser game instance
-    if (game.value) {
-        game.value.destroy(true);
-        game.value = null; // Clear the ref
+const endGameSession = async () => {
+  if (gameSessionId.value) {
+    try {
+      console.log("Ending game session:", gameSessionId.value);
+      await store.dispatch('endSession');
+      gameSessionId.value = null;
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (err) {
+      console.error("Failed to end game session:", err);
+      localStorage.removeItem(SESSION_STORAGE_KEY); // Still clear if API fails
     }
-    // Clean up potentially other listeners or timers
+  }
+};
+
+onBeforeUnmount(async () => {
+  console.log("Slot.vue: Cleaning up Phaser game instance and event listeners.");
+
+  // Remove Event Bus Listeners
+  EventBus.off('phaserSpinResult', handlePhaserSpinResult);
+  EventBus.off('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
+  EventBus.off('phaserError', handlePhaserError);
+  EventBus.off('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
+  EventBus.off('spinCommand', handlePhaserSpinCommand);
+
+  await endGameSession();
+
+  if (game.value) {
+    game.value.destroy(true);
+    game.value = null;
+  }
 });
 
 </script>

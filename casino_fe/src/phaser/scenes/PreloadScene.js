@@ -7,56 +7,80 @@ export default class PreloadScene extends Phaser.Scene {
 
     preload() {
         console.log('PreloadScene: Preload');
-        const gameConfig = this.registry.get('gameConfig'); // Get config from registry
+        const gameConfig = this.registry.get('gameConfig');
+        const slotShortName = this.registry.get('slotShortName'); // Get slotShortName
 
         if (!gameConfig) {
             console.error("PreloadScene: Game config not found in registry!");
-            // Handle error - perhaps return to main menu or show error
+            // Optionally emit an event or stop the scene
+            this.registry.get('eventBus')?.emit('phaserError', 'Game configuration missing in PreloadScene.');
+            return;
+        }
+        if (!slotShortName) {
+            console.error("PreloadScene: slotShortName not found in registry! Asset paths will be incorrect.");
+            // Fallback to a default or handle error
+            this.registry.get('eventBus')?.emit('phaserError', 'Slot identifier missing for assets.');
             return;
         }
 
         this.createLoadingBar();
 
         // --- Load Game Assets Based on Config ---
-        //const assetDir = gameConfig.asset_dir; // e.g., /slot1/
-        const assetDir = '/'
+        const assetBaseUrl = `/public/${slotShortName}/`; // Base path for this slot's assets e.g. /public/slot1/
+
         // 1. Background Image
         if (gameConfig.background?.image) {
-            this.load.image('background', `${assetDir}${gameConfig.background.image.replace(/^\//, '')}`); // Remove leading slash if present
+            // Assuming gameConfig.background.image is relative to the slot's asset folder e.g., "background.png" or "images/bg.jpg"
+            this.load.image('background', `${assetBaseUrl}${gameConfig.background.image.replace(/^\//, '')}`);
         }
 
         // 2. Symbol Images
         if (gameConfig.symbols && Array.isArray(gameConfig.symbols)) {
             gameConfig.symbols.forEach(symbol => {
-                if (symbol.icon) {
-                     // Use internal ID for texture key consistency
-                    this.load.image(`symbol_${symbol.id}`, `${assetDir}${symbol.icon.replace(/^\//, '')}`);
+                if (symbol.icon) { // symbol.icon is like "symbols/symbol_0.png"
+                    this.load.image(`symbol_${symbol.id}`, `${assetBaseUrl}${symbol.icon.replace(/^\//, '')}`);
                 }
             });
         }
 
-        // 3. UI Button Images
+        // 3. UI Button Images & Other UI Assets from gameConfig.json
+        // Assuming gameConfig.ui.buttons paths are also relative to assetBaseUrl
         if (gameConfig.ui?.buttons) {
-            Object.values(gameConfig.ui.buttons).forEach(button => {
-                if (button.icon && button.name) {
-                    this.load.image(button.name, `${assetDir}${button.icon.replace(/^\//, '')}`);
+            Object.entries(gameConfig.ui.buttons).forEach(([key, buttonData]) => {
+                // buttonData could be a string (path) or an object {name, icon}
+                let iconPath = '';
+                let loadKey = key; // Use the key from gameConfig.ui.buttons as the Phaser asset key
+
+                if (typeof buttonData === 'string') { // e.g. "spin_button": "ui/spin_button.png"
+                    iconPath = buttonData;
+                } else if (buttonData && buttonData.icon) { // e.g. "spin_button": { "name": "spinButton", "icon": "ui/spin_button.png" }
+                    iconPath = buttonData.icon;
+                    if(buttonData.name) loadKey = buttonData.name; // Use provided name if available
+                }
+
+                if (iconPath) {
+                    this.load.image(loadKey, `${assetBaseUrl}${iconPath.replace(/^\//, '')}`);
                 }
             });
-             // Also load common UI assets if defined separately
-            this.load.image('settings-button', '/assets/ui/settings.png'); // Example common asset
-            this.load.image('payline-dot', '/assets/ui/payline_dot.png'); // Small dot for paylines
-            this.load.image('win-particle', '/assets/ui/particle.png'); // Particle for win effects
         }
+        // Common UI assets (not slot-specific, loaded from /public/assets/ui/)
+        // These were already loaded in BootScene for the loader itself, but if others are needed:
+        this.load.image('settings-button', '/assets/ui/settings.png');
+        this.load.image('payline-dot', '/assets/ui/payline_dot.png');
+        this.load.image('win-particle', '/assets/ui/particle.png');
 
 
         // 4. Audio Files
         if (gameConfig.sound) {
             Object.entries(gameConfig.sound).forEach(([key, path]) => {
-                if (path) {
-                    // Ensure path has correct asset directory prefix
-                    const fullPath = path.startsWith('/assets/') ? path : `${assetDir}${path.replace(/^\//, '')}`;
+                if (path && typeof path === 'string') { // Ensure path is a string
+                    // Assuming sound paths in gameConfig are relative to the slot's asset folder
+                    const fullPath = `${assetBaseUrl}${path.replace(/^\//, '')}`;
                     console.log(`Loading sound: ${key} from ${fullPath}`);
-                    // Phaser determines format from extension
+                    this.load.audio(key, fullPath);
+                } else if (path && path.src && typeof path.src === 'string') { // Handle if path is an object like {src: "...", volume: 1}
+                    const fullPath = `${assetBaseUrl}${path.src.replace(/^\//, '')}`;
+                    console.log(`Loading sound: ${key} from ${fullPath}`);
                     this.load.audio(key, fullPath);
                 }
             });

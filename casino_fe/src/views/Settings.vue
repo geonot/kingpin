@@ -2,236 +2,261 @@
   <div class="container mx-auto mt-10 max-w-lg px-4">
     <h2 class="text-3xl font-bold text-center mb-8 text-gray-800 dark:text-gray-100">Account Settings</h2>
 
-     <div v-if="!user" class="text-center p-6 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 rounded-md shadow">
+    <div v-if="!currentUser" class="text-center p-6 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 rounded-md shadow">
       Please log in to access your settings.
     </div>
 
-    <form v-else @submit.prevent="submitUpdate" class="bg-white dark:bg-dark-card p-6 md:p-8 rounded-lg shadow-lg space-y-6">
-       <!-- Success/Error Messages -->
-      <div v-if="successMessage" class="mb-4 p-4 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100 border border-green-300 dark:border-green-600 rounded-md">
-        {{ successMessage }}
-      </div>
-      <div v-if="errorMessage" class="mb-4 p-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-100 border border-red-300 dark:border-red-600 rounded-md">
-        {{ errorMessage }}
-      </div>
+    <div v-else class="space-y-10">
+      <!-- Update Email Section -->
+      <form @submit.prevent="handleUpdateEmail" class="bg-white dark:bg-dark-card p-6 md:p-8 rounded-lg shadow-lg space-y-6">
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white border-b dark:border-gray-700 pb-3">Update Email</h3>
 
-      <div>
-        <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
-        <input
-          id="username"
-          type="text"
-          :value="user.username"
-          class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-gray-100 dark:bg-gray-700 dark:text-gray-400 cursor-not-allowed"
-          disabled
-        />
-        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Username cannot be changed.</p>
-      </div>
+        <error-message :error="emailApiError" @dismiss="emailApiError = null" />
+        <div v-if="emailSuccessMessage" class="mb-4 p-3 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-100 border border-green-300 dark:border-green-600 rounded-md text-sm">
+          {{ emailSuccessMessage }}
+        </div>
 
-      <div>
-        <label for="email" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
-        <input
-          v-model="form.email"
-          id="email"
-          type="email"
-          class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
-          placeholder="your.email@example.com"
-          required
-        />
-         <p v-if="formErrors.email" class="text-xs text-red-500 mt-1">{{ formErrors.email }}</p>
-      </div>
+        <div>
+          <label for="username_disabled" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
+          <input
+            id="username_disabled"
+            type="text"
+            :value="currentUser.username"
+            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-gray-100 dark:bg-gray-700 dark:text-gray-400 cursor-not-allowed"
+            disabled
+          />
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Username cannot be changed.</p>
+        </div>
 
-      <div>
-        <label for="newPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Password (Optional)</label>
-        <input
-          v-model="form.password"
-          id="newPassword"
-          type="password"
-          class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
-          placeholder="Leave blank to keep current password"
-        />
-         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char.</p>
-         <p v-if="formErrors.password" class="text-xs text-red-500 mt-1">{{ formErrors.password }}</p>
-      </div>
-
-       <div>
-        <label for="confirmPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm New Password</label>
-        <input
-          v-model="form.confirmPassword"
-          id="confirmPassword"
-          type="password"
-          class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
-          placeholder="Confirm new password if changing"
-          :required="!!form.password"
-        />
-         <p v-if="formErrors.confirmPassword" class="text-xs text-red-500 mt-1">{{ formErrors.confirmPassword }}</p>
-      </div>
-
-
-      <div class="text-center pt-4">
-         <button
+        <div>
+          <label for="email" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
+          <input
+            v-model="emailForm.email"
+            id="email"
+            type="email"
+            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
+            placeholder="your.email@example.com"
+            required
+          />
+          <p v-if="formErrors.email" class="text-xs text-red-500 mt-1">{{ formErrors.email }}</p>
+        </div>
+        <div class="text-right">
+          <button
             type="submit"
-            :disabled="isLoading || !isFormChanged || !isValidForm"
-            class="w-full md:w-auto inline-flex justify-center items-center px-8 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-royal-blue hover:bg-dark-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            :disabled="isEmailLoading || !isEmailFormChanged || formErrors.email"
+            class="inline-flex justify-center items-center px-6 py-2.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-royal-blue hover:bg-dark-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <svg v-if="isLoading" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg v-if="isEmailLoading" class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            {{ isLoading ? 'Saving...' : 'Save Changes' }}
+            {{ isEmailLoading ? 'Saving...' : 'Update Email' }}
           </button>
-      </div>
-    </form>
+        </div>
+      </form>
+
+      <!-- Change Password Section -->
+      <form @submit.prevent="handleChangePassword" class="bg-white dark:bg-dark-card p-6 md:p-8 rounded-lg shadow-lg space-y-6">
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white border-b dark:border-gray-700 pb-3">Change Password</h3>
+
+        <error-message :error="passwordApiError" @dismiss="passwordApiError = null" />
+         <div v-if="passwordSuccessMessage" class="mb-4 p-3 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-100 border border-green-300 dark:border-green-600 rounded-md text-sm">
+          {{ passwordSuccessMessage }}
+        </div>
+
+        <div>
+          <label for="newPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Password</label>
+          <input
+            v-model="passwordForm.password"
+            id="newPassword"
+            type="password"
+            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
+            placeholder="Enter new password"
+          />
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char.</p>
+          <p v-if="formErrors.password" class="text-xs text-red-500 mt-1">{{ formErrors.password }}</p>
+        </div>
+
+        <div>
+          <label for="confirmPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm New Password</label>
+          <input
+            v-model="passwordForm.confirmPassword"
+            id="confirmPassword"
+            type="password"
+            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
+            placeholder="Confirm new password"
+            :required="!!passwordForm.password"
+          />
+          <p v-if="formErrors.confirmPassword" class="text-xs text-red-500 mt-1">{{ formErrors.confirmPassword }}</p>
+        </div>
+        <div class="text-right">
+          <button
+            type="submit"
+            :disabled="isPasswordLoading || !passwordForm.password || formErrors.password || formErrors.confirmPassword"
+            class="inline-flex justify-center items-center px-6 py-2.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-royal-blue hover:bg-dark-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <svg v-if="isPasswordLoading" class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            {{ isPasswordLoading ? 'Saving...' : 'Change Password' }}
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { useStore } from 'vuex';
-import { validate as validateEmail } from 'email-validator'; // Use a library for email validation
+import { validate as validateEmailValidator } from 'email-validator';
+import ErrorMessage from '@components/ErrorMessage.vue';
 
 const store = useStore();
-const user = computed(() => store.state.user);
+const currentUser = computed(() => store.getters.currentUser);
 
-const form = reactive({
-  email: user.value?.email || '',
+// Form state for email
+const emailForm = reactive({
+  email: '',
+});
+const emailApiError = ref(null);
+const emailSuccessMessage = ref('');
+const isEmailLoading = ref(false);
+
+// Form state for password
+const passwordForm = reactive({
+  password: '',
+  confirmPassword: '',
+});
+const passwordApiError = ref(null);
+const passwordSuccessMessage = ref('');
+const isPasswordLoading = ref(false);
+
+const formErrors = reactive({ // Shared for client-side validation messages
+  email: '',
   password: '',
   confirmPassword: '',
 });
 
-const formErrors = ref({});
-const isLoading = ref(false);
-const errorMessage = ref('');
-const successMessage = ref('');
-
-// Track if form has changed from initial state
-const isFormChanged = computed(() => {
-    if (!user.value) return false;
-    return form.email !== user.value.email || form.password !== '';
+// Initialize form with current user data
+onMounted(() => {
+  if (currentUser.value) {
+    emailForm.email = currentUser.value.email || '';
+  }
 });
 
-// Watch user state to update form if user logs in/out while on page
-watch(user, (newUser) => {
-    if (newUser) {
-        form.email = newUser.email;
-        form.password = '';
-        form.confirmPassword = '';
-        formErrors.value = {}; // Clear errors on user change
-    }
+watch(currentUser, (newVal) => {
+  if (newVal) {
+    emailForm.email = newVal.email || '';
+  }
 });
 
-const validatePasswordStrength = (password) => {
-    if (!password) return true; // Optional field if empty
-    const errors = [];
-    if (password.length < 8) errors.push("Password must be at least 8 characters.");
-    if (!/[A-Z]/.test(password)) errors.push("Must contain an uppercase letter.");
-    if (!/[a-z]/.test(password)) errors.push("Must contain a lowercase letter.");
-    if (!/[0-9]/.test(password)) errors.push("Must contain a number.");
-    if (!/[!@#$%^&*()_+=\-[\]{};':"\\|,.<>/?~`]/.test(password)) errors.push("Must contain a special character.");
-    return errors.length === 0 ? true : errors.join(' ');
+const isEmailFormChanged = computed(() => {
+  if (!currentUser.value) return false;
+  return emailForm.email !== currentUser.value.email;
+});
+
+// --- Email Update Logic ---
+const validateEmailForm = () => {
+  formErrors.email = '';
+  if (!emailForm.email || !validateEmailValidator(emailForm.email)) {
+    formErrors.email = 'Please enter a valid email address.';
+    return false;
+  }
+  return true;
 };
 
+const handleUpdateEmail = async () => {
+  emailApiError.value = null;
+  emailSuccessMessage.value = '';
+  if (!validateEmailForm()) return;
 
-const validateForm = () => {
-    formErrors.value = {};
-    let isValid = true;
-
-    if (!form.email || !validateEmail(form.email)) {
-        formErrors.value.email = 'Please enter a valid email address.';
-        isValid = false;
+  isEmailLoading.value = true;
+  try {
+    const response = await store.dispatch('updateSettings', { email: emailForm.email });
+    if (response.status) {
+      emailSuccessMessage.value = response.status_message || 'Email updated successfully!';
+      // User data in store is updated by the action, which will update currentUser computed prop
+    } else {
+      emailApiError.value = response; // { status_message: '...' }
+       if (!emailApiError.value?.status_message) emailApiError.value = { status_message: 'Failed to update email.'};
     }
+  } catch (err) {
+    console.error('Email update system error:', err);
+    emailApiError.value = { status_message: 'An unexpected error occurred.' };
+  } finally {
+    isEmailLoading.value = false;
+  }
+};
 
-    const passwordValidation = validatePasswordStrength(form.password);
-    if (passwordValidation !== true) {
-        formErrors.value.password = passwordValidation;
-        isValid = false;
-    }
+// --- Password Change Logic ---
+const validatePasswordStrength = (password) => {
+    if (!password) return ''; // Not an error if empty, just means no change
+    const errors = [];
+    if (password.length < 8) errors.push("At least 8 characters.");
+    if (!/[A-Z]/.test(password)) errors.push("An uppercase letter.");
+    if (!/[a-z]/.test(password)) errors.push("A lowercase letter.");
+    if (!/[0-9]/.test(password)) errors.push("A number.");
+    if (!/[!@#$%^&*()_+=\-[\]{};':"\\|,.<>/?~`]/.test(password)) errors.push("A special character.");
+    return errors.length === 0 ? '' : errors.join(' ');
+};
 
-    if (form.password && form.password !== form.confirmPassword) {
-         formErrors.value.confirmPassword = 'Passwords do not match.';
-         isValid = false;
-    } else if (!form.password && form.confirmPassword) {
-        // Clear confirm password if password is removed
-        form.confirmPassword = '';
-    } else if (form.password && !form.confirmPassword) {
-         formErrors.value.confirmPassword = 'Please confirm your new password.';
-         isValid = false;
-    }
+const validatePasswordForm = () => {
+  formErrors.password = '';
+  formErrors.confirmPassword = '';
+  let isValid = true;
 
-
-    return isValid;
-}
-
-// Computed property to check overall form validity for button state
-const isValidForm = computed(() => {
-    // This re-runs validation on any form change, can be optimized
-    // but fine for simple forms.
-    const currentErrors = {};
-    let valid = true;
-     if (!form.email || !validateEmail(form.email)) {
-        currentErrors.email = 'Invalid email.'; valid = false;
-    }
-     const passValidation = validatePasswordStrength(form.password);
-     if (passValidation !== true) {
-        currentErrors.password = 'Invalid password.'; valid = false;
-     }
-     if (form.password && form.password !== form.confirmPassword) {
-        currentErrors.confirmPassword = 'Passwords mismatch.'; valid = false;
-     } else if (form.password && !form.confirmPassword) {
-         currentErrors.confirmPassword = 'Confirmation needed.'; valid = false;
-     }
-     // Only set formErrors if validation is actively triggered by submit,
-     // but use the logic here to determine validity for the button state.
-     return valid;
-});
-
-
-const submitUpdate = async () => {
-  errorMessage.value = '';
-  successMessage.value = '';
-
-  if (!validateForm()) {
-      return; // Stop if validation fails
+  if (!passwordForm.password) { // Password is required if attempting to change
+    formErrors.password = 'New password cannot be empty if you intend to change it.';
+    isValid = false;
+    return isValid; // Early exit if no new password is provided
   }
 
-  isLoading.value = true;
-
-  // Prepare payload, only include changed fields
-  const payload = {};
-  if (form.email !== user.value.email) {
-      payload.email = form.email;
-  }
-  if (form.password) {
-      payload.password = form.password;
-      // No need to send confirmPassword to backend
+  const passwordStrengthError = validatePasswordStrength(passwordForm.password);
+  if (passwordStrengthError) {
+    formErrors.password = passwordStrengthError;
+    isValid = false;
   }
 
-  if (Object.keys(payload).length === 0) {
-      successMessage.value = "No changes detected.";
-      isLoading.value = false;
+  if (passwordForm.password !== passwordForm.confirmPassword) {
+    formErrors.confirmPassword = 'Passwords do not match.';
+    isValid = false;
+  }
+  return isValid;
+};
+
+const handleChangePassword = async () => {
+  passwordApiError.value = null;
+  passwordSuccessMessage.value = '';
+
+  if (!validatePasswordForm()) return;
+  if (!passwordForm.password) { // Should be caught by validatePasswordForm, but double check
+      passwordApiError.value = { status_message: "New password cannot be empty." };
       return;
   }
 
-
+  isPasswordLoading.value = true;
   try {
-    const response = await store.dispatch('updateSettings', payload);
-
+    const response = await store.dispatch('updateSettings', { password: passwordForm.password });
     if (response.status) {
-      successMessage.value = 'Settings updated successfully!';
-      // Clear password fields after successful update
-      form.password = '';
-      form.confirmPassword = '';
-      formErrors.value = {}; // Clear errors
-      // User data in store is updated by the action
+      passwordSuccessMessage.value = response.status_message || 'Password changed successfully!';
+      passwordForm.password = '';
+      passwordForm.confirmPassword = '';
+      formErrors.password = ''; // Clear local validation error on success
+      formErrors.confirmPassword = '';
     } else {
-      errorMessage.value = response.status_message || 'Failed to update settings.';
+      passwordApiError.value = response;
+      if (!passwordApiError.value?.status_message) passwordApiError.value = { status_message: 'Failed to change password.'};
     }
-  } catch (error) {
-    console.error('Settings update error:', error);
-    errorMessage.value = 'An unexpected error occurred. Please try again later.';
+  } catch (err) {
+    console.error('Password change system error:', err);
+    passwordApiError.value = { status_message: 'An unexpected error occurred.' };
   } finally {
-    isLoading.value = false;
+    isPasswordLoading.value = false;
   }
 };
+
 </script>
 
 <style scoped>

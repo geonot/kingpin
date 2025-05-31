@@ -21,19 +21,32 @@
 <script setup>
 import { ref, watch, defineProps, defineEmits } from 'vue';
 
+import { computed } from 'vue'; // Import computed
+
 const props = defineProps({
   message: {
     type: String,
-    required: true
+    default: ''
+  },
+  error: {
+    type: Object,
+    default: null
   }
 });
 
 const emit = defineEmits(['dismiss']);
 
-const visible = ref(true);
+const displayMessage = computed(() => {
+  if (props.error) {
+    return props.error.status_message || props.error.message || 'An unknown error occurred.';
+  }
+  return props.message;
+});
 
-// Watch the message prop to automatically become visible when message changes
-watch(() => props.message, (newMessage) => {
+const visible = ref(!!displayMessage.value); // Initial visibility based on message presence
+
+// Watch the displayMessage to automatically become visible when message changes
+watch(displayMessage, (newMessage) => {
   visible.value = !!newMessage;
 });
 

@@ -58,6 +58,37 @@
       </div>
     </div>
 
+    <!-- Featured Games Section -->
+    <div class="container mx-auto mt-16 px-4">
+      <h2 class="text-3xl md:text-4xl font-semibold text-center mb-10 dark:text-gray-100">Featured Games</h2>
+      <div v-if="isLoadingGames" class="text-center dark:text-gray-300">Loading exciting games...</div>
+      <div v-if="gamesError" class="text-center text-red-500 dark:text-red-400">{{ gamesError }}</div>
+      <div v-if="!isLoadingGames && !gamesError && featuredSlots.length === 0" class="text-center dark:text-gray-400">
+        No featured games available at the moment. Check out all our <router-link to="/slots" class="text-royal-blue dark:text-light-purple hover:underline">slots</router-link>!
+      </div>
+      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+        <router-link
+          v-for="slot in featuredSlots"
+          :key="slot.id"
+          :to="{ name: 'Slot', params: { id: slot.id } }"
+          class="featured-slot-card block bg-white dark:bg-dark-card rounded-lg shadow-md hover:shadow-xl dark:hover:shadow-lg dark:hover:shadow-light-purple/20 overflow-hidden transform transition-all duration-300 hover:-translate-y-1 group"
+        >
+          <div class="h-40 md:h-48 w-full overflow-hidden">
+            <img v-if="getSlotImageUrl(slot)" :src="getSlotImageUrl(slot)" :alt="slot.name" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110">
+            <div v-else class="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-300 to-gray-400 dark:from-gray-700 dark:to-gray-800">
+              <i class="fas fa-image text-5xl opacity-50 text-gray-500 dark:text-gray-400"></i>
+            </div>
+          </div>
+          <div class="p-4">
+            <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-1 truncate group-hover:text-royal-blue dark:group-hover:text-light-purple transition-colors">
+              {{ slot.name }}
+            </h3>
+            <!-- <p class="text-gray-600 dark:text-gray-400 text-xs line-clamp-2">{{ slot.description || 'Exciting slot adventure!' }}</p> -->
+          </div>
+        </router-link>
+      </div>
+    </div>
+
      <!-- Call to Action Section (Optional) -->
      <div class="mt-20 mb-10 text-center px-4">
        <h3 class="text-2xl md:text-3xl font-semibold mb-6 dark:text-gray-100">Ready to Spin and Win?</h3>
@@ -72,37 +103,69 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useStore } from 'vuex';
-// If using FontAwesome, ensure it's properly set up
-// import '@fortawesome/fontawesome-free/css/all.css'; // Example import
+// Assuming FontAwesome is globally available or imported in main.js
+// For utility classes like btn-primary, btn-secondary, ensure they are defined globally (e.g. in styles.css or via Tailwind config)
 
 const store = useStore();
 const isAuthenticated = computed(() => store.getters.isAuthenticated);
 
-// No specific logic needed for this simple home page currently
+const featuredSlots = ref([]);
+const isLoadingGames = ref(false);
+const gamesError = ref(null);
+
+const getSlotImageUrl = (slot) => {
+  if (slot.thumbnail_url) return slot.thumbnail_url;
+  if (slot.short_name) {
+    return `/public/${slot.short_name}/background.png`; // Adjust path if Vite serves public differently
+  }
+  return null; // Or a path to a generic placeholder image
+};
+
+onMounted(async () => {
+  isLoadingGames.value = true;
+  gamesError.value = null;
+  try {
+    // fetchSlots action returns { status, slots, status_message }
+    const response = await store.dispatch('fetchSlots');
+    if (response.status && response.slots) {
+      // Filter for active slots and take the first 4 for example
+      featuredSlots.value = response.slots.filter(slot => slot.is_active).slice(0, 4);
+    } else if (!response.status) {
+      // Do not display specific API error on homepage, just log it.
+      console.warn('Failed to fetch slots for homepage:', response.status_message);
+      // gamesError.value = response.status_message || "Could not load featured games.";
+    }
+  } catch (error) {
+    console.error('Error fetching slots for homepage:', error);
+    // gamesError.value = "An unexpected error occurred while loading games.";
+  } finally {
+    isLoadingGames.value = false;
+  }
+});
 </script>
 
 <style scoped>
 .hero {
-  /* Add specific hero styles if needed, like background attachments */
+  /* Specific hero styles, e.g., background image if not using gradient classes */
+  /* background-image: url('@/assets/hero-background.jpg');
+  background-size: cover;
+  background-position: center; */
 }
 
-.feature-card {
-  /* Add styles for card icons if not using an icon library */
+.feature-card i { /* If using FontAwesome and want to ensure size/alignment */
+  /* font-size: 3rem; */ /* Already handled by text-5xl */
 }
 
-.btn-primary {
-  @apply bg-gold text-royal-purple font-semibold py-2 px-4 rounded hover:bg-dark-gold transition-colors duration-200;
+.featured-slot-card {
+  /* Add any specific styling for featured slot cards if needed */
 }
 
-.btn-secondary {
-   @apply bg-royal-blue text-white font-semibold py-2 px-4 rounded hover:bg-dark-blue transition-colors duration-200;
-}
-
-/* Add FontAwesome CDN or setup locally if using icons */
-/* Example CDN link (add to public/index.html):
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" ... />
+/* Removed scoped .btn-primary and .btn-secondary as they should use global styles from assets/styles.css or Tailwind utility classes */
+/* Ensure your global button styles or Tailwind classes provide the desired appearance for:
+   - Hero CTA: uses .btn-primary
+   - Secondary CTA: uses .btn-secondary
 */
 </style>
 

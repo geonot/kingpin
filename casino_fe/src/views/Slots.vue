@@ -22,13 +22,10 @@
     </div>
 
     <!-- Error message -->
-    <div v-else-if="error" class="bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-100 px-6 py-4 rounded-md my-8 shadow">
-      <strong class="font-bold">Oops!</strong>
-      <span class="block sm:inline ml-2">{{ error }}</span>
-    </div>
+    <error-message :error="errorObject" @dismiss="errorObject = null" class="my-8" />
 
     <!-- Empty state -->
-    <div v-else-if="filteredSlots.length === 0" class="text-center my-20 py-10 bg-gray-50 dark:bg-gray-800 rounded-lg shadow">
+    <div v-if="!loading && !errorObject && filteredSlots.length === 0" class="text-center my-20 py-10 bg-gray-50 dark:bg-gray-800 rounded-lg shadow">
       <i class="fas fa-ghost text-5xl text-gray-400 dark:text-gray-500 mb-4"></i>
       <p v-if="search" class="text-xl text-gray-600 dark:text-gray-300">
         No slots found matching "<strong>{{ search }}</strong>".
@@ -49,8 +46,10 @@
         <!-- Placeholder for Slot Image -->
         <div class="h-48 bg-gradient-to-br from-gray-300 to-gray-400 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400">
            <!-- Use actual image if available: <img :src="slot.thumbnail_url || defaultThumbnail" alt="" class="w-full h-full object-cover"> -->
-           <i class="fas fa-image text-6xl opacity-50"></i>
-           <span class="ml-2">Image for {{ slot.name }}</span>
+           <img v-if="getSlotImageUrl(slot)" :src="getSlotImageUrl(slot)" :alt="slot.name" class="w-full h-full object-cover">
+           <div v-else class="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-300 to-gray-400 dark:from-gray-700 dark:to-gray-800">
+            <i class="fas fa-image text-6xl opacity-50 text-gray-500 dark:text-gray-400"></i>
+           </div>
         </div>
         <div class="p-5">
           <h3 class="text-xl font-semibold text-gray-800 dark:text-white mb-2 truncate group-hover:text-royal-blue dark:group-hover:text-light-purple transition-colors">
@@ -86,15 +85,17 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useStore } from 'vuex';
+import ErrorMessage from '@components/ErrorMessage.vue'; // Import ErrorMessage
+
 // Ensure FontAwesome is loaded (e.g., via main.js or index.html)
 
 const store = useStore();
 const search = ref('');
 const loading = ref(true);
-const error = ref(null);
+const errorObject = ref(null); // Changed from error to errorObject
 
 // Access state using computed
-const slots = computed(() => store.state.slots);
+const slots = computed(() => store.getters.getSlots); // Use getter
 
 // Filtered slots based on search input
 const filteredSlots = computed(() => {
@@ -112,20 +113,36 @@ const filteredSlots = computed(() => {
 
 // Fetch slots when component is mounted
 onMounted(async () => {
+  loading.value = true;
+  errorObject.value = null;
   try {
-    loading.value = true;
-    error.value = null;
-    // Only fetch if not already loaded, or implement cache expiry
-    if (!store.state.slotsLoaded) {
-        await store.dispatch('fetchSlots');
+    // fetchSlots action now returns an object like { status, slots, status_message }
+    const response = await store.dispatch('fetchSlots');
+    if (!response.status) {
+      errorObject.value = response; // Store the error object { status, status_message }
     }
-  } catch (err) {
-    error.value = 'Failed to load slot games. Please refresh the page or try again later.';
-    console.error('Error loading slots:', err);
+    // Slots are committed to store by the action itself if successful
+  } catch (err) { // Catch unexpected errors during dispatch
+    console.error('System error loading slots:', err);
+    errorObject.value = { status_message: 'Failed to load slot games due to a system error.' };
   } finally {
     loading.value = false;
   }
 });
+
+const getSlotImageUrl = (slot) => {
+  // Prioritize thumbnail_url if it exists in slot data from API
+  if (slot.thumbnail_url) return slot.thumbnail_url;
+  // Fallback to constructing path from short_name
+  if (slot.short_name) {
+    // In Vite, public assets are served from the root.
+    // If assets are in public/slot1/background.png, then path is /slot1/background.png
+    // This assumes a consistent naming convention.
+    return `/public/${slot.short_name}/background.png`;
+  }
+  // Further fallback or generic placeholder handled in template
+  return null;
+};
 </script>
 
 <style scoped>

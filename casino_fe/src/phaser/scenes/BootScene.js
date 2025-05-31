@@ -7,135 +7,122 @@ export default class BootScene extends Phaser.Scene {
     super({ key: 'BootScene' });
   }
 
-  // No preload needed here, moved to PreloadScene
   preload() {
-     // Display a simple loading message during boot
-     this.add.text(
-        this.cameras.main.width / 2,
-        this.cameras.main.height / 2,
-        'Booting Game...',
-        {
-          font: '24px Arial',
-          fill: '#ffffff'
-        }
-      ).setOrigin(0.5);
+    // Display a simple loading message during boot
+    this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      'Booting Game...',
+      { font: '24px Arial', fill: '#ffffff' }
+    ).setOrigin(0.5);
 
-     // Load the game config JSON needed for PreloadScene
-     // Get slotId from registry (passed from Vue component)
-     const slotId = this.registry.get('slotId'); // Use registry now
-     
-     // If slotId is not available yet, wait for it to be set
-     if (!slotId) {
-        console.warn("BootScene: Slot ID not found in registry yet. Waiting for it to be set...");
-        
-        // Create a registry change listener to detect when slotId is set
-        const registryChangeHandler = (key, data) => {
-          if (key === 'slotId' && data) {
-            console.log(`BootScene: Slot ID ${data} received from registry update.`);
-            this.registry.events.off('changedata', registryChangeHandler);
-            this.loadSlotConfig(data);
-          }
-        };
-        
-        this.registry.events.on('changedata', registryChangeHandler);
-        
-        // Set a timeout to handle the case where slotId is never set
-        this.time.delayedCall(5000, () => {
-          if (!this.registry.get('slotId')) {
-            console.error("BootScene: Timed out waiting for Slot ID!");
-            this.registry.events.off('changedata', registryChangeHandler);
-            EventBus.$emit('phaserError', 'Configuration error: Slot ID missing after timeout.');
-            this.scene.stop();
-          }
-        });
-        
-        return;
-     }
-     
-     // If slotId is available immediately, load the config
-     this.loadSlotConfig(slotId);
-  }
-  
-  loadSlotConfig(slotId) {
-      // Construct config path using asset_dir convention
-      const configPath = `/slot${slotId}/gameConfig.json`;
-      this.load.json(`gameConfig_${slotId}`, configPath); // Use unique key per slot
-
-      // Load common UI assets needed early (like loading bar background)
-      this.load.image('loader-bg', '/assets/ui/loader_bg.png');
-      this.load.image('loader-fill', '/assets/ui/loader_fill.png');
-      
-      // Start loading
-      this.load.start();
+    // Load common UI assets needed for the PreloadScene's loading bar
+    // These paths should be absolute or relative to the game's base URL.
+    // Assuming they are in the public/assets/ui directory.
+    this.load.image('loader-bg', '/assets/ui/loader_bg.png');
+    this.load.image('loader-fill', '/assets/ui/loader_fill.png');
   }
 
   create() {
     console.log('BootScene: Create');
+    // Slot.vue is responsible for fetching the slot configuration (slotInfo)
+    // and passing it to Phaser through the registry as 'slotConfigData'.
+    // It also passes 'slotId'.
+
     const slotId = this.registry.get('slotId');
-    
-    // If slotId is still not available, we'll wait for the registry change event in preload
-    if (!slotId) {
-      console.warn('BootScene: Create called but slotId still not available in registry');
+    const slotConfigData = this.registry.get('slotConfigData'); // This is the parsed gameConfig.json content
+
+    if (!slotId || !slotConfigData) {
+      const errorMessage = 'Critical Error: Slot ID or Slot Configuration Data not found in registry.';
+      console.error(`BootScene: ${errorMessage}`);
+      this.showError(errorMessage);
+      // Potentially emit an event to Vue to handle this critical failure
+      const eventBus = this.registry.get('eventBus') || EventBus; // Fallback to imported EventBus
+      if (eventBus) {
+        eventBus.emit('phaserError', errorMessage);
+      }
+      this.scene.stop(); // Stop further scene processing
       return;
     }
     
-    const configKey = `gameConfig_${slotId}`;
+    // The slotConfigData should already be the object that was gameConfig.json's content.
+    // If slotConfigData is the full slot object from backend (which includes short_name, etc.),
+    // and the actual game config is a sub-object (e.g., slotConfigData.game_config_json), adjust accordingly.
+    // Based on Slot.vue, slotInfo (which becomes slotConfigData) is the direct content of gameConfig.json.
+    // So, slotConfigData itself is what we need for gameConfig.
 
-    try {
-        // Check if the config is loaded
-        if (!this.cache.json.exists(configKey)) {
-            console.warn(`BootScene: Game config for slot ${slotId} not loaded yet. Waiting for load to complete.`);
-            
-            // Set up a one-time event listener for when the file loads
-            this.load.once('filecomplete-json-' + configKey, () => {
-                console.log(`BootScene: Game config for slot ${slotId} loaded asynchronously.`);
-                this.processGameConfig(slotId);
-            });
-            
-            // Set a timeout in case the load never completes
-            this.time.delayedCall(5000, () => {
-                if (!this.cache.json.exists(configKey)) {
-                    console.error(`BootScene: Timed out waiting for game config to load for slot ${slotId}`);
-                    this.showError('Timed out waiting for game configuration to load.');
-                }
-            });
-            
-            return;
-        }
-        
-        // If we get here, the config is already loaded, so process it
-        this.processGameConfig(slotId);
+    // Ensure 'gameConfig' in registry is the specific 'game' object from the JSON structure.
+    // The current Slot.vue passes the entire slot object from the store as slotConfigData.
+    // The actual game design config (reels, symbols, paylines) is typically a part of this.
+    // Let's assume slotConfigData *is* the game configuration object (equivalent to gameConfig.json's content)
+    // And that it has a 'game' property as per original BootScene structure.
 
-    } catch (error) {
-        console.error('Error in BootScene create:', error);
-        this.showError(`Error loading configuration: ${error.message}`);
+    // If slotConfigData is the result from /api/slots/:id (which includes name, description, short_name, AND the game config content)
+    // we need to extract the actual game config part.
+    // Let's assume Slot.vue sets `slotConfigData` to be the direct JSON content that was in `public/slotX/gameConfig.json`
+
+    let gameSpecificConfig;
+    if (slotConfigData.game && typeof slotConfigData.game === 'object') {
+        // This implies slotConfigData was an object like { "game": {...}, "other_meta_data_from_slot_model": ... }
+        // This was the structure expected by the old BootScene if it loaded the config itself.
+        // If Slot.vue sets slotConfigData to the content of gameConfig.json (which is game_config.game from backend model),
+        // then slotConfigData *is* gameSpecificConfig.
+        gameSpecificConfig = slotConfigData.game;
+    } else if (slotConfigData.layout && slotConfigData.symbols) {
+        // This implies slotConfigData is already the "game" object itself.
+        gameSpecificConfig = slotConfigData;
+    } else {
+        const errorMessage = 'Critical Error: Invalid Slot Configuration Data structure in registry.';
+        console.error(`BootScene: ${errorMessage}`, slotConfigData);
+        this.showError(errorMessage);
+        const eventBus = this.registry.get('eventBus') || EventBus;
+        if (eventBus) eventBus.emit('phaserError', errorMessage);
+        this.scene.stop();
+        return;
     }
-  }
-  
-  processGameConfig(slotId) {
-    const configKey = `gameConfig_${slotId}`;
-    
-    try {
-        const gameConfigData = this.cache.json.get(configKey);
-        if (!gameConfigData) {
-            throw new Error('Failed to load game config');
-        }
-        console.log(`BootScene: Game config for slot ${slotId} loaded successfully.`);
 
-        // Store loaded config in the registry for other scenes
-        this.registry.set('gameConfig', gameConfigData.game); // Store only the 'game' object
-
-        // Set default settings in registry if not already set
-        this.registry.set('soundEnabled', this.registry.get('soundEnabled') ?? gameConfigData.game.settings.soundDefault ?? true);
-        this.registry.set('turboEnabled', this.registry.get('turboEnabled') ?? gameConfigData.game.settings.turboDefault ?? false);
-
-        // Start the PreloadScene, passing the config key (or let PreloadScene get from registry)
-        console.log('BootScene: Starting PreloadScene...');
-        this.scene.start('PreloadScene'); // PreloadScene will get config from registry
-    } catch (error) {
-        console.error('Error processing game config:', error);
-        this.showError(`Error processing configuration: ${error.message}`);
+    if (!gameSpecificConfig) {
+        const errorMessage = 'Critical Error: Game specific configuration (reels, symbols, etc.) is missing.';
+        console.error(`BootScene: ${errorMessage}`, slotConfigData);
+        this.showError(errorMessage);
+        const eventBus = this.registry.get('eventBus') || EventBus;
+        if (eventBus) eventBus.emit('phaserError', errorMessage);
+        this.scene.stop();
+        return;
     }
+
+    this.registry.set('gameConfig', gameSpecificConfig);
+    // Also store short_name if available at the root of slotConfigData (from Slot.vue's slotInfo) for PreloadScene
+    if (slotConfigData.short_name) {
+        this.registry.set('slotShortName', slotConfigData.short_name);
+    } else if (gameSpecificConfig.short_name) { // Or if it's inside the game object
+         this.registry.set('slotShortName', gameSpecificConfig.short_name);
+    } else {
+        // Fallback or error if short_name is essential for asset paths and not found
+        console.warn("BootScene: slotShortName not found in slotConfigData. Asset paths might be incorrect if they rely on it.");
+        // Attempt to derive from slotId if convention is /slotX/
+        this.registry.set('slotShortName', `slot${slotId}`);
+    }
+
+
+    // Set default sound/turbo settings from game config, respecting values already in registry (passed from Vue)
+    const soundEnabled = this.registry.get('soundEnabled');
+    const turboEnabled = this.registry.get('turboEnabled');
+
+    if (soundEnabled === undefined && gameSpecificConfig.settings?.soundDefault !== undefined) {
+      this.registry.set('soundEnabled', gameSpecificConfig.settings.soundDefault);
+    } else if (soundEnabled === undefined) {
+      this.registry.set('soundEnabled', true); // Default true if not in config or Vue
+    }
+
+    if (turboEnabled === undefined && gameSpecificConfig.settings?.turboDefault !== undefined) {
+      this.registry.set('turboEnabled', gameSpecificConfig.settings.turboDefault);
+    } else if (turboEnabled === undefined) {
+      this.registry.set('turboEnabled', false); // Default false if not in config or Vue
+    }
+
+    console.log('BootScene: Configuration processed. Starting PreloadScene...');
+    this.scene.start('PreloadScene');
   }
   
   showError(message) {

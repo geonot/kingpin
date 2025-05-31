@@ -1,7 +1,4 @@
-/* Import Tailwind base, components, and utilities */
-@import 'tailwindcss/base';
-@import 'tailwindcss/components';
-@import 'tailwindcss/utilities';
+/* Tailwind directives are expected to be in tailwind.css, not re-imported here. */
 
 /* Import Fonts (Ensure they are linked in index.html or configured with webpack/vite) */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
@@ -159,6 +156,46 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Add styles for custom scrollbar if desired */
 /* (Scrollbar styles from App.vue are already global, no need to repeat here unless preferred) */
+
+/* Page transition styles (moved from App.vue) */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Custom Scrollbar styles (moved from App.vue) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1; /* Light mode track */
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #888; /* Light mode thumb */
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555; /* Light mode thumb hover */
+}
+
+/* Dark mode scrollbar styles */
+.dark ::-webkit-scrollbar-track {
+  background: #2d2d44; /* Darker track for dark mode */
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #555; /* Slightly lighter thumb for dark mode */
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #777; /* Dark mode thumb hover */
+}
+
 
 /* Fix potential issues with focus rings */
 *:focus {
