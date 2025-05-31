@@ -27,7 +27,7 @@ app.config.from_object(Config)
 
 # --- Database Setup ---
 db.init_app(app)
-migrate = Migrate(app, db)
+migrate = Migrate(app, db, directory='casino_be/migrations')
 
 # --- JWT Setup ---
 jwt = JWTManager(app)

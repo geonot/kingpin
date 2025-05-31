@@ -60,9 +60,10 @@ elif ini_url:
     # URL is already set from ini file, no need to set it again
     logger.info(f"Using database URL from alembic.ini: {ini_url}")
 else:
-    logger.error("Database URL not found in Flask config or alembic.ini. Please configure 'sqlalchemy.url'.")
+    logger.warning("Database URL not found in Flask config or alembic.ini. Defaulting to SQLite for migration generation.")
     # Optionally, raise an error or exit
-    raise ValueError("Missing database URL configuration for Alembic.")
+    # raise ValueError("Missing database URL configuration for Alembic.")
+    config.set_main_option('sqlalchemy.url', 'sqlite:///./_alembic_dummy.db')
 
 
 # --- Rest of the env.py (mostly standard) ---
