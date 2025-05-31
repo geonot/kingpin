@@ -1,0 +1,30 @@
+*actor with id
+  ~inbox takes *msg
+    call msg type with msg value
+
+*teller *actor
+  ~deposit takes (id as uuid, aid as uuid, amount as integer)
+    gain amount to balance on *account aid from *customer id from **bank
+  ~withdraw takes (id as uuid, aid as uuid, amount as integer)
+    amount <= balance on *account aid from *customer id from **bank ?
+      lose amount from balance on *account aid from *customer id from **bank
+      return amount
+    return 1 'insufficient funds'
+
+*account with id and balance
+*customer with id and name
+**bank with (*customer with &*account) and *teller
+
+
+*data with id, **db
+  ~~ id db get * me     
+  ~save ~ db save me
+
+*account *data with id and balance
+
+b is *customer brandon
+acc is *account 100
+teller is *teller
+**bank owns teller                 #bank autosaves
+**bank owns (b with acc)           #bank autosaves
+

@@ -1,0 +1,177 @@
+/* Import Tailwind base, components, and utilities */
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Import Fonts (Ensure they are linked in index.html or configured with webpack/vite) */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap'); /* Example secondary font */
+
+/* Define CSS variables for easier theme management */
+:root {
+  /* Light Mode Colors */
+  --color-text-primary: #1f2937; /* gray-800 */
+  --color-text-secondary: #4b5563; /* gray-600 */
+  --color-bg-primary: #f9fafb; /* gray-50 */
+  --color-bg-secondary: #ffffff; /* white */
+  --color-accent: #4B0082; /* royal-purple */
+  --color-accent-hover: #3a0068;
+  --color-highlight: #FFD700; /* gold */
+  --color-border: #e5e7eb; /* gray-200 */
+
+  /* Define brand colors */
+  --brand-royal-purple: #4B0082;
+  --brand-gold: #FFD700;
+  --brand-silver: #C0C0C0;
+  --brand-royal-blue: #4169E1;
+  --brand-dark-gold: #B8860B;
+  --brand-dark-blue: #1F3A93;
+  --brand-light-purple: #9370DB;
+  --brand-success: #27AE60;
+  --brand-warning: #E74C3C;
+}
+
+.dark {
+  /* Dark Mode Colors */
+  --color-text-primary: #e5e7eb; /* gray-200 */
+  --color-text-secondary: #9ca3af; /* gray-400 */
+  --color-bg-primary: #1a1a2e; /* custom dark */
+  --color-bg-secondary: #16213e; /* custom dark card */
+  --color-accent: #9370DB; /* light-purple */
+  --color-accent-hover: #7e57c2;
+  --color-highlight: #FFD700; /* gold */
+  --color-border: #4b5563; /* gray-600 */
+}
+
+/* Apply base styles */
+body {
+  @apply font-sans transition-colors duration-300;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: 'Poppins', sans-serif; /* Ensure font is applied */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Global component styles using @apply (optional, can use direct CSS) */
+.btn {
+  @apply inline-block px-5 py-2 rounded-md font-semibold text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply btn focus:outline-none;
+  background-color: var(--color-highlight);
+  color: var(--color-accent);
+  &:hover {
+    background-color: var(--brand-dark-gold);
+  }
+  &:focus {
+    box-shadow: 0 0 0 2px var(--color-highlight);
+  }
+  /* Dark mode specific styles if needed */
+  /* .dark & {
+    background-color: var(--color-highlight);
+    color: #1a202c;
+    &:hover {
+      background-color: #ecc94b;
+    }
+  } */
+}
+
+.btn-secondary {
+  @apply btn;
+  background-color: var(--color-accent);
+  color: white;
+  &:hover {
+    background-color: var(--color-accent-hover);
+  }
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent);
+  }
+  /* Dark mode specific styles */
+  .dark & {
+    background-color: var(--brand-light-purple);
+    &:hover {
+      background-color: #9f7aea; /* purple-500 */
+    }
+    &:focus {
+      box-shadow: 0 0 0 2px var(--brand-light-purple);
+    }
+  }
+}
+.btn-outline-gold {
+     @apply btn border;
+     border-color: var(--color-highlight);
+     color: var(--color-highlight);
+     &:hover {
+         background-color: var(--color-highlight);
+         color: var(--color-accent);
+     }
+     &:focus {
+         outline: none;
+         box-shadow: 0 0 0 2px var(--color-highlight);
+     }
+}
+
+.card {
+    @apply p-6 rounded-lg shadow-md transition-shadow duration-300;
+    background-color: var(--color-bg-secondary);
+}
+
+/* Custom global styles */
+h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold; /* Example global heading style */
+}
+
+/* Alert styles (if not using a component library) */
+.alert-success {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: #047857; /* text-green-700 */
+  background-color: #d1fae5; /* bg-green-100 */
+  border-radius: 0.5rem;
+  border: 1px solid #6ee7b7; /* border-green-300 */
+  
+  .dark & {
+    background-color: #064e3b; /* dark:bg-green-900 */
+    color: #6ee7b7; /* dark:text-green-300 */
+    border-color: #059669; /* dark:border-green-600 */
+  }
+}
+
+.alert-error {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: #b91c1c; /* text-red-700 */
+  background-color: #fee2e2; /* bg-red-100 */
+  border-radius: 0.5rem;
+  border: 1px solid #fca5a5; /* border-red-300 */
+  
+  .dark & {
+    background-color: #7f1d1d; /* dark:bg-red-900 */
+    color: #fca5a5; /* dark:text-red-300 */
+    border-color: #dc2626; /* dark:border-red-600 */
+  }
+}
+
+/* Add styles for custom scrollbar if desired */
+/* (Scrollbar styles from App.vue are already global, no need to repeat here unless preferred) */
+
+/* Fix potential issues with focus rings */
+*:focus {
+  /* outline: none; */ /* Avoid removing outline for accessibility */
+  /* If removing outline, ensure focus state is visually distinct */
+}
+*:focus-visible {
+   /* Use focus-visible for keyboard users */
+   outline: none;
+   box-shadow: 0 0 0 2px var(--brand-royal-blue), 0 0 0 4px white;
+   .dark & {
+     box-shadow: 0 0 0 2px var(--brand-light-purple), 0 0 0 4px #1a1a2e;
+   }
+}
+
+

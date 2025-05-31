@@ -1,0 +1,8 @@
+Flask==2.0.1
+Flask-JWT-Extended==4.4.3
+Flask-Migrate==3.1.0
+Flask-SQLAlchemy==2.5.1
+cryptography==3.4.7
+bitcoin==1.1.42
+marshmallow==3.11.1
+
