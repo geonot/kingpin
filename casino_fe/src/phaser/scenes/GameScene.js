@@ -43,21 +43,27 @@ export default class GameScene extends Phaser.Scene {
   create() {
     console.log('GameScene: Create');
     this.gameConfig = this.registry.get('gameConfig');
-    this.slotId = this.registry.get('slotId');
-    this.turboSpinEnabled = this.registry.get('turboEnabled');
-    this.soundEnabled = this.registry.get('soundEnabled');
-    // Apply initial sound setting
+    this.slotId = this.registry.get('slotId'); // Though slotId might not be directly used if gameConfig has all info
+    this.turboSpinEnabled = this.registry.get('turboEnabled') ?? false;
+    this.soundEnabled = this.registry.get('soundEnabled') ?? true;
+    // User balance might be needed for some UI elements directly in GameScene, or passed to win displays
+    // this.userBalance = this.registry.get('userBalance') ?? 0;
+    this.eventBus = this.registry.get('eventBus'); // Get the event bus instance
+
+    if (!this.eventBus) {
+        console.warn("GameScene: EventBus not found in registry. Using fallback import.");
+        this.eventBus = EventBus; // Fallback, assuming global import works
+    }
+
     this.sound.mute = !this.soundEnabled;
 
-
-    if (!this.gameConfig || !this.slotId) {
-        console.error("GameScene: Missing game configuration or Slot ID!");
-        // Handle error appropriately
-        EventBus.$emit('phaserError', 'Game initialization failed: Missing configuration.');
+    if (!this.gameConfig) { // slotId might not be strictly necessary if gameConfig is self-contained
+        console.error("GameScene: Missing game configuration!");
+        this.eventBus.emit('phaserError', 'Game initialization failed: Missing game configuration.');
         return;
     }
 
-    this.symbolSize = this.gameConfig.reel.symbolSize || { width: 100, height: 100 };
+    this.symbolSize = this.gameConfig.reel?.symbolSize || { width: 100, height: 100 };
     const { rows, columns } = this.gameConfig.layout;
     const totalReelWidth = columns * this.symbolSize.width + (columns - 1) * (this.gameConfig.reel.reelSpacing || 0);
     const totalReelHeight = rows * this.symbolSize.height + (rows - 1) * (this.gameConfig.reel.symbolSpacing || 0);
@@ -84,21 +90,33 @@ export default class GameScene extends Phaser.Scene {
     this.createPaylineGraphics(); // Graphics object for drawing lines
     this.createWinDisplay(); // Text object for showing win amounts
 
-    // --- Event Listeners ---
-    // Listen for settings changes from SettingsModalScene or Vue
-    EventBus.$on('turboSettingChanged', (isEnabled) => {
-      this.turboSpinEnabled = isEnabled;
-      console.log('GameScene: Turbo spin set to', this.turboSpinEnabled);
-    });
-     EventBus.$on('soundSettingChanged', (isEnabled) => {
-      this.soundEnabled = isEnabled;
-      this.sound.mute = !this.soundEnabled;
-      console.log('GameScene: Sound set to', this.soundEnabled ? 'ON' : 'OFF');
+    // --- Event Listeners from Vue ---
+    this.eventBus.on('startSpinAnimationCommand', this.startReelSpinAnimation, this);
+    this.eventBus.on('updateSettingsInPhaser', (settings) => {
+        if (settings.soundEnabled !== undefined) {
+            this.soundEnabled = settings.soundEnabled;
+            this.sound.mute = !this.soundEnabled;
+            console.log('GameScene: Sound setting updated from Vue to', this.soundEnabled ? 'ON' : 'OFF');
+        }
+        if (settings.turboEnabled !== undefined) {
+            this.turboSpinEnabled = settings.turboEnabled;
+            console.log('GameScene: Turbo spin updated from Vue to', this.turboSpinEnabled);
+        }
     });
 
+    // Listener for settings changes from SettingsModalScene (if it emits directly to Phaser scenes)
+    // This might be redundant if SettingsModalScene emits to Vue, and Vue emits updateSettingsInPhaser
+    // For now, we assume Vue is the central dispatcher for settings.
+    // this.scene.get('SettingsModalScene').events.on('settingsChanged', (settings) => {
+    //    this.soundEnabled = settings.sound;
+    //    this.sound.mute = !this.soundEnabled;
+    //    this.turboSpinEnabled = settings.turbo;
+    // });
+
+
     console.log('GameScene: Ready.');
-    // Notify Vue that Phaser is ready (if needed)
-    // EventBus.$emit('phaserReady');
+    // Notify Vue that Phaser GameScene is ready (if Slot.vue needs to know)
+    // this.eventBus.emit('phaserGameSceneReady');
   }
 
   createBackground() {
@@ -126,20 +144,22 @@ export default class GameScene extends Phaser.Scene {
 
     for (let c = 0; c < cols; c++) {
       const reelX = startX + c * (symbolSize.width + reelSpacing);
-      const reelContainer = this.add.container(reelX, startY); // Container for this column
+      const reelContainer = this.add.container(reelX, startY);
       this.reelContainers.push(reelContainer);
 
-      const currentReelSymbols = []; // Array to hold symbol objects for this reel
+      const currentReelSymbols = [];
+      const availableSymbolIds = this.gameConfig.symbols.map(s => s.id); // Get actual symbol IDs
 
       for (let i = 0; i < totalSymbolsPerReel; i++) {
-        const randomSymbolId = Phaser.Math.Between(1, this.gameConfig.symbol_count); // Use internal IDs 1 to N
-        const symbolY = i * (symbolSize.height + symbolSpacing); // Position symbols vertically within the container
+        // Select a random symbol ID from the actual available symbols
+        const randomSymbolId = Phaser.Utils.Array.GetRandom(availableSymbolIds);
+        const symbolY = i * (symbolSize.height + symbolSpacing);
 
         const symbol = this.add.image(symbolSize.width / 2, symbolY + symbolSize.height / 2, `symbol_${randomSymbolId}`)
           .setDisplaySize(symbolSize.width, symbolSize.height)
-          .setOrigin(0.5); // Center origin
+          .setOrigin(0.5);
 
-        reelContainer.add(symbol); // Add symbol to the container
+        reelContainer.add(symbol);
         currentReelSymbols.push(symbol);
 
         // Map visible symbols for easy access [col, row]
@@ -242,60 +262,48 @@ export default class GameScene extends Phaser.Scene {
 
  // --- Spin Logic ---
 
-  handleSpinResult(response) {
-      console.log('GameScene received spin result:', response);
-      this.lastSpinResponse = response; // Store for later use (win display)
-      const spinResultGrid = response.result; // The final grid state
+  // This method is triggered by an event from Slot.vue, e.g., 'startSpinAnimationCommand'
+  // It receives the final grid and win data.
+  startReelSpinAnimation({ finalGrid, winningLinesData, totalWinAmountSats }) {
+    if (this.isSpinning) {
+        console.warn("GameScene: Already spinning, ignoring new spin command.");
+        return;
+    }
+    this.isSpinning = true;
+    this.clearWinAnimations();
 
-      if (!spinResultGrid || spinResultGrid.length !== this.gridConfig.rows) {
-          console.error('Invalid spin result grid received:', spinResultGrid);
-          this.isSpinning = false; // Reset spinning state
-          return;
-      }
+    // Reset win display in UI Scene
+    this.eventBus.emit('lineWinUpdate', { winAmount: 0, isScatter: false });
 
-      // Format result if needed (ensure it's [rows][cols])
-      const targetGrid = this.formatSpinResult(spinResultGrid);
-      const transposedTargetGrid = this.transposeMatrix(targetGrid); // Get [cols][rows] for reel processing
+    this.playSound(this.gameConfig.sound?.spinEffect || 'spin');
 
-      // Start the spinning animation sequence
-      this.startReelSpinAnimation(transposedTargetGrid);
+    const spinReelDuration = this.turboSpinEnabled ? REEL_SPIN_DURATION_TURBO : REEL_SPIN_DURATION_BASE;
+    const numReels = this.gridConfig.cols;
+    let completedReels = 0;
+
+    // Ensure finalGrid is in [cols][rows] format for easier processing per reel
+    const transposedFinalGrid = this.transposeMatrix(finalGrid); // if finalGrid is [rows][cols]
+
+    this.reels.forEach((reelSymbols, reelIndex) => {
+      this.time.delayedCall(reelIndex * REEL_START_DELAY, () => {
+        this.spinReel(
+          reelIndex,
+          reelSymbols,
+          spinReelDuration,
+          transposedFinalGrid[reelIndex], // Pass the target symbols for this specific reel
+          () => { // onCompleteCallback for this individual reel
+            completedReels++;
+            this.playSound(this.gameConfig.sound?.reelStopEffect || 'reelStop');
+            if (completedReels === numReels) {
+              this.onAllReelsStopped(winningLinesData, totalWinAmountSats);
+            }
+          }
+        );
+      });
+    });
   }
 
-  startReelSpinAnimation(transposedTargetGrid) {
-      if (this.isSpinning) return; // Prevent overlap
-      this.isSpinning = true;
-
-      this.clearWinAnimations(); // Clear previous win effects
-      
-      // Reset win display in UI Scene when starting a new spin
-      EventBus.$emit('lineWinUpdate', {
-          winAmount: 0,
-          isScatter: false
-      });
-      
-      this.playSound('spin');
-
-      const spinDuration = this.turboSpinEnabled ? REEL_SPIN_DURATION_TURBO : REEL_SPIN_DURATION_BASE;
-      const numReels = this.gridConfig.cols;
-      let completedReels = 0;
-
-      // Start all reels spinning with a stagger
-      this.reels.forEach((reelSymbols, reelIndex) => {
-          this.time.delayedCall(reelIndex * REEL_START_DELAY, () => {
-              this.spinReel(reelIndex, reelSymbols, spinDuration, transposedTargetGrid[reelIndex], () => {
-                  // Callback when this specific reel finishes its stopping animation
-                  completedReels++;
-                  this.playSound('reelStop');
-                  if (completedReels === numReels) {
-                      this.onAllReelsStopped(); // All reels have visually stopped
-                  }
-              });
-          });
-      });
-  }
-
-
- spinReel(reelIndex, reelSymbols, baseDuration, targetSymbols, onCompleteCallback) {
+  spinReel(reelIndex, reelSymbols, baseDuration, targetSymbols, onCompleteCallback) {
     const { rows, startY } = this.gridConfig;
     const { symbolSize } = this;
     const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
@@ -396,36 +404,36 @@ export default class GameScene extends Phaser.Scene {
 }
 
 
-  onAllReelsStopped() {
-      console.log('GameScene: All reels stopped.');
-      this.isSpinning = false;
+  onAllReelsStopped(winningLinesData, totalWinAmountSats) {
+    console.log('GameScene: All reels stopped.');
+    this.isSpinning = false;
+
+    // Notify Vue that the visual part of the spin is done.
+    // Slot.vue might use this to re-enable UI elements or perform other actions.
+    this.eventBus.emit('visualSpinComplete');
       
-      // Emit event to signal that spin animation is complete
-      // This allows the UI to add any wins to the balance
-      EventBus.$emit('spinAnimationComplete', this.lastSpinResponse);
-      
-      // Now check for wins based on the final grid state stored in lastSpinResponse
-      if (this.lastSpinResponse && this.lastSpinResponse.win_amount > 0 && this.lastSpinResponse.winning_lines) {
-          this.playSoundWin(this.lastSpinResponse.win_amount); // Play appropriate win sound
-          this.displayWinningLines(this.lastSpinResponse.winning_lines, this.lastSpinResponse.win_amount);
-      } else {
-          // No win, ready for next spin
-      }
+    if (totalWinAmountSats > 0 && winningLinesData) {
+      this.playSoundWin(totalWinAmountSats); // Play appropriate win sound
+      this.displayWinningLines(winningLinesData, totalWinAmountSats);
+    } else {
+      // No win, ready for next spin
+      // Optionally, inform UI that no win occurred if needed for specific UI states
+      // this.eventBus.emit('noWin');
+    }
   }
 
-  displayWinningLines(winningLines, totalWinAmountSats) {
-      if (!winningLines || winningLines.length === 0) {
-           // Just show total win briefly if there's a scatter win but no line details?
-           if (totalWinAmountSats > 0) {
-                this.showTotalWinAmount(totalWinAmountSats);
-                this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
-                    this.clearWinAnimations();
-                });
-           }
-          return;
-      }
+  displayWinningLines(winningLinesData, totalWinAmountSats) {
+    if (!winningLinesData || winningLinesData.length === 0) {
+        if (totalWinAmountSats > 0) { // Possible for scatter wins not detailed in lines
+            this.showTotalWinAmount(totalWinAmountSats);
+            this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
+                this.clearWinAnimations();
+            });
+        }
+        return;
+    }
 
-      let currentLineIndex = 0;
+    let currentLineIndex = 0;
       const displayNextLine = () => {
             this.clearWinAnimations(false); // Clear previous line/symbol highlights, but keep total win if shown
 
@@ -495,28 +503,27 @@ export default class GameScene extends Phaser.Scene {
    if (!this.isScatterWin) {
        const paylineConfig = this.gameConfig.paylines.find(p => p.id === winLine.line_index);
        if (paylineConfig) {
-            const lineColor = this.getPaylineColor(winLine.line_index);
-            this.paylineGraphics.lineStyle(5, lineColor, 0.9); // Thicker line
-            this.paylineGraphics.fillStyle(lineColor, 0.8);
+            const paylineDef = this.gameConfig.layout.paylines.find(p => p.id === winLine.line_id); // line_id from backend
+            if (paylineDef) { // Ensure payline definition exists
+                const lineColor = this.getPaylineColor(paylineDef.id); // Use paylineDef.id or winLine.line_id
+                this.paylineGraphics.lineStyle(5, lineColor, 0.9);
+                this.paylineGraphics.fillStyle(lineColor, 0.8);
 
-           const linePoints = [];
-           // Use only the winning positions for drawing the line segment
-            winLine.positions.forEach(([row, col], index) => {
-               const pos = this.getSymbolWorldPosition(col, row);
-               linePoints.push(new Phaser.Math.Vector2(pos.x, pos.y));
+                const linePoints = [];
+                // Draw based on the actual winning positions provided
+                winLine.positions.forEach(([row, col]) => { // Assuming positions are [row, col] from backend
+                    const pos = this.getSymbolWorldPosition(col, row); // Need to ensure getSymbolAt understands this
+                    linePoints.push(new Phaser.Math.Vector2(pos.x, pos.y));
+                    this.paylineGraphics.fillCircle(pos.x, pos.y, 8);
+                });
 
-                // Draw small circles at each symbol position on the line
-                this.paylineGraphics.fillCircle(pos.x, pos.y, 8);
-               // Or use a small dot image:
-               // this.add.image(pos.x, pos.y, 'payline-dot').setTint(lineColor).setDepth(this.paylineGraphics.depth + 1);
-            });
-
-
-           // Draw connecting lines only between the winning symbols
-            if (linePoints.length > 1) {
-                for (let i = 0; i < linePoints.length - 1; i++) {
-                    this.paylineGraphics.lineBetween(linePoints[i].x, linePoints[i].y, linePoints[i+1].x, linePoints[i+1].y);
+                if (linePoints.length > 1) {
+                    for (let i = 0; i < linePoints.length - 1; i++) {
+                        this.paylineGraphics.lineBetween(linePoints[i].x, linePoints[i].y, linePoints[i+1].x, linePoints[i+1].y);
+                    }
                 }
+            } else {
+                console.warn(`Payline definition not found for ID: ${winLine.line_id}`);
             }
        }
    }

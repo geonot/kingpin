@@ -12,96 +12,99 @@ export default class UIScene extends Phaser.Scene {
     this.betSizeText = null;
     this.spinButton = null;
     this.turboButton = null;
-    this.autoSpinButton = null; // If implementing auto-spin
+    // this.autoSpinButton = null; // If implementing auto-spin
     this.settingsButton = null;
     this.betPlusButton = null;
     this.betMinusButton = null;
 
     // State
     this.currentBetIndex = 0;
-    this.betOptions = [10, 20, 50, 100, 200, 500]; // Default, loaded from config
-    this.currentBetSats = 10;
-    this.isSpinning = false; // Local state to disable buttons during spin
-    this.soundEnabled = true;
-    this.turboEnabled = false;
+    this.betOptions = [1000000, 2000000, 5000000, 10000000]; // Default Satoshis, loaded from config
+    this.currentBetSats = 1000000; // Default Satoshis
+    this.isSpinning = false;
+    this.soundEnabled = true; // Will be updated from registry
+    this.turboEnabled = false; // Will be updated from registry
+    this.eventBus = null;
   }
 
-  preload() {
-    // Preload common UI assets if not done in PreloadScene
-    // this.load.image('spin-button', '/assets/ui/spin_button.png'); // Example
-    // this.load.image('settings-button', '/assets/ui/settings.png');
-    // Assets specific to the slot theme (like button icons) should be loaded in PreloadScene
-  }
+  // No preload needed here, assets are loaded in PreloadScene
 
   create() {
     console.log('UIScene: Create');
-    const gameConfig = this.registry.get('gameConfig');
-    if (!gameConfig) {
-        console.error("UIScene: Game config not found!");
-        return;
+    this.gameConfig = this.registry.get('gameConfig');
+    this.eventBus = this.registry.get('eventBus'); // Get EventBus from registry
+
+    if (!this.gameConfig || !this.eventBus) {
+        console.error("UIScene: Missing game configuration or EventBus from registry!");
+        // Fallback or stop scene
+        if (!this.eventBus) this.eventBus = EventBus; // Fallback to global import if not in registry
+        if (!this.gameConfig) return;
     }
-     // Initialize state from registry
+
     this.soundEnabled = this.registry.get('soundEnabled') ?? true;
     this.turboEnabled = this.registry.get('turboEnabled') ?? false;
 
+    this.betOptions = this.gameConfig.settings?.betOptions || this.betOptions;
+    // Initial bet can be passed from Vue or use first option
+    const initialBetFromRegistry = this.registry.get('initialBet');
+    this.currentBetSats = initialBetFromRegistry !== undefined ? initialBetFromRegistry : (this.betOptions[0] || 1000000);
 
-    // Get bet options from config or use default
-    this.betOptions = gameConfig.settings?.betOptions || this.betOptions;
-    this.currentBetSats = this.registry.get('initialBet') || this.betOptions[0] || 10;
     this.currentBetIndex = this.betOptions.indexOf(this.currentBetSats);
-    if (this.currentBetIndex === -1) { // If initialBet not in options, default to first
+    if (this.currentBetIndex === -1) {
         this.currentBetIndex = 0;
         this.currentBetSats = this.betOptions[0];
+        console.warn(`Initial bet ${initialBetFromRegistry} not in options, defaulting to ${this.currentBetSats}`);
     }
+    // Emit initial bet to Vue, so Vue is aware of default/initial Phaser bet
+    this.eventBus.emit('uiBetChanged', { newBetAmountSats: this.currentBetSats });
+
 
     const initialBalance = this.registry.get('userBalance') ?? 0;
 
-    // Create UI elements using config positions/styles if available
-    this.createBalanceDisplay(initialBalance, gameConfig.ui?.balance);
-    this.createWinDisplay(0, gameConfig.ui?.win);
-    this.createBetDisplay(this.currentBetSats, gameConfig.ui?.betSize, gameConfig.ui?.betAdjust);
-    this.createActionButtons(gameConfig.ui?.buttons);
+    this.createBalanceDisplay(initialBalance, this.gameConfig.ui?.balance);
+    this.createWinDisplay(0, this.gameConfig.ui?.win);
+    this.createBetDisplay(this.currentBetSats, this.gameConfig.ui?.betSize, this.gameConfig.ui?.betAdjust);
+    this.createActionButtons(this.gameConfig.ui?.buttons);
 
-    // --- Event Listeners ---
-    // Listen for updates from GameScene or Vue app
-    EventBus.$on('uiUpdate', (data) => {
-        if (data.balance !== undefined) {
-            this.updateBalance(data.balance);
+    // --- Event Listeners from Vue or GameScene ---
+    this.eventBus.on('vueBalanceUpdated', (data) => {
+        if (data.balance !== undefined) this.updateBalance(data.balance);
+    });
+    // GameScene's displayWinningLines will emit 'lineWinUpdate' to update this.winText
+    this.eventBus.on('lineWinUpdate', (data) => {
+        if (data.winAmount !== undefined) this.updateWin(data.winAmount, data.isScatter);
+    });
+    this.eventBus.on('phaserBalanceInsufficient', () => {
+        this.handleInsufficientBalance(true);
+    });
+    this.eventBus.on('vueSpinInitiated', () => {
+        this.isSpinning = true;
+        this.spinButton?.setAlpha(0.5).disableInteractive();
+        this.betPlusButton?.disableInteractive().setAlpha(0.5);
+        this.betMinusButton?.disableInteractive().setAlpha(0.5);
+    });
+    this.eventBus.on('vueSpinConcluded', () => { // Or listen to 'visualSpinComplete' from GameScene
+        this.isSpinning = false;
+        this.spinButton?.setAlpha(1.0).setInteractive();
+        this.updateBetButtonStates(); // Re-enable bet buttons based on currentBetIndex
+        // Balance check will re-enable/disable spin if needed via vueBalanceUpdated
+    });
+    this.eventBus.on('updateSettingsInPhaser', (settings) => {
+        if (settings.soundEnabled !== undefined) {
+            this.soundEnabled = settings.soundEnabled;
         }
-        if (data.winAmount !== undefined) {
-            this.updateWin(data.winAmount, data.isScatter);
-        }
-        if (data.balanceInsufficient !== undefined) {
-            this.handleInsufficientBalance(data.balanceInsufficient);
+        if (settings.turboEnabled !== undefined) {
+            this.turboEnabled = settings.turboEnabled;
+            this.updateTurboButtonVisuals();
         }
     });
 
-    // Listen for line win updates from GameScene
-    EventBus.$on('lineWinUpdate', (data) => {
-        if (data.winAmount !== undefined) {
-            this.updateWin(data.winAmount, data.isScatter);
-        }
-    });
+    // Initial UI setup based on state
+    this.updateTurboButtonVisuals();
+    this.handleInsufficientBalance(initialBalance < this.currentBetSats);
 
-     // Listen for spin start/end from GameScene to disable/enable buttons
-     // This might be redundant if GameScene directly checks its own isSpinning state
-     // EventBus.$on('spinStateChanged', (data) => {
-     //   this.isSpinning = data.spinning;
-     //   this.spinButton?.setInteractive(!this.isSpinning);
-     //   // Disable other buttons during spin?
-     // });
 
-     // Listen for settings changes to update button states if needed (e.g., Turbo)
-      EventBus.$on('turboSettingChanged', (isEnabled) => {
-          this.turboEnabled = isEnabled;
-          this.updateTurboButtonVisuals(); // Update visual state
-      });
-       EventBus.$on('soundSettingChanged', (isEnabled) => {
-          this.soundEnabled = isEnabled;
-          // Update sound button visuals if any in this scene
-      });
-
-      console.log('UIScene: Ready.');
+    console.log('UIScene: Ready.');
   }
 
   // --- UI Element Creation ---
@@ -174,103 +177,62 @@ export default class UIScene extends Phaser.Scene {
             this.playSound('buttonClick');
             this.isSpinning = true; // Set local UI lock
             
-            // Update visual appearance only
-            this.spinButton?.setAlpha(0.6);
-            
-            // Get current balance from store via event bus
-            EventBus.$emit('getBalanceForDeduction', this.currentBetSats);
-            
-            // Emit spin request with bet amount
-            EventBus.$emit('spinRequest', { bet: this.currentBetSats }); // Emit request
+            // Spin button should not directly deduct balance or call API.
+            // It emits an event to Slot.vue, which then calls the Vuex action.
+            this.playSound('buttonClick');
+            this.eventBus.emit('uiSpinButtonClicked', { betAmount: this.currentBetSats });
         });
-         // Re-enable spin button when spin completes (via GameScene event or specific callback)
-        // We'll use the 'uiUpdate' event for simplicity, assuming it implies spin end if win occurs/balance updates
-         EventBus.$on('uiUpdate', () => {
-             if (this.isSpinning) { // Only re-enable if it was spinning
-                this.isSpinning = false;
-                if (this.spinButton) {
-                    // Update visual appearance only
-                    this.spinButton.setAlpha(1.0);
-                }
-             }
-         });
-         // Also re-enable on spin error
-         EventBus.$on('spinError', () => {
-              if (this.isSpinning) {
-                  this.isSpinning = false;
-                  if (this.spinButton) {
-                      // Update visual appearance only
-                      this.spinButton.setAlpha(1.0);
-                  }
-              }
-         });
-
 
         // --- Turbo Button ---
-        const turboConfig = config?.turbo;
-        if (turboConfig) {
-            const turboPos = turboConfig.position || { x: 520, y: 475 };
+        const turboConfig = config?.turbo; // Expects { name: "turboButtonTextureKey", position, size }
+        if (turboConfig?.name) { // Check if name (texture key) is provided
+            const turboPos = turboConfig.position || { x: 520, y: 475 }; // Example default
             const turboSize = turboConfig.size || { width: 80, height: 40 };
-            this.turboButton = this.add.image(turboPos.x, turboPos.y, turboConfig.name || 'turbo-button')
+            this.turboButton = this.add.image(turboPos.x, turboPos.y, turboConfig.name)
                 .setDisplaySize(turboSize.width, turboSize.height)
                 .setOrigin(0.5)
                 .setInteractive({ useHandCursor: true });
 
-             this.add.text(turboPos.x, turboPos.y, 'TURBO', {
-                 font: 'bold 14px Arial', color: '#FFFFFF'
-             }).setOrigin(0.5);
+            // Optional: Add text over turbo button if not part of the image
+             this.add.text(turboPos.x, turboPos.y, 'TURBO', { font: 'bold 14px Arial', color: '#FFFFFF' }).setOrigin(0.5);
+
 
             this.turboButton.on('pointerdown', () => {
-                 this.playSound('buttonClick');
-                const newState = !this.turboEnabled;
-                EventBus.$emit('turboSettingChanged', newState); // Emit event for GameScene & Settings
+                this.playSound('buttonClick');
+                const newTurboState = !this.turboEnabled;
+                // this.turboEnabled = newTurboState; // Local state updated by event listener
+                // this.updateTurboButtonVisuals();
+                this.eventBus.emit('uiTurboSettingChanged', { turboEnabled: newTurboState });
             });
-            this.updateTurboButtonVisuals(); // Set initial visual state
+            this.updateTurboButtonVisuals();
+        } else {
+            console.warn("UIScene: Turbo button configuration or texture key missing in gameConfig.ui.buttons.turbo");
         }
 
         // --- Settings Button ---
-        const settingsConfig = config?.settings;
-         if (settingsConfig) {
-            const settingsPos = settingsConfig.position || { x: 750, y: 50 };
+        const settingsConfig = config?.settingsButton; // Expects { name: "settingsButtonTextureKey", position, size }
+         if (settingsConfig?.name) {
+            const settingsPos = settingsConfig.position || { x: 750, y: 50 }; // Example default
             const settingsSize = settingsConfig.size || { width: 40, height: 40 };
-            this.settingsButton = this.add.image(settingsPos.x, settingsPos.y, settingsConfig.name || 'settings-button')
+            this.settingsButton = this.add.image(settingsPos.x, settingsPos.y, settingsConfig.name)
                 .setDisplaySize(settingsSize.width, settingsSize.height)
                 .setOrigin(0.5)
                 .setInteractive({ useHandCursor: true });
 
             this.settingsButton.on('pointerdown', () => {
-                 this.playSound('buttonClick');
-                 // Pause current scenes and launch settings modal
-                 this.scene.pause('GameScene');
-                 this.scene.pause('UIScene'); // Pause this scene as well
-                 this.scene.launch('SettingsModalScene', {
-                     soundEnabled: this.soundEnabled,
-                     turboEnabled: this.turboEnabled
-                 });
+                this.playSound('buttonClick');
+                this.eventBus.emit('uiSettingsButtonClicked'); // Inform Vue
+                this.scene.pause('GameScene');
+                this.scene.pause('UIScene');
+                this.scene.launch('SettingsModalScene', {
+                    // Pass current states, which are kept in sync by updateSettingsInPhaser listener
+                    soundEnabled: this.soundEnabled,
+                    turboEnabled: this.turboEnabled
+                });
             });
+         } else {
+            console.warn("UIScene: Settings button configuration or texture key missing in gameConfig.ui.buttons.settingsButton");
          }
-
-
-        // --- Auto Spin Button (Placeholder) ---
-        const autoSpinConfig = config?.autoSpin;
-        if (autoSpinConfig) {
-             const autoPos = autoSpinConfig.position || { x: 280, y: 475 };
-             const autoSize = autoSpinConfig.size || { width: 80, height: 40 };
-             this.autoSpinButton = this.add.image(autoPos.x, autoPos.y, autoSpinConfig.name || 'auto-button')
-                 .setDisplaySize(autoSize.width, autoSize.height)
-                 .setOrigin(0.5)
-                 .setInteractive({ useHandCursor: true });
-
-             this.add.text(autoPos.x, autoPos.y, 'AUTO', {
-                 font: 'bold 14px Arial', color: '#FFFFFF'
-             }).setOrigin(0.5);
-
-             this.autoSpinButton.on('pointerdown', () => {
-                  this.playSound('buttonClick');
-                 console.log('Auto-spin clicked (Not Implemented)');
-                 // TODO: Implement auto-spin logic
-             });
-        }
     }
 
   // --- UI Update Methods ---

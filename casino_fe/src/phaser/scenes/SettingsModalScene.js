@@ -105,7 +105,8 @@ export default class SettingsModalScene extends Phaser.Scene {
     groove.fillStyle(grooveColor, 1);
     groove.fillRoundedRect(x - width / 2, y - height / 2, width, height, radius);
 
-    const handleX = initialState ? x + width / 2 - radius : x - width / 2 + radius;
+    // Adjusted initial handleX to match updateToggleVisuals logic
+    const handleX = initialState ? (x + (width/2 - radius - 2)) : (x - (width/2 - radius - 2));
     const handle = this.add.circle(handleX, y, radius - 3, handleColor).setDepth(2);
 
     // Add invisible interactive zone over the toggle
@@ -122,22 +123,22 @@ export default class SettingsModalScene extends Phaser.Scene {
   toggleSound(newState, groove, handle) {
     this.soundEnabled = newState;
     this.soundValueText.setText(this.soundEnabled ? 'ON' : 'OFF');
-    this.updateToggleVisuals(this.soundEnabled, groove, handle);
-    this.game.registry.set('soundEnabled', this.soundEnabled); // Update registry
-    EventBus.$emit('soundSettingChanged', this.soundEnabled); // Notify other scenes/Vue
-    // Apply sound change (mute/unmute master volume)
-    this.sound.mute = !this.soundEnabled;
+    this.updateToggleVisuals(this.soundEnabled, groove, handle, 'sound');
+
+    const eventBus = this.game.registry.get('eventBus') || EventBus;
+    eventBus.emit('uiSoundSettingChanged', { soundEnabled: this.soundEnabled });
   }
 
   toggleTurbo(newState, groove, handle) {
     this.turboEnabled = newState;
     this.turboValueText.setText(this.turboEnabled ? 'ON' : 'OFF');
-    this.updateToggleVisuals(this.turboEnabled, groove, handle);
-    this.game.registry.set('turboEnabled', this.turboEnabled); // Update registry
-    EventBus.$emit('turboSettingChanged', this.turboEnabled); // Notify other scenes/Vue
+    this.updateToggleVisuals(this.turboEnabled, groove, handle, 'turbo');
+
+    const eventBus = this.game.registry.get('eventBus') || EventBus;
+    eventBus.emit('uiTurboSettingChanged', { turboEnabled: this.turboEnabled });
   }
 
-  updateToggleVisuals(isOn, groove, handle) {
+  updateToggleVisuals(isOn, groove, handle, type) { // Added type for clarity if needed
       const width = 60;
       const height = 30;
       const radius = height / 2;
@@ -145,22 +146,36 @@ export default class SettingsModalScene extends Phaser.Scene {
       const grooveColor = isOn ? 0x4caf50 : 0x757575;
 
       // Animate handle position
+      // Ensure the targetX calculation is correct based on the current position of the handle
+      // The handle's 'x' might not be its center if it's part of a container or its origin is changed.
+      // Assuming handle.x is its center for this relative move.
+      const targetXPosition = isOn ? (x + width / 2 - radius) : (x - width / 2 + radius);
+       // If handle.x is already the desired targetX for one state, this needs adjustment.
+       // Let's assume the handle's x is its current center.
+       // The groove is at x. Handle should be at x - width/4 for OFF, x + width/4 for ON.
+       const newHandleX = isOn ? (x + (width/2 - radius - 2)) : (x - (width/2 - radius - 2)) ; // Small padding
+
       this.tweens.add({
           targets: handle,
-          x: targetX,
+          x: newHandleX, // Animate to the new calculated position
           duration: 150,
           ease: 'Linear'
       });
 
-      // Change groove color instantly (or tween color if desired)
+      // Change groove color instantly
       groove.clear();
       groove.fillStyle(grooveColor, 1);
-      groove.fillRoundedRect(handle.x - targetX + (isOn ? -width/2 + radius : width/2 - radius) , handle.y - radius, width, height, radius); // Recalculate rect position based on handle's frame position
-       // Re-calculate x for groove based on handle's current position and direction
-      const grooveX = handle.x - (isOn ? (width / 2 - radius) : (-width / 2 + radius));
-      groove.fillRoundedRect(grooveX - width / 2, handle.y - height / 2, width, height, radius);
-
+      // Groove position should be static, relative to x, y
+      groove.fillRoundedRect(x - width / 2, y - height / 2, width, height, radius);
   }
+
+  // Ensure createToggleButton correctly positions the initial handle
+  // createToggleButton(x, y, initialState, callback) {
+  //   ...
+  //   const handleX = initialState ? (x + width / 2 - radius -2) : (x - width / 2 + radius + 2); // Adjusted initial
+  //   const handle = this.add.circle(handleX, y, radius - 3, handleColor).setDepth(2);
+  //   ...
+  // }
 
 
   closeModal() {
