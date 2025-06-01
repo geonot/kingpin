@@ -14,10 +14,10 @@ const Withdraw = () => import('@views/Withdraw.vue');
 const Settings = () => import('@views/Settings.vue');
 
 // Placeholder components for routes added
-const Terms = () => import('@/components/placeholders/PlaceholderContent.vue'); // Replace with actual
-const Privacy = () => import('@/components/placeholders/PlaceholderContent.vue'); // Replace with actual
-const ResponsibleGaming = () => import('@/components/placeholders/PlaceholderContent.vue'); // Replace with actual
-const AdminDashboard = () => import('@/components/admin/AdminDashboard.vue'); // Replace with actual Admin component
+const Terms = () => import('@/views/static/TermsPage.vue');
+const Privacy = () => import('@/views/static/PrivacyPage.vue');
+const ResponsibleGaming = () => import('@/views/static/ResponsibleGamingPage.vue');
+const AdminDashboard = () => import('@/views/admin/AdminDashboard.vue');
 
 
 const routes = [
@@ -100,7 +100,7 @@ const routes = [
    {
      path: '/:pathMatch(.*)*', // Matches everything else
      name: 'NotFound',
-     component: () => import('@/components/placeholders/NotFound.vue'), // Lazy load a 404 component
+     component: () => import('@/views/NotFoundPage.vue'),
      meta: { title: 'Page Not Found' }
    }
 ];

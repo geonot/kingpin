@@ -90,14 +90,20 @@ def register():
         return jsonify({'status': False, 'status_message': 'Email already exists'}), 409 # Conflict
 
     try:
-        wallet_address, private_key = generate_bitcoin_wallet()
+        # Private key is no longer generated or stored here.
+        # generate_bitcoin_wallet now only returns an address.
+        wallet_address = generate_bitcoin_wallet()
+
+        if not wallet_address:
+            logger.error("Failed to generate Bitcoin wallet address during registration.")
+            return jsonify({'status': False, 'status_message': 'Failed to generate wallet address for user.'}), 500
 
         new_user = User(
             username=data['username'],
             email=data['email'],
             password=User.hash_password(data['password']),
-            deposit_wallet_address=wallet_address,
-            deposit_wallet_private_key=private_key # Storing private keys like this is highly insecure for production! Consider HSM or managed service.
+            deposit_wallet_address=wallet_address
+            # deposit_wallet_private_key is no longer a field in the User model
         )
         db.session.add(new_user)
         db.session.commit()
@@ -959,3 +965,24 @@ if __name__ == '__main__':
     # Consider using Flask CLI for running in development: flask run
     # This block is useful for direct execution (python app.py)
     app.run(debug=app.config.get('DEBUG', False), host='0.0.0.0', port=5000)
+
+# --- CLI Commands (Registered with Flask App) ---
+@app.cli.command("db_cleanup_expired_tokens")
+def db_cleanup_expired_tokens_command():
+    """Cleans up expired tokens from the TokenBlacklist table."""
+    now = datetime.now(timezone.utc)
+    try:
+        expired_tokens = TokenBlacklist.query.filter(TokenBlacklist.expires_at < now).all()
+        if not expired_tokens:
+            print("No expired tokens found to clean up.")
+            return
+
+        count = len(expired_tokens)
+        for token in expired_tokens:
+            db.session.delete(token)
+
+        db.session.commit()
+        print(f"Successfully deleted {count} expired token(s).")
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error during token cleanup: {str(e)}")

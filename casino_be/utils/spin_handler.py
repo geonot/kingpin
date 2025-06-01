@@ -2,7 +2,7 @@ import random
 import json
 import os
 from datetime import datetime, timezone
-from models import db, SlotSpin, GameSession, User, Transaction # Added GameSession, User, Transaction
+from casino_be.models import db, SlotSpin, GameSession, User, Transaction # Added GameSession, User, Transaction
 # SlotSymbol might not be directly used if all config comes from JSON, but keep for now
 
 # --- Configuration ---
@@ -86,9 +86,10 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             wager_tx = Transaction(
                 user_id=user.id,
                 amount=-bet_amount_sats, # Negative for wager
-                type='wager',
-                description=f'Slot wager: {slot.name} - Spin ID to be linked',
-                game_session_id=game_session.id
+                transaction_type='wager', # Ensure this matches model's transaction_type column name
+                details={'slot_name': slot.name, 'session_id': game_session.id}, # Using details field
+                # description=f'Slot wager: {slot.name}', # Old description field
+                game_session_id=game_session.id # Retaining for now, but primary link will be slot_spin_id
             )
             db.session.add(wager_tx)
             # game_session.transactions.append(wager_tx) # Add to session if relationship is set up
@@ -180,9 +181,10 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             win_tx = Transaction(
                 user_id=user.id,
                 amount=win_amount_sats,
-                type='win',
-                description=f'Slot win: {slot.name} - Spin ID to be linked',
-                game_session_id=game_session.id
+                transaction_type='win', # Ensure this matches model's transaction_type column name
+                details={'slot_name': slot.name, 'session_id': game_session.id}, # Using details field
+                # description=f'Slot win: {slot.name}', # Old description field
+                game_session_id=game_session.id # Retaining for now
             )
             db.session.add(win_tx)
             # game_session.transactions.append(win_tx)
@@ -195,17 +197,21 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             win_amount=win_amount_sats,
             bet_amount=actual_bet_this_spin,
             is_bonus_spin=is_bonus_spin,
-            spin_time=datetime.now(timezone.utc),
-            multiplier_used=current_spin_multiplier if is_bonus_spin else 1.0
+            spin_time=datetime.now(timezone.utc)
+            # multiplier_used field doesn't exist on SlotSpin model in provided models.py
+            # multiplier_used=current_spin_multiplier if is_bonus_spin else 1.0
         )
         db.session.add(new_spin)
-        db.session.flush() # Flush to get new_spin.id for transaction linking
+        # Crucially, flush here to get new_spin.id before assigning to transactions
+        db.session.flush()
 
-        # Link transactions to this spin if created
-        if not is_bonus_spin and 'wager_tx' in locals():
+        # Link transactions to this spin
+        if not is_bonus_spin and wager_tx: # wager_tx is defined in this scope
             wager_tx.slot_spin_id = new_spin.id
-        if win_amount_sats > 0 and 'win_tx' in locals():
+            wager_tx.details['slot_spin_id'] = new_spin.id # Also add to details for easier querying if needed
+        if win_amount_sats > 0 and win_tx: # win_tx is defined in this scope
             win_tx.slot_spin_id = new_spin.id
+            win_tx.details['slot_spin_id'] = new_spin.id # Also add to details
 
         # --- Return Results ---
         # Ensure all satoshi amounts are integers
