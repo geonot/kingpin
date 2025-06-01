@@ -14,7 +14,7 @@ class User(db.Model):
     password = db.Column(db.String(128), nullable=False)
     balance = db.Column(BigInteger, default=0, nullable=False, index=True)  # Balance in satoshis, Indexed
     deposit_wallet_address = db.Column(db.String(256), nullable=False, unique=True) # Wallet address should be unique
-    deposit_wallet_private_key = db.Column(db.String(256), nullable=False) # Highly insecure for prod!
+    # deposit_wallet_private_key field removed for security reasons. Private keys should be managed externally.
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False) # Added active status
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False) # Use timezone-aware
@@ -90,6 +90,14 @@ class Transaction(db.Model):
     status = db.Column(db.String(15), default='completed', nullable=False, index=True) # e.g., 'pending', 'completed', 'failed', 'cancelled'
     details = db.Column(JSONB, nullable=True) # Store related info like addresses, bonus codes, related tx_id etc.
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True) # Added index
+
+    # Foreign keys for linking to specific game events
+    slot_spin_id = db.Column(db.Integer, db.ForeignKey('slot_spin.id'), nullable=True, index=True)
+    blackjack_hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id'), nullable=True, index=True)
+
+    # Relationships to game events
+    slot_spin = db.relationship('SlotSpin', backref=db.backref('transactions', lazy='dynamic'))
+    blackjack_hand = db.relationship('BlackjackHand', backref=db.backref('transactions', lazy='dynamic'))
 
     def __repr__(self):
         return f"<Transaction {self.id} (User: {self.user_id}, Type: {self.transaction_type}, Amount: {self.amount}, Status: {self.status})>"

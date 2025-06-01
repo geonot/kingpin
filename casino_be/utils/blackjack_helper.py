@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import random
 # import json # Not strictly needed if BlackjackHand.details is handled by SQLAlchemy's JSON type directly
-from models import db, User, GameSession, BlackjackHand, BlackjackAction, BlackjackTable, Transaction # Ensure BlackjackAction is used or removed if not.
+from casino_be.models import db, User, GameSession, BlackjackHand, BlackjackAction, BlackjackTable, Transaction # Ensure BlackjackAction is used or removed if not.
 
 # --- Card Constants ---
 SUITS = ['H', 'D', 'C', 'S']  # Hearts, Diamonds, Clubs, Spades
@@ -57,49 +57,18 @@ def _calculate_hand_value(cards_list):
             num_aces += 1
         total += value
 
-    is_soft = False
+    # Store the original number of aces, as num_aces will be decremented.
+    original_num_aces = num_aces
+
     # Adjust for Aces if total > 21
     while total > 21 and num_aces > 0:
         total -= 10  # Change an Ace from 11 to 1
-        num_aces -= 1
+        num_aces -= 1 # This ace is now effectively a 1, not an 11.
 
-    if total <= 21 and num_aces > 0: # Check if any ace is still counted as 11
-        # If removing 10 (making an Ace 1 instead of 11) would keep it <= 21,
-        # but it's currently an 11, it's soft.
-        # More simply: if there's an ace whose value is 11, the hand is soft.
-        # This happens if (total - 10*num_aces_as_11) + 11*num_aces_as_11 = total
-        # An ace is counted as 11 if (total - 10) is a valid score for the rest of the cards with that ace as 1.
-        current_aces_as_eleven = 0
-        temp_total_for_soft_check = 0
-        aces_in_hand = 0
-        for card_str_check in cards_list:
-            val = _get_card_value(card_str_check)
-            if val == 11:
-                aces_in_hand +=1
-
-        temp_total_for_soft_check = total # This is the final total after adjustments
-
-        # How many aces are effectively 11?
-        # total = sum_non_aces + num_aces_as_1 * 1 + num_aces_as_11 * 11
-        # num_aces = num_aces_as_1 + num_aces_as_11
-        # total = sum_non_aces + (num_aces - num_aces_as_11) * 1 + num_aces_as_11 * 11
-        # total = sum_non_aces + num_aces - num_aces_as_11 + num_aces_as_11 * 11
-        # total = sum_non_aces + num_aces + 10 * num_aces_as_11
-        # 10 * num_aces_as_11 = total - (sum_non_aces + num_aces)
-        # sum_values_as_ace_is_1 = sum of non-aces + number of all aces
-        sum_values_as_ace_is_1 = 0
-        initial_aces = 0
-        for card_str_check in cards_list:
-            rank = card_str_check[1]
-            if rank == 'A':
-                initial_aces +=1
-                sum_values_as_ace_is_1 +=1
-            else:
-                sum_values_as_ace_is_1 += _get_card_value(card_str_check)
-
-        if initial_aces > 0 and temp_total_for_soft_check > sum_values_as_ace_is_1 : # an ace is counted as 11
-             is_soft = True
-
+    # A hand is soft if it contains an Ace that is currently counted as 11,
+    # and the total value is not over 21.
+    # The variable `num_aces` at this point holds the count of Aces still being treated as 11.
+    is_soft = (num_aces > 0) and (total <= 21)
 
     return total, is_soft
 
@@ -210,9 +179,9 @@ def handle_join_blackjack(user, table, bet_amount_sats):
     wager_tx = Transaction(
         user_id=user.id,
         amount=-bet_amount_sats, # Negative for wager
-        type='wager', # Ensure this matches your TransactionType enum/choices
-        description=f'Blackjack wager - Hand ID: {new_blackjack_hand.id}',
-        game_session_id=game_session.id,
+        transaction_type='wager',
+        details={'hand_id': new_blackjack_hand.id, 'table_id': table.id, 'session_id': game_session.id},
+        game_session_id=game_session.id, # Retaining for now
         blackjack_hand_id=new_blackjack_hand.id
     )
     db.session.add(wager_tx)
@@ -364,9 +333,18 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
 
         # Create additional wager transaction
         double_tx = Transaction(
-            user_id=user.id, amount=-current_player_hand['bet_sats'], type='wager',
-            description=f'Blackjack double down - Hand ID: {bj_hand.id}, Hand Index: {active_hand_idx}',
-            game_session_id=game_session.id, blackjack_hand_id=bj_hand.id
+            user_id=user.id,
+            amount=-current_player_hand['bet_sats'],
+            transaction_type='wager',
+            details={
+                'reason': 'double_down',
+                'hand_id': bj_hand.id,
+                'hand_index': active_hand_idx,
+                'table_id': table.id,
+                'session_id': game_session.id
+            },
+            game_session_id=game_session.id, # Retaining for now
+            blackjack_hand_id=bj_hand.id
         )
         db.session.add(double_tx)
 
@@ -401,9 +379,18 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
 
         # Create additional wager transaction for the new hand's bet
         split_tx = Transaction(
-            user_id=user.id, amount=-current_player_hand['bet_sats'], type='wager',
-            description=f'Blackjack split - Hand ID: {bj_hand.id}, New Hand Index: {len(player_hands_list)}',
-            game_session_id=game_session.id, blackjack_hand_id=bj_hand.id
+            user_id=user.id,
+            amount=-current_player_hand['bet_sats'],
+            transaction_type='wager',
+            details={
+                'reason': 'split',
+                'hand_id': bj_hand.id,
+                'new_hand_index': len(player_hands_list),
+                'table_id': table.id,
+                'session_id': game_session.id
+            },
+            game_session_id=game_session.id, # Retaining for now
+            blackjack_hand_id=bj_hand.id
         )
         db.session.add(split_tx)
 
@@ -523,9 +510,15 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
                  win_tx = Transaction(
                     user_id=user.id,
                     amount=profit_sats, # Net profit
-                    type='win',
-                    description=f'Blackjack net win - Hand ID: {bj_hand.id}',
-                    game_session_id=game_session.id,
+                    transaction_type='win',
+                    details={
+                        'hand_id': bj_hand.id,
+                        'table_id': table.id,
+                        'session_id': game_session.id,
+                        'player_final_hands': player_hands_list, # Store final state for audit
+                        'dealer_final_hand': dealer_hand_obj
+                    },
+                    game_session_id=game_session.id, # Retaining for now
                     blackjack_hand_id=bj_hand.id
                 )
                  db.session.add(win_tx)

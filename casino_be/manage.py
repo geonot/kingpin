@@ -33,20 +33,24 @@ def create_admin():
     """Creates the default admin user if it doesn't exist."""
     from models import User # Import locally to avoid circular dependency issues
     from config import Config
-    from utils.bitcoin import generate_bitcoin_wallet
+    # from utils.bitcoin import generate_bitcoin_wallet # generate_bitcoin_wallet now only returns address
 
     if not User.query.filter_by(username=Config.ADMIN_USERNAME).first():
         print(f"Creating default admin user: {Config.ADMIN_USERNAME}")
         try:
-            admin_wallet_addr, admin_priv_key = generate_bitcoin_wallet()
+            admin_wallet_addr = generate_bitcoin_wallet() # Now only returns address
+            if not admin_wallet_addr:
+                print("Failed to generate wallet address for admin user. Aborting.")
+                return
+
             admin_user = User(
                 username=Config.ADMIN_USERNAME,
                 email=Config.ADMIN_EMAIL,
                 password=User.hash_password(Config.ADMIN_PASSWORD),
                 is_admin=True,
                 balance=1_000_000_000, # 10 BTC in Sats
-                deposit_wallet_address=admin_wallet_addr,
-                deposit_wallet_private_key=admin_priv_key # Insecure for production
+                deposit_wallet_address=admin_wallet_addr
+                # deposit_wallet_private_key removed
             )
             db.session.add(admin_user)
             db.session.commit()
@@ -57,7 +61,12 @@ def create_admin():
     else:
         print(f"Admin user '{Config.ADMIN_USERNAME}' already exists.")
 
+# The flask_script manager.run() will only execute flask_script commands.
+# The new command 'db_cleanup_expired_tokens' needs to be run via `flask db_cleanup_expired_tokens`.
+# That command has been moved to app.py for Flask's native CLI discovery.
 if __name__ == '__main__':
+    # Note: This will only run flask_script commands.
+    # To run app.cli commands, use `flask <command_name>`.
     manager.run()
     # Usage:
     # python manage.py db init (only once)

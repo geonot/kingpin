@@ -144,21 +144,21 @@ const toggleDarkMode = () => {
     emit('toggle-dark-mode');
 };
 
-};
+// Removed one redundant handleLogout definition
+// Removed one redundant toggleDarkMode definition
+// Removed one redundant handleClickOutside definition (it was identical to the one above it, likely a copy-paste error in original code)
 
 const handleClickOutside = (event) => {
     if (dropdownContainer.value && !dropdownContainer.value.contains(event.target)) {
         dropdownOpen.value = false;
     }
-    // Note: Mobile menu often covers full width, so click outside might not be applicable in the same way
-    // or needs to check against the mobile menu button if it's not part of the menu content area.
-    // For simplicity, mobile menu is toggled by its button.
+    // Mobile menu closing is handled by its own button or navigation.
 };
 
 const handleLogout = async () => {
-  closeDropdownOnNav(); // Ensure dropdown closes
+  closeDropdownOnNav();
   await store.dispatch('logout');
-  router.push('/'); // Redirect to home or login
+  router.push('/');
 };
 
 const handleLogoutMobile = async () => {
@@ -167,9 +167,7 @@ const handleLogoutMobile = async () => {
   router.push('/');
 };
 
-const toggleDarkMode = () => {
-    emit('toggle-dark-mode');
-};
+// toggleDarkMode is already defined above correctly.
 
 onMounted(() => {
     document.addEventListener('click', handleClickOutside);
