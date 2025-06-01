@@ -9,17 +9,17 @@ from flask_jwt_extended import (
 from datetime import datetime, timedelta, timezone # Use timezone-aware datetimes
 import logging # Add logging
 
-from models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction
-from schemas import (
+from .models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction
+from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
     BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema
 )
-from utils.bitcoin import generate_bitcoin_wallet
-from utils.spin_handler import handle_spin
-from utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
-from config import Config
+from .utils.bitcoin import generate_bitcoin_wallet
+from .utils.spin_handler import handle_spin
+from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from .config import Config
 
 # --- App Initialization ---
 app = Flask(__name__)
@@ -33,7 +33,12 @@ migrate = Migrate(app, db, directory='casino_be/migrations')
 jwt = JWTManager(app)
 
 # --- Logging Setup ---
-logging.basicConfig(level=logging.INFO)
+# Configure logging with a more informative format and UTC timestamps
+logging.basicConfig(
+    level=logging.DEBUG,  # Set to DEBUG to capture more details; control with env var in prod
+    format="%(asctime)s [%(levelname)s] [%(name)s:%(funcName)s:%(lineno)d] - %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S%z"  # ISO 8601 format for timestamps
+)
 logger = logging.getLogger(__name__)
 
 # --- JWT Helper Functions ---
@@ -52,6 +57,43 @@ def check_if_token_in_blacklist(jwt_header, jwt_payload):
     now = datetime.now(timezone.utc)
     token = db.session.query(TokenBlacklist.id).filter_by(jti=jti).scalar()
     return token is not None
+
+# --- Global Error Handler ---
+@app.errorhandler(Exception)
+def handle_unhandled_exception(e):
+    """
+    Global handler for unhandled exceptions.
+    Logs the full error and returns a generic 500 response.
+    """
+    logger.error("Unhandled exception caught by global error handler:", exc_info=True)
+    return jsonify({
+        'status': False,
+        'status_message': 'An unexpected internal server error occurred. Please try again later.'
+    }), 500
+
+# --- Response Security Headers ---
+@app.after_request
+def add_security_headers(response):
+    """
+    Adds common security headers to all responses.
+    """
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    # Basic Content Security Policy:
+    # - default-src 'self': Allows content only from the application's own origin.
+    # - script-src 'self': Allows scripts only from the application's own origin.
+    # - object-src 'none': Disallows plugins (like Flash).
+    # - frame-ancestors 'none': Prevents the page from being embedded in iframes on other sites (clickjacking protection).
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none';"
+
+    # HTTP Strict Transport Security (HSTS)
+    # This header should only be sent over HTTPS.
+    # It tells browsers to only communicate with the site using HTTPS for the specified duration.
+    # Enable this if your application is exclusively served over HTTPS in production.
+    if request.is_secure and not app.debug: # request.is_secure ensures it's an HTTPS request
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+
+    return response
 
 # --- Helper Functions ---
 def is_admin():
@@ -85,8 +127,10 @@ def register():
         return jsonify({'status': False, 'status_message': errors}), 400
 
     if User.query.filter_by(username=data['username']).first():
+        logger.warning(f"Registration attempt with existing username: {data['username']} - Path: {request.path}")
         return jsonify({'status': False, 'status_message': 'Username already exists'}), 409 # Conflict
     if User.query.filter_by(email=data['email']).first():
+        logger.warning(f"Registration attempt with existing email: {data['email']} - Path: {request.path}")
         return jsonify({'status': False, 'status_message': 'Email already exists'}), 409 # Conflict
 
     try:
@@ -112,7 +156,7 @@ def register():
         refresh_token = create_refresh_token(identity=new_user)
         user_data = UserSchema().dump(new_user)
 
-        logger.info(f"User registered: {new_user.username} (ID: {new_user.id})")
+        logger.info(f"User registered: {new_user.username} (ID: {new_user.id}) - Path: {request.path}")
         return jsonify({
             'status': True,
             'user': user_data,
@@ -122,7 +166,7 @@ def register():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Registration failed: {str(e)}", exc_info=True)
+        logger.error(f"Registration failed for username {data.get('username')}: {str(e)} - Path: {request.path}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Registration failed due to an internal error.'}), 500
 
 @app.route('/api/login', methods=['POST'])
@@ -134,13 +178,14 @@ def login():
 
     user = User.query.filter_by(username=data['username']).first()
     if not user or not User.verify_password(user.password, data['password']):
+        logger.warning(f"Invalid login attempt for username: {data['username']} - Path: {request.path}")
         return jsonify({'status': False, 'status_message': 'Invalid username or password'}), 401
 
     access_token = create_access_token(identity=user)
     refresh_token = create_refresh_token(identity=user)
     user_data = UserSchema().dump(user)
 
-    logger.info(f"User logged in: {user.username} (ID: {user.id})")
+    logger.info(f"User logged in: {user.username} (ID: {user.id}) - Path: {request.path}")
     return jsonify({
         'status': True,
         'user': user_data,
@@ -316,18 +361,18 @@ def spin():
     game_session = GameSession.query.filter_by(user_id=user.id, session_end=None).order_by(GameSession.session_start.desc()).first()
 
     if not game_session:
-        logger.warning(f"No active game session found for user {user.id} during spin attempt.")
+        logger.warning(f"No active game session found for user {user.id} during spin attempt. Path: {request.path}")
         return jsonify({'status': False, 'status_message': 'No active game session found. Please join a game first.'}), 404
 
     slot = Slot.query.get(game_session.slot_id)
-    print(slot) # Debug print to check slot details
+    logger.debug(f"Slot details for spin: {slot} - User: {user.id}, Path: {request.path}") # Replaced print with logger.debug
     if not slot:
-         logger.error(f"Slot ID {game_session.slot_id} not found for active session {game_session.id}.")
+         logger.error(f"Slot ID {game_session.slot_id} not found for active session {game_session.id}. User: {user.id}. Path: {request.path}")
          return jsonify({'status': False, 'status_message': 'Internal error: Slot associated with session not found.'}), 500
 
     # Check balance (using Satoshis)
     if user.balance < bet_amount_sats:
-        logger.warning(f"Insufficient balance for user {user.id} (Balance: {user.balance}, Bet: {bet_amount_sats})")
+        logger.warning(f"Insufficient balance for user {user.id} (Balance: {user.balance}, Bet: {bet_amount_sats}). Path: {request.path}")
         return jsonify({
             'status': False,
             'status_message': 'Insufficient balance'
@@ -344,7 +389,7 @@ def spin():
         user_data = UserSchema().dump(user) # Get updated user data
         session_data = GameSessionSchema().dump(game_session) # Get updated session data
 
-        logger.info(f"Spin successful for user {user.id}, session {game_session.id}. Bet: {bet_amount_sats}, Win: {result['win_amount_sats']}. New Balance: {user.balance}")
+        logger.info(f"Spin successful for user {user.id}, session {game_session.id}. Bet: {bet_amount_sats}, Win: {result['win_amount_sats']}. New Balance: {user.balance}. Path: {request.path}")
 
         return jsonify({
             'status': True,
@@ -361,15 +406,14 @@ def spin():
 
     except ValueError as ve: # Catch specific validation errors from spin_handler
         db.session.rollback()
-        logger.warning(f"Spin validation error for user {user.id}: {str(ve)}")
+        logger.warning(f"Spin validation error for user {user.id}: {str(ve)}. Path: {request.path}")
         return jsonify({'status': False, 'status_message': str(ve)}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error during spin for user {user.id}, session {game_session.id}: {str(e)}", exc_info=True)
+        logger.error(f"Error during spin for user {user.id}, session {game_session.id}: {str(e)}. Path: {request.path}", exc_info=True)
         return jsonify({
             'status': False,
-            'status_message': f"Error processing spin: {str(e)}" # Avoid exposing too much detail in prod
-            # 'status_message': 'An internal error occurred while processing your spin.' # Prod-friendly message
+            'status_message': 'An internal error occurred while processing your spin.'
         }), 500
 
 
@@ -391,10 +435,11 @@ def withdraw():
     withdraw_address = data['withdraw_wallet_address'] # Keep address validation basic for now
 
     if not isinstance(amount_sats, int) or amount_sats <= 0:
+         logger.warning(f"Invalid withdrawal amount by user {user.id}: {amount_sats}. Path: {request.path}")
          return jsonify({'status': False, 'status_message': 'Invalid withdrawal amount. Must be a positive integer (satoshis).'}), 400
 
     if user.balance < amount_sats:
-        logger.warning(f"Withdrawal failed for user {user.id}: Insufficient funds (Balance: {user.balance}, Requested: {amount_sats})")
+        logger.warning(f"Withdrawal failed for user {user.id}: Insufficient funds (Balance: {user.balance}, Requested: {amount_sats}). Path: {request.path}")
         return jsonify({'status': False, 'status_message': 'Insufficient funds'}), 400
 
     try:
@@ -411,7 +456,7 @@ def withdraw():
         db.session.add(transaction)
         db.session.commit()
 
-        logger.info(f"Withdrawal request created for user {user.id}: {amount_sats} sats to {withdraw_address}. Tx ID: {transaction.id}")
+        logger.info(f"Withdrawal request created for user {user.id}: {amount_sats} sats to {withdraw_address}. Tx ID: {transaction.id}. Path: {request.path}")
 
         # Return updated user data along with transaction ID
         user_data = UserSchema().dump(user)
@@ -424,7 +469,7 @@ def withdraw():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Withdrawal failed for user {user.id}: {str(e)}", exc_info=True)
+        logger.error(f"Withdrawal failed for user {user.id}: {str(e)}. Path: {request.path}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Withdrawal request failed due to an internal error.'}), 500
 
 @app.route('/api/settings', methods=['POST'])
@@ -595,7 +640,7 @@ def join_blackjack():
         logger.error(f"Error joining blackjack for user {current_user.id}, table {table_id}: {str(e)}", exc_info=True)
         return jsonify({
             'status': False,
-            'status_message': f"Error joining blackjack: {str(e)}"
+            'status_message': 'An internal error occurred while joining the blackjack game.'
         }), 500
 
 @app.route('/api/blackjack_action', methods=['POST'])
@@ -632,7 +677,7 @@ def blackjack_action():
         logger.error(f"Error processing blackjack action for user {current_user.id}, hand {hand_id}: {str(e)}", exc_info=True)
         return jsonify({
             'status': False,
-            'status_message': f"Error processing blackjack action: {str(e)}"
+            'status_message': 'An internal error occurred while processing your blackjack action.'
         }), 500
 
 # === Admin Routes ===
@@ -640,8 +685,10 @@ def blackjack_action():
 @jwt_required()
 def admin_dashboard():
     if not is_admin():
+        logger.warning(f"Non-admin user {current_user.id if current_user else 'Unknown'} attempted to access admin dashboard. Path: {request.path}")
         return jsonify({'status': False, 'status_message': 'Access denied: Administrator privileges required.'}), 403
     try:
+        logger.info(f"Admin dashboard accessed by user: {current_user.username} (ID: {current_user.id}). Path: {request.path}")
         total_users = db.session.query(User.id).count()
         total_sessions = db.session.query(GameSession.id).count()
         total_transactions = db.session.query(Transaction.id).count()
@@ -661,7 +708,7 @@ def admin_dashboard():
         return jsonify({'status': True, 'dashboard_data': dashboard_data}), 200
 
     except Exception as e:
-        logger.error(f"Admin dashboard data retrieval failed: {str(e)}", exc_info=True)
+        logger.error(f"Admin dashboard data retrieval failed for user {current_user.username} (ID: {current_user.id}): {str(e)}. Path: {request.path}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to retrieve admin dashboard data.'}), 500
 
 # --- Admin User Management ---

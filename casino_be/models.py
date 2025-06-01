@@ -1,9 +1,9 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone, timedelta
 from passlib.hash import pbkdf2_sha256 as sha256
-from sqlalchemy.dialects.postgresql import JSONB # Use JSONB for better performance in Postgres
-from sqlalchemy import BigInteger, Index # Import BigInteger and Index
-
+# from sqlalchemy.dialects.postgresql import JSONB # Use JSONB for better performance in Postgres
+# Use generic JSON for broader compatibility (SQLite in tests)
+from sqlalchemy import BigInteger, Index, JSON
 db = SQLAlchemy()
 
 class User(db.Model):
@@ -71,7 +71,7 @@ class SlotSpin(db.Model):
     __tablename__ = 'slot_spin'
     id = db.Column(db.Integer, primary_key=True)
     game_session_id = db.Column(db.Integer, db.ForeignKey('game_session.id'), nullable=False, index=True) # Added index
-    spin_result = db.Column(JSONB, nullable=False) # Use JSONB
+    spin_result = db.Column(db.JSON, nullable=False) # Use JSON
     win_amount = db.Column(BigInteger, nullable=False) # In satoshis
     bet_amount = db.Column(BigInteger, nullable=False) # In satoshis - Already existed, ensure type is BigInteger
     is_bonus_spin = db.Column(db.Boolean, default=False, nullable=False) # Added is_bonus_spin flag
@@ -88,7 +88,7 @@ class Transaction(db.Model):
     amount = db.Column(BigInteger, nullable=False) # In satoshis (can be negative for debits)
     transaction_type = db.Column(db.String(20), nullable=False, index=True) # e.g., 'deposit', 'withdraw', 'wager', 'win', 'bonus', 'transfer', 'adjustment'
     status = db.Column(db.String(15), default='completed', nullable=False, index=True) # e.g., 'pending', 'completed', 'failed', 'cancelled'
-    details = db.Column(JSONB, nullable=True) # Store related info like addresses, bonus codes, related tx_id etc.
+    details = db.Column(db.JSON, nullable=True) # Store related info like addresses, bonus codes, related tx_id etc.
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True) # Added index
 
     # Foreign keys for linking to specific game events
@@ -170,7 +170,7 @@ class SlotSymbol(db.Model):
     # Replaced is_wild/is_scatter with FKs in Slot table
     # is_wild = db.Column(db.Boolean, default=False, nullable=False)
     # is_scatter = db.Column(db.Boolean, default=False, nullable=False)
-    data = db.Column(JSONB, nullable=True) # Store extra data like animation details, sound effects
+    data = db.Column(db.JSON, nullable=True) # Store extra data like animation details, sound effects
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
@@ -223,7 +223,7 @@ class BlackjackTable(db.Model):
     min_bet = db.Column(BigInteger, nullable=False)  # in satoshis
     max_bet = db.Column(BigInteger, nullable=False)  # in satoshis
     deck_count = db.Column(db.Integer, nullable=False)
-    rules = db.Column(JSONB, nullable=True)  # JSON field for specific rules
+    rules = db.Column(db.JSON, nullable=True)  # JSON field for specific rules
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
@@ -245,10 +245,10 @@ class BlackjackHand(db.Model):
     initial_bet = db.Column(BigInteger, nullable=False)  # in satoshis
     total_bet = db.Column(BigInteger, nullable=False)  # in satoshis (includes doubles, splits)
     win_amount = db.Column(BigInteger, nullable=True)  # in satoshis
-    player_cards = db.Column(JSONB, nullable=False)  # JSON array of card objects
-    dealer_cards = db.Column(JSONB, nullable=False)  # JSON array of card objects
-    player_hands = db.Column(JSONB, nullable=False)  # JSON array of hand objects (for splits)
-    dealer_hand = db.Column(JSONB, nullable=False)  # JSON object for dealer hand
+    player_cards = db.Column(db.JSON, nullable=False)  # JSON array of card objects
+    dealer_cards = db.Column(db.JSON, nullable=False)  # JSON array of card objects
+    player_hands = db.Column(db.JSON, nullable=False)  # JSON array of hand objects (for splits)
+    dealer_hand = db.Column(db.JSON, nullable=False)  # JSON object for dealer hand
     status = db.Column(db.String(20), nullable=False, index=True)  # 'active', 'completed', 'cancelled'
     result = db.Column(db.String(20), nullable=True)  # 'win', 'lose', 'push', 'blackjack'
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -268,7 +268,7 @@ class BlackjackAction(db.Model):
     hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id'), nullable=False, index=True)
     action_type = db.Column(db.String(20), nullable=False)  # 'hit', 'stand', 'double', 'split'
     hand_index = db.Column(db.Integer, nullable=False)  # Which hand the action applies to (for splits)
-    card_dealt = db.Column(JSONB, nullable=True)  # Card dealt as a result of the action
+    card_dealt = db.Column(db.JSON, nullable=True)  # Card dealt as a result of the action
     hand_total = db.Column(db.Integer, nullable=True)  # Hand total after the action
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 

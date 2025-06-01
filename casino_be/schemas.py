@@ -4,7 +4,7 @@ from marshmallow.validate import OneOf, Range, Length, Email, Regexp
 from datetime import datetime, timezone
 import re
 
-from models import db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, BlackjackTable, BlackjackHand, BlackjackAction # Import models
+from .models import db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, BlackjackTable, BlackjackHand, BlackjackAction # Import models
 
 # --- Helper ---
 def validate_password(password):
@@ -33,8 +33,13 @@ class UserSchema(SQLAlchemyAutoSchema):
         model = User
         load_instance = True
         sqla_session = db.session
-        # Exclude sensitive fields
-        exclude = ("password", "deposit_wallet_private_key", "transactions", "game_sessions")
+        # Explicitly list fields to include, excluding sensitive ones
+        # This also helps avoid issues with fields that might have been removed from model but linger in some cache/introspection
+        only = (
+            "id", "username", "email", "balance", "deposit_wallet_address",
+            "is_admin", "is_active", "created_at", "last_login_at", "balance_btc"
+        )
+        # exclude = ("password", "deposit_wallet_private_key", "transactions", "game_sessions") # Keep for reference
 
     id = auto_field(dump_only=True)
     username = auto_field()
