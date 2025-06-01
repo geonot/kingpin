@@ -9,15 +9,14 @@ const apiClient = axios.create({
   },
 });
 
-// This is tricky because 'store' is not defined yet at this point in the module execution.
-// A common solution is to inject the store after it's created.
-// For this exercise, we'll attempt a simplified version or note the limitation.
-// Let's assume for now we'll handle token injection and refresh more directly in actions
-// if direct store access in interceptors here is problematic.
+let storeInstance; // To be set later
+export const setStoreForApiClient = (store) => {
+  storeInstance = store;
+};
 
 // Request interceptor for API token
 apiClient.interceptors.request.use(config => {
-  const token = localStorage.getItem('userSession'); // Get token from localStorage directly
+  const token = localStorage.getItem('userSession');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -27,15 +26,6 @@ apiClient.interceptors.request.use(config => {
 });
 
 // Response interceptor for handling 401 and token refresh
-// This will require access to the store's dispatch method.
-// We will define this interceptor more fully after the store is created,
-// or simplify its direct usage here and handle refresh more explicitly in actions.
-// For now, let's set up a basic one that doesn't immediately try to dispatch.
-let storeInstance; // To be set later
-export const setStoreForApiClient = (store) => {
-  storeInstance = store;
-};
-
 apiClient.interceptors.response.use(response => {
   return response;
 }, async error => {
@@ -45,44 +35,44 @@ apiClient.interceptors.response.use(response => {
     try {
       const refreshData = await storeInstance.dispatch('refreshToken');
       if (refreshData && refreshData.access_token) {
-        // apiClient.defaults.headers.common['Authorization'] = 'Bearer ' + refreshData.access_token; // Update default for subsequent
-        originalRequest.headers.Authorization = `Bearer ${refreshData.access_token}`; // Update current request
+        originalRequest.headers.Authorization = `Bearer ${refreshData.access_token}`;
         return apiClient(originalRequest);
       } else {
         await storeInstance.dispatch('logout');
-        // router.push('/login'); // Requires router instance, handle in UI components
         return Promise.reject(error);
       }
     } catch (refreshError) {
       await storeInstance.dispatch('logout');
-      // router.push('/login');
       return Promise.reject(refreshError);
     }
   }
   return Promise.reject(error);
 });
 
-
-// const SATOSHI_FACTOR = 100_000_000; // Not used in this file currently
-
 export default createStore({
   state: {
-    user: null, // Will hold: { id, username, email, balance, deposit_wallet_address, is_admin, is_active, created_at, last_login_at }
-    userSession: localStorage.getItem('userSession') || null, // Access Token (JWT)
-    refreshToken: localStorage.getItem('refreshToken') || null, // Refresh Token (JWT)
-    slots: [], // Array of slot objects from /api/slots
+    user: null,
+    userSession: localStorage.getItem('userSession') || null,
+    refreshToken: localStorage.getItem('refreshToken') || null,
+    slots: [],
     slotsLoaded: false,
-    currentSlotConfig: null, // Holds configuration for a single slot
-    tables: [], // Array of table objects from /api/tables
+    currentSlotConfig: null,
+    tables: [],
     tablesLoaded: false,
-    currentTableConfig: null, // Holds configuration for a single table
+    currentTableConfig: null,
+    globalError: null, // For global error notifications
   },
   mutations: {
+    setGlobalError(state, errorMessage) {
+      state.globalError = errorMessage;
+      // Optionally, set a timer to clear it
+      // setTimeout(() => { state.globalError = null; }, 5000);
+    },
+    clearGlobalError(state) {
+      state.globalError = null;
+    },
     setUser(state, userData) {
       state.user = userData;
-      // No need to stringify/parse for localStorage if only storing tokens,
-      // or if user object is simple and non-sensitive for caching.
-      // For this refactor, user object is not stored in localStorage directly, only tokens.
     },
     setAuthTokens(state, { accessToken, refreshToken }) {
       state.userSession = accessToken;
@@ -104,7 +94,6 @@ export default createStore({
       state.refreshToken = null;
       localStorage.removeItem('userSession');
       localStorage.removeItem('refreshToken');
-      // localStorage.removeItem('user'); // Removed as user object isn't directly stored now
     },
     setSlots(state, slots) {
       state.slots = slots;
@@ -128,22 +117,21 @@ export default createStore({
   },
   actions: {
     // --- Authentication ---
-    async register({ dispatch }, payload) { // Changed: dispatch fetchUserProfile
+    async register({ dispatch }, payload) {
       try {
         const response = await apiClient.post('/register', payload);
         const data = response.data;
         if (data.status && data.access_token && data.refresh_token) {
-          // setUser and setAuthTokens will be handled by fetchUserProfile after this
-          // Or, commit tokens here, then fetch user profile
           dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token, refreshToken: data.refresh_token });
         }
         return data;
       } catch (error) {
+        // Assuming specific error messages for registration are handled by the component
         console.error("Registration Error:", error.response?.data || error.message);
         return error.response?.data || { status: false, status_message: "Network error during registration." };
       }
     },
-    async login({ dispatch }, payload) { // Changed: dispatch fetchUserProfile
+    async login({ dispatch, commit }, payload) { // Added commit
       try {
         const response = await apiClient.post('/login', payload);
         const data = response.data;
@@ -152,11 +140,15 @@ export default createStore({
         }
         return data;
       } catch (error) {
-        console.error("Login Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error during login." };
+        const errData = error.response?.data;
+        const defaultMessage = "Login failed. Please try again later.";
+        if (error.response?.status !== 401) {
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Login Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
-    // Helper action
     async setAuthTokensAndFetchUser({ commit, dispatch }, { accessToken, refreshToken }) {
         commit('setAuthTokens', { accessToken, refreshToken });
         if (accessToken) {
@@ -165,107 +157,96 @@ export default createStore({
     },
     async refreshToken({ commit, state, dispatch }) {
       if (!state.refreshToken) {
-        await dispatch('logout'); // Ensure full logout if no refresh token
+        await dispatch('logout');
         return { status: false, status_message: "No refresh token available. Logged out." };
       }
       try {
-        // Temporarily remove the Authorization header for the refresh token request if it's automatically added
-        // Or ensure the request interceptor doesn't add it for '/refresh' path.
-        // For simplicity, create a new axios instance or use a clean config for refresh.
         const refreshApiClient = axios.create({ baseURL: '/api' });
         const response = await refreshApiClient.post('/refresh', {}, {
           headers: { Authorization: `Bearer ${state.refreshToken}` }
         });
-
         const data = response.data;
         if (data.status && data.access_token) {
-          commit('setAuthTokens', { accessToken: data.access_token, refreshToken: state.refreshToken }); // Keep old refresh token
+          commit('setAuthTokens', { accessToken: data.access_token, refreshToken: state.refreshToken });
           return { status: true, access_token: data.access_token };
         } else {
-          await dispatch('logout'); // Refresh failed, token likely invalid
+          await dispatch('logout');
           return { status: false, status_message: data.status_message || "Session refresh failed. Logged out." };
         }
       } catch (error) {
         console.error("Token Refresh Error:", error.response?.data || error.message);
-        await dispatch('logout'); // Critical error on refresh
+        await dispatch('logout');
         return { status: false, status_message: "Session expired. Please log in again." };
       }
     },
     async logout({ commit, state }) {
       const accessToken = state.userSession;
       const refreshToken = state.refreshToken;
-
-      // Perform local logout immediately
       commit('clearAuth');
-
       try {
         if (accessToken) {
-          await apiClient.post('/logout', {}); // Access token invalidated by interceptor adding it
+          await apiClient.post('/logout', {});
         }
         if (refreshToken) {
-          // logout2 needs its own token, so create a temporary client or set header manually
           const tempApiClient = axios.create({ baseURL: '/api' });
           await tempApiClient.post('/logout2', {}, { headers: { Authorization: `Bearer ${refreshToken}` } });
         }
         return { status: true, status_message: "Logged out successfully from server." };
       } catch (error) {
         console.warn("Server Logout Error:", error.response?.data || error.message);
-        // Local logout already performed, this is best effort.
         return { status: true, status_message: "Logged out locally. Server session might still be active." };
       }
     },
-    async loadSession({ dispatch }) { // Changed: always dispatch fetchUserProfile
+    async loadSession({ dispatch }) {
       const accessToken = localStorage.getItem('userSession');
       if (accessToken) {
-        // Tokens are already set by the 'setAuthTokens' mutation if they exist in localStorage.
-        // We just need to fetch the user profile.
-        // The request interceptor will add the token.
         await dispatch('fetchUserProfile');
       } else {
-        // No token, ensure state is clean (though clearAuth on logout should handle this)
-        dispatch('logout'); // This will also clear any potentially stale refresh token from state
+        dispatch('logout');
       }
     },
-    async fetchUserProfile({ commit }) { // Removed state from params, token comes from interceptor
+    async fetchUserProfile({ commit }) {
       try {
-        const response = await apiClient.get('/me'); // Endpoint changed from /api/me to /me due to baseURL
+        const response = await apiClient.get('/me');
         if (response.data.status) {
           commit('setUser', response.data.user);
           return response.data.user;
         } else {
           console.warn("Failed to fetch user profile:", response.data.status_message);
-          // Do not logout here, let 401 interceptor handle it if it's an auth issue
           return null;
         }
       } catch (error) {
         console.error("Error fetching user profile:", error.response?.data || error.message);
-        // If 401, interceptor should handle. Otherwise, it's a network or server error.
-        // No automatic logout here unless it's confirmed an auth failure not handled by interceptor.
         return null;
       }
     },
 
     // --- Game Data ---
-    async fetchSlots({ commit, state }) {
-      // if (state.slotsLoaded && !forceRefresh) return state.slots; // Keep loaded data unless forced
+    async fetchSlots({ commit }) { // Removed state from params as it's not used directly before try
       try {
-        const response = await apiClient.get('/slots'); // Auth might not be needed for public slot list
+        const response = await apiClient.get('/slots');
         if (response.data.status && Array.isArray(response.data.slots)) {
           commit('setSlots', response.data.slots);
-          return response.data; // Return the whole response object {status, slots}
+          return response.data;
         } else {
-          console.error('Error fetching slots:', response.data.status_message || 'API returned non-status-true or invalid data');
-          return { status: false, status_message: response.data.status_message || 'Failed to parse slots data.' };
+          const errorMessage = response.data.status_message || 'Failed to parse slots data.';
+          commit('setGlobalError', errorMessage);
+          console.error('Error fetching slots:', errorMessage);
+          return { status: false, status_message: errorMessage };
         }
       } catch (error) {
-        console.error('Network error fetching slots:', error.response?.data || error.message);
-        return { status: false, status_message: error.response?.data?.status_message || "Network error fetching slots." };
+        const errData = error.response?.data;
+        const defaultMessage = "Failed to load slot machines. Please try again.";
+        if (error.response?.status !== 401) {
+          commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error('Network error fetching slots:', errData || error.message);
+        return { status: false, status_message: errData?.status_message || defaultMessage };
       }
     },
     async fetchSlotConfig({ commit, state, dispatch }, slotId) {
       if (!state.slotsLoaded) {
         const fetchResult = await dispatch('fetchSlots');
-        // Check if fetchSlots returned an error object or actual data
         if (fetchResult.status === false || !fetchResult.slots) {
             console.error("fetchSlots failed, cannot filter for slot config");
             return null;
@@ -277,33 +258,30 @@ export default createStore({
         return slot;
       } else {
         console.error(`Slot config for ID ${slotId} not found in loaded slots.`);
-        // Optional: If backend supports fetching a single slot by ID:
-        // try {
-        //   const response = await apiClient.get(`/slots/${slotId}`);
-        //   if (response.data.status && response.data.slot) {
-        //     commit('setCurrentSlotConfig', response.data.slot);
-        //     return response.data.slot;
-        //   }
-        // } catch (error) {
-        //   console.error(`Direct fetch for slot ID ${slotId} failed:`, error.response?.data || error.message);
-        // }
         return null;
       }
     },
-    async fetchTables({ commit, state }) {
-      // if (state.tablesLoaded && !forceRefresh) return state.tables;
+    async fetchTables({ commit }) { // Removed state from params
       try {
-        const response = await apiClient.get('/tables'); // Auth might not be needed
+        const response = await apiClient.get('/tables');
         if (response.data.status && Array.isArray(response.data.tables)) {
           commit('setTables', response.data.tables);
-          return response.data; // Return {status, tables}
+          return response.data;
         } else {
-           console.error('Error fetching tables:', response.data.status_message || 'API returned non-status-true or invalid data');
-           return { status: false, status_message: response.data.status_message || 'Failed to parse tables data.' };
+           const errorMessage = response.data.status_message || 'Failed to parse tables data.';
+           // Consider if this specific error should be global or handled by component
+           // commit('setGlobalError', errorMessage);
+           console.error('Error fetching tables:', errorMessage);
+           return { status: false, status_message: errorMessage };
         }
       } catch (error) {
-        console.error('Network error fetching tables:', error.response?.data || error.message);
-        return { status: false, status_message: error.response?.data?.status_message || "Network error fetching tables." };
+        const errData = error.response?.data;
+        const defaultMessage = "Failed to load tables. Please try again.";
+        // if (error.response?.status !== 401) { // Example if global error is desired here too
+        //   commit('setGlobalError', errData?.status_message || defaultMessage);
+        // }
+        console.error('Network error fetching tables:', errData || error.message);
+        return { status: false, status_message: errData?.status_message || defaultMessage };
       }
     },
     async fetchTableConfig({ commit, state, dispatch }, tableId) {
@@ -325,29 +303,33 @@ export default createStore({
     },
 
     // --- Gameplay Actions ---
-    async endSession() {
+    async endSession({commit}) { // Added commit (not used yet, but good practice if global errors needed)
       try {
         const response = await apiClient.post('/end_session', {});
-        // Backend only returns status and message, no user/balance update needed here.
         return response.data;
       } catch (error) {
-        console.error("End Session Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error ending game session." };
+        const errData = error.response?.data;
+        const defaultMessage = "Network error ending game session.";
+        if (error.response?.status !== 401) {
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("End Session Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
     async joinGame({ commit }, payload) {
       try {
-        // Ensure game_type is present, defaulting if necessary (though backend might also default)
         payload.game_type = payload.game_type || (payload.slot_id ? 'slot' : (payload.table_id ? 'blackjack' : 'unknown'));
         const response = await apiClient.post('/join', payload);
-        // Backend's /join endpoint currently returns { status, game_session, session_id }
-        // It does not return the user object or balance.
-        // If user balance is affected by join (e.g. theoretical entry fee), backend should handle & return new balance.
-        // For now, no direct user balance mutation here based on current backend spec.
         return response.data;
       } catch (error) {
-        console.error("Join Game Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error joining game." };
+        const errData = error.response?.data;
+        const defaultMessage = "Network error joining game.";
+        if (error.response?.status !== 401) {
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Join Game Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
     async spin({ commit }, payload) {
@@ -356,16 +338,19 @@ export default createStore({
         if (isNaN(betAmount) || betAmount <= 0) {
             return { status: false, status_message: "Invalid bet amount."};
         }
-        const response = await apiClient.post('/spin', { bet_amount: betAmount }); // Send only bet_amount
+        const response = await apiClient.post('/spin', { bet_amount: betAmount });
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
-          // The spin response also contains game_session data, could update that if needed.
-          // commit('setCurrentGameSessionDetails', response.data.game_session); // Example
         }
-        return response.data; // Full response: { result, win_amount, winning_lines, bonus_*, game_session, user }
+        return response.data;
       } catch (error) {
-        console.error("Spin Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error during spin." };
+        const errData = error.response?.data;
+        const defaultMessage = "Network error during spin.";
+         if (error.response?.status !== 400 && error.response?.status !== 401 ) { // 400 might be "insufficient balance"
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Spin Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
     async joinBlackjack({ commit }, payload) {
@@ -381,28 +366,33 @@ export default createStore({
         const response = await apiClient.post('/join_blackjack', { table_id: tableId, bet_amount: betAmount });
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
-          // The response also contains 'hand' data which might be stored.
-          // commit('setCurrentBlackjackHand', response.data.hand); // Example
         }
-        return response.data; // Full response: { hand, user }
+        return response.data;
       } catch (error) {
-        console.error("Join Blackjack Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error joining blackjack." };
+        const errData = error.response?.data;
+        const defaultMessage = "Network error joining blackjack.";
+        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 might be validation error
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Join Blackjack Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
     async blackjackAction({ commit }, payload) {
       try {
-        // hand_id, action_type, hand_index (optional)
         const response = await apiClient.post('/blackjack_action', payload);
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
-          // The response also contains 'action_result' (updated hand state)
-          // commit('updateCurrentBlackjackHand', response.data.action_result); // Example
         }
-        return response.data; // Full response: { action_result, user }
+        return response.data;
       } catch (error) {
-        console.error("Blackjack Action Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error during blackjack action." };
+        const errData = error.response?.data;
+        const defaultMessage = "Network error during blackjack action.";
+        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 might be validation error
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Blackjack Action Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
 
@@ -420,48 +410,63 @@ export default createStore({
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
-        return response.data; // { status, withdraw_id, user, status_message }
+        return response.data;
       } catch (error) {
-        console.error("Withdraw Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error during withdrawal." };
+        const errData = error.response?.data;
+        const defaultMessage = "Network error during withdrawal.";
+        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 insufficient funds
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Withdraw Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
     async updateSettings({ commit }, payload) {
       try {
         const response = await apiClient.post('/settings', payload);
         if (response.data.status && response.data.user) {
-          commit('setUser', response.data.user); // Update full user object
+          commit('setUser', response.data.user);
         }
-        return response.data; // { status, user, status_message? }
-      } catch (error) {
-        console.error("Update Settings Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error updating settings." };
+        return response.data;
+      } catch (error)_ { // Typo here, should be (error)
+        const errData = error.response?.data;
+        const defaultMessage = "Network error updating settings.";
+        if (error.response?.status !== 400 && error.response?.status !== 401 && error.response?.status !== 409) { // 409 email exists
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Update Settings Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
     async applyBonusCode({ commit }, payload) {
       try {
-        const response = await apiClient.post('/deposit', payload); // Backend uses /deposit for bonus codes
+        const response = await apiClient.post('/deposit', payload);
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
-        return response.data; // { status, user, status_message }
+        return response.data;
       } catch (error) {
-        console.error("Apply Bonus Code Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error applying bonus code." };
+        const errData = error.response?.data;
+        const defaultMessage = "Network error applying bonus code.";
+        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 invalid code
+            commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
+        console.error("Apply Bonus Code Error:", errData || error.message);
+        return errData || { status: false, status_message: defaultMessage };
       }
     },
   },
   getters: {
     isAuthenticated: (state) => !!state.userSession,
     currentUser: (state) => state.user,
-    isAdmin: (state) => state.user?.is_admin === true, // Explicitly check for true
+    isAdmin: (state) => state.user?.is_admin === true,
     getSlots: (state) => state.slots,
     getSlotById: (state) => (id) => {
       return state.slots.find(slot => slot.id === Number(id));
     },
     getTables: (state) => state.tables,
     getTableById: (state) => (id) => {
-      return state.tables.find(table => table.id === Number(table.id)); // Corrected: table.id
+      return state.tables.find(table => table.id === Number(table.id));
     },
   },
   modules: {},

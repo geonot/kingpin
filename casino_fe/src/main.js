@@ -18,6 +18,11 @@ app.config.globalProperties.$bus = emitter;
 
 // Use plugins
 app.use(store);
+
+// Provide the store instance to the apiClient in store/index.js for interceptors
+import { setStoreForApiClient } from '@/store'; // Assuming store/index.js
+setStoreForApiClient(store);
+
 app.use(router);
 
 // Mount the app
