@@ -1,8 +1,15 @@
 from __future__ import with_statement
 
+import sys # Import sys
+import os # Import os
+from os.path import abspath, dirname # Import abspath and dirname
+
+# Add the parent directory of 'migrations' (i.e., 'casino_be') to sys.path
+# This allows 'from models import db' to work correctly.
+sys.path.insert(0, dirname(dirname(abspath(__file__))))
+
 import logging
 from logging.config import fileConfig
-import os # Import os
 
 from flask import current_app
 from sqlalchemy import engine_from_config, pool # Import necessary components

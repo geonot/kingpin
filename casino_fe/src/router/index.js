@@ -12,6 +12,7 @@ const Login = () => import('@views/Login.vue');
 const Deposit = () => import('@views/Deposit.vue');
 const Withdraw = () => import('@views/Withdraw.vue');
 const Settings = () => import('@views/Settings.vue');
+const Spacecrash = () => import('@/views/Spacecrash.vue'); // Import Spacecrash view
 
 // Placeholder components for routes added
 const Terms = () => import('@/views/static/TermsPage.vue');
@@ -83,6 +84,12 @@ const routes = [
     name: 'Settings',
     component: Settings,
     meta: { title: 'Settings', requiresAuth: true }
+  },
+  {
+    path: '/spacecrash',
+    name: 'Spacecrash',
+    component: Spacecrash,
+    meta: { title: 'Spacecrash', requiresAuth: true }
   },
    // Placeholder routes for footer links
   { path: '/terms', name: 'Terms', component: Terms, meta: { title: 'Terms & Conditions' } },

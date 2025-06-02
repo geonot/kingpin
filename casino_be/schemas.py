@@ -4,7 +4,7 @@ from marshmallow.validate import OneOf, Range, Length, Email, Regexp
 from datetime import datetime, timezone
 import re
 
-from .models import db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, BlackjackTable, BlackjackHand, BlackjackAction # Import models
+from .models import db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, SpacecrashGame, SpacecrashBet # Import models
 
 # --- Helper ---
 def validate_password(password):
@@ -482,3 +482,67 @@ class BlackjackActionRequestSchema(Schema):
     hand_id = fields.Int(required=True, validate=Range(min=1))
     action_type = fields.Str(required=True, validate=OneOf(['hit', 'stand', 'double', 'split']))
     hand_index = fields.Int(required=True, validate=Range(min=0)) # Removed load_default for required field
+
+
+# --- Spacecrash Schemas ---
+class SpacecrashBetSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = SpacecrashBet
+        load_instance = True
+        sqla_session = db.session
+        # Fields for placing a bet (request)
+        # For response, we might want to dump more fields
+        only = ("bet_amount", "auto_eject_at")
+
+
+    bet_amount = fields.Integer(required=True, validate=Range(min=1)) # Min 1 satoshi
+    auto_eject_at = fields.Float(required=False, allow_none=True, validate=Range(min=1.01)) # Min eject 1.01x
+
+class SpacecrashPlayerBetSchema(SQLAlchemyAutoSchema):
+    """Minimal bet info for public game display"""
+    class Meta:
+        model = SpacecrashBet
+        sqla_session = db.session
+        only = ("user_id", "bet_amount", "ejected_at", "win_amount", "status") # Add username later via method field for privacy
+
+    user_id = auto_field(dump_only=True) # Consider replacing with username or masked ID
+    # username = fields.Method("get_username", dump_only=True) # Example for privacy
+    bet_amount = auto_field(dump_only=True)
+    ejected_at = auto_field(dump_only=True)
+    win_amount = auto_field(dump_only=True)
+    status = auto_field(dump_only=True)
+
+    # def get_username(self, obj):
+    #     return obj.user.username # Requires eager/joined loading of user or separate query
+
+class SpacecrashGameSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = SpacecrashGame
+        load_instance = True # Not typically needed for dump-only schemas
+        sqla_session = db.session
+        # include_relationships = True # To include 'bets' relationship
+        exclude = ("server_seed", "client_seed", "nonce") # Exclude sensitive/internal fields by default
+
+    id = auto_field(dump_only=True)
+    crash_point = auto_field(dump_only=True)
+    public_seed = auto_field(dump_only=True)
+    status = auto_field(dump_only=True)
+    game_start_time = auto_field(dump_only=True)
+    game_end_time = auto_field(dump_only=True)
+    created_at = auto_field(dump_only=True)
+
+    # For /api/spacecrash/current_game
+    current_multiplier = fields.Float(dump_only=True, allow_none=True) # To be calculated based on game status and start time
+    player_bets = fields.List(fields.Nested(SpacecrashPlayerBetSchema), dump_only=True)
+
+class SpacecrashGameHistorySchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = SpacecrashGame
+        sqla_session = db.session
+        only = ("id", "crash_point", "game_end_time", "public_seed", "status") # Only show relevant history fields
+
+    id = auto_field(dump_only=True)
+    crash_point = auto_field(dump_only=True)
+    game_end_time = auto_field(dump_only=True)
+    public_seed = auto_field(dump_only=True)
+    status = auto_field(dump_only=True)

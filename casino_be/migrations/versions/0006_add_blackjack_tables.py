@@ -7,7 +7,7 @@ Create Date: 2025-03-30 21:15:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
+# from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision = '0006_add_blackjack_tables'
@@ -26,10 +26,10 @@ def upgrade():
         sa.Column('min_bet', sa.BigInteger(), nullable=False),  # in satoshis
         sa.Column('max_bet', sa.BigInteger(), nullable=False),  # in satoshis
         sa.Column('deck_count', sa.Integer(), nullable=False),
-        sa.Column('rules', JSONB, nullable=True),  # JSON field for specific rules
+        sa.Column('rules', sa.JSON(), nullable=True),  # JSON field for specific rules
         sa.Column('is_active', sa.Boolean(), nullable=False, default=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
         sa.PrimaryKeyConstraint('id')
     )
     
@@ -43,14 +43,14 @@ def upgrade():
         sa.Column('initial_bet', sa.BigInteger(), nullable=False),  # in satoshis
         sa.Column('total_bet', sa.BigInteger(), nullable=False),  # in satoshis (includes doubles, splits)
         sa.Column('win_amount', sa.BigInteger(), nullable=True),  # in satoshis
-        sa.Column('player_cards', JSONB, nullable=False),  # JSON array of card objects
-        sa.Column('dealer_cards', JSONB, nullable=False),  # JSON array of card objects
-        sa.Column('player_hands', JSONB, nullable=False),  # JSON array of hand objects (for splits)
-        sa.Column('dealer_hand', JSONB, nullable=False),  # JSON object for dealer hand
+        sa.Column('player_cards', sa.JSON(), nullable=False),  # JSON array of card objects
+        sa.Column('dealer_cards', sa.JSON(), nullable=False),  # JSON array of card objects
+        sa.Column('player_hands', sa.JSON(), nullable=False),  # JSON array of hand objects (for splits)
+        sa.Column('dealer_hand', sa.JSON(), nullable=False),  # JSON object for dealer hand
         sa.Column('status', sa.String(length=20), nullable=False),  # 'active', 'completed', 'cancelled'
         sa.Column('result', sa.String(length=20), nullable=True),  # 'win', 'lose', 'push', 'blackjack'
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
         sa.ForeignKeyConstraint(['table_id'], ['blackjack_table.id'], ),
@@ -65,9 +65,9 @@ def upgrade():
         sa.Column('hand_id', sa.Integer(), nullable=False),
         sa.Column('action_type', sa.String(length=20), nullable=False),  # 'hit', 'stand', 'double', 'split'
         sa.Column('hand_index', sa.Integer(), nullable=False),  # Which hand the action applies to (for splits)
-        sa.Column('card_dealt', JSONB, nullable=True),  # Card dealt as a result of the action
+        sa.Column('card_dealt', sa.JSON(), nullable=True),  # Card dealt as a result of the action
         sa.Column('hand_total', sa.Integer(), nullable=True),  # Hand total after the action
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
         sa.ForeignKeyConstraint(['hand_id'], ['blackjack_hand.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
