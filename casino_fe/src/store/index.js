@@ -64,6 +64,14 @@ export default createStore({
     adminDashboardData: null,
     adminDashboardError: null,
     isAdminDataLoading: false, // For loading state
+    isLoadingGlobal: false, // For global loading indicator
+    adminUsers: [],
+    adminUsersCurrentPage: 1,
+    adminUsersTotalPages: 1,
+    adminUsersPerPage: 20,
+    adminUsersTotalCount: 0,
+    isAdminUsersLoading: false,
+    adminUsersError: null,
   },
   mutations: {
     setGlobalError(state, errorMessage) {
@@ -130,6 +138,33 @@ export default createStore({
     setAdminDataLoading(state) {
       state.isAdminDataLoading = true;
       state.adminDashboardError = null; // Clear previous error on new load
+    },
+    setGlobalLoading(state, isLoading) { // Generic setter
+      state.isLoadingGlobal = isLoading;
+    },
+    startGlobalLoading(state) {
+      state.isLoadingGlobal = true;
+    },
+    stopGlobalLoading(state) {
+      state.isLoadingGlobal = false;
+    },
+    setAdminUsersLoading(state, isLoading) {
+      state.isAdminUsersLoading = isLoading;
+      state.adminUsersError = null;
+    },
+    setAdminUsersData(state, { users, page, pages, per_page, total }) {
+      state.adminUsers = users;
+      state.adminUsersCurrentPage = page;
+      state.adminUsersTotalPages = pages;
+      state.adminUsersPerPage = per_page;
+      state.adminUsersTotalCount = total;
+      state.isAdminUsersLoading = false;
+      state.adminUsersError = null;
+    },
+    setAdminUsersError(state, error) {
+      state.adminUsers = [];
+      state.isAdminUsersLoading = false;
+      state.adminUsersError = error;
     }
   },
   actions: {
@@ -148,7 +183,8 @@ export default createStore({
         return error.response?.data || { status: false, status_message: "Network error during registration." };
       }
     },
-    async login({ dispatch, commit }, payload) { // Added commit
+    async login({ dispatch, commit }, payload) {
+      commit('startGlobalLoading');
       try {
         const response = await apiClient.post('/login', payload);
         const data = response.data;
@@ -164,6 +200,8 @@ export default createStore({
         }
         console.error("Login Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
+      } finally {
+        commit('stopGlobalLoading');
       }
     },
     async setAuthTokensAndFetchUser({ commit, dispatch }, { accessToken, refreshToken }) {
@@ -214,12 +252,18 @@ export default createStore({
         return { status: true, status_message: "Logged out locally. Server session might still be active." };
       }
     },
-    async loadSession({ dispatch }) {
+    async loadSession({ dispatch, commit }) {
       const accessToken = localStorage.getItem('userSession');
       if (accessToken) {
-        await dispatch('fetchUserProfile');
+        commit('startGlobalLoading');
+        try {
+            await dispatch('fetchUserProfile');
+        } finally {
+            commit('stopGlobalLoading');
+        }
       } else {
-        dispatch('logout');
+        // No action needed here if token doesn't exist, user is effectively logged out.
+        // dispatch('logout'); // This was removed as per instruction.
       }
     },
     async fetchUserProfile({ commit }) {
@@ -490,6 +534,30 @@ export default createStore({
         const errorMsg = error.response?.data?.status_message || error.message || 'Network error fetching admin dashboard data.';
         commit('setAdminDashboardError', errorMsg);
         // commit('setGlobalError', errorMsg);
+        return null;
+      }
+    },
+    async fetchAdminUsers({ commit, state }, page = 1) {
+      commit('setAdminUsersLoading', true);
+      try {
+        const response = await apiClient.get(`/admin/users?page=${page}&per_page=${state.adminUsersPerPage}`);
+        if (response.data.status && response.data.users && response.data.users.items) {
+          commit('setAdminUsersData', {
+            users: response.data.users.items,
+            page: response.data.users.page,
+            pages: response.data.users.pages,
+            per_page: response.data.users.per_page,
+            total: response.data.users.total
+          });
+          return response.data.users;
+        } else {
+          const errorMsg = response.data.status_message || 'Failed to fetch admin users list.';
+          commit('setAdminUsersError', errorMsg);
+          return null;
+        }
+      } catch (error) {
+        const errorMsg = error.response?.data?.status_message || error.message || 'Network error fetching admin users.';
+        commit('setAdminUsersError', errorMsg);
         return null;
       }
     }

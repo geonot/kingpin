@@ -3,7 +3,7 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone
-from casino_be.models import db, SlotSpin, GameSession, User, Transaction # Added GameSession, User, Transaction
+from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserBonus # Added UserBonus
 # SlotSymbol might not be directly used if all config comes from JSON, but keep for now
 
 # --- Configuration ---
@@ -69,6 +69,29 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
 
         if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0) :
             raise ValueError("Insufficient balance for this bet.")
+
+        # --- Update Wagering Progress if Active Bonus (for PAID spins) ---
+        actual_bet_this_spin_for_wagering = 0
+        if not (game_session.bonus_active and game_session.bonus_spins_remaining > 0): # i.e., if this is a paid spin
+            actual_bet_this_spin_for_wagering = bet_amount_sats
+
+        if actual_bet_this_spin_for_wagering > 0:
+            active_bonus = UserBonus.query.filter_by(
+                user_id=user.id,
+                is_active=True,
+                is_completed=False,
+                is_cancelled=False
+            ).first()
+
+            if active_bonus:
+                active_bonus.wagering_progress_sats += actual_bet_this_spin_for_wagering
+                active_bonus.updated_at = datetime.now(timezone.utc)
+
+                if active_bonus.wagering_progress_sats >= active_bonus.wagering_requirement_sats:
+                    active_bonus.is_active = False
+                    active_bonus.is_completed = True
+                    active_bonus.completed_at = datetime.now(timezone.utc)
+                    # print(f"User {user.id} completed wagering for UserBonus {active_bonus.id}.") # Logging handled by caller or removed for now
 
         # --- Determine Spin Type and Deduct Bet ---
         is_bonus_spin = False

@@ -165,6 +165,7 @@ class WithdrawSchema(Schema):
 class DepositSchema(Schema):
     # Primarily for bonus code application during deposit flow
     bonus_code = fields.Str(required=False, validate=Length(min=1, max=50))
+    deposit_amount_sats = fields.Integer(required=False, allow_none=True, validate=Range(min=1), metadata={"description": "The amount of the deposit in Satoshis, used for percentage bonus calculation."})
 
 class BalanceTransferSchema(Schema):
     from_user_id = fields.Int(required=False, allow_none=True, metadata={"description": "Source User ID (null for system)"})

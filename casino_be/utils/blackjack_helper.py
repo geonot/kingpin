@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import random
 import secrets # Added import
 # import json # Not strictly needed if BlackjackHand.details is handled by SQLAlchemy's JSON type directly
-from casino_be.models import db, User, GameSession, BlackjackHand, BlackjackAction, BlackjackTable, Transaction # Ensure BlackjackAction is used or removed if not.
+from casino_be.models import db, User, GameSession, BlackjackHand, BlackjackAction, BlackjackTable, Transaction, UserBonus # Ensure BlackjackAction is used or removed if not.
 
 # --- Card Constants ---
 SUITS = ['H', 'D', 'C', 'S']  # Hearts, Diamonds, Clubs, Spades
@@ -98,6 +98,27 @@ def _create_player_hand_obj(cards_list=None, bet_sats=0, bet_multiplier=1.0):
         "result": "pending"  # 'win', 'lose', 'push', 'blackjack_win'
     }
 
+def _update_wagering_progress(user, bet_amount_sats_for_wagering, db_session):
+    if bet_amount_sats_for_wagering <= 0:
+        return
+
+    active_bonus = db_session.query(UserBonus).filter_by(
+        user_id=user.id,
+        is_active=True,
+        is_completed=False,
+        is_cancelled=False
+    ).first()
+
+    if active_bonus:
+        active_bonus.wagering_progress_sats += bet_amount_sats_for_wagering
+        active_bonus.updated_at = datetime.now(timezone.utc)
+
+        if active_bonus.wagering_progress_sats >= active_bonus.wagering_requirement_sats:
+            active_bonus.is_active = False
+            active_bonus.is_completed = True
+            active_bonus.completed_at = datetime.now(timezone.utc)
+            # print(f"User {user.id} completed wagering for UserBonus {active_bonus.id}.") # Logging placeholder
+        # db_session.add(active_bonus) # Not needed if fetched from session
 
 # --- Main Game Functions ---
 
@@ -177,6 +198,9 @@ def handle_join_blackjack(user, table, bet_amount_sats):
     # Deduct bet from user balance
     user.balance -= bet_amount_sats
     
+    # Update wagering progress for the initial bet
+    _update_wagering_progress(user, bet_amount_sats, db.session)
+
     # Create Wager Transaction
     wager_tx = Transaction(
         user_id=user.id,
@@ -326,9 +350,13 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
             raise ValueError(f"Insufficient balance to double. Need {current_player_hand['bet_sats']} more.")
 
         # Perform double:
-        user.balance -= current_player_hand['bet_sats']
-        bj_hand.total_bet += current_player_hand['bet_sats']
-        game_session.amount_wagered += current_player_hand['bet_sats']
+        additional_bet_for_double = current_player_hand['bet_sats'] # The amount for double is same as original hand bet
+        user.balance -= additional_bet_for_double
+        bj_hand.total_bet += additional_bet_for_double
+        game_session.amount_wagered += additional_bet_for_double
+
+        # Update wagering progress for the doubled portion of the bet
+        _update_wagering_progress(user, additional_bet_for_double, db.session)
         
         current_player_hand['bet_multiplier'] = 2.0
         current_player_hand['is_doubled'] = True # Mark as doubled
@@ -375,9 +403,13 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
             raise ValueError(f"Insufficient balance to split. Need {current_player_hand['bet_sats']} for the new hand.")
 
         # Perform split:
-        user.balance -= current_player_hand['bet_sats'] # Bet for the new hand
-        bj_hand.total_bet += current_player_hand['bet_sats']
-        game_session.amount_wagered += current_player_hand['bet_sats']
+        bet_for_new_split_hand = current_player_hand['bet_sats'] # Bet for the new hand is same as original
+        user.balance -= bet_for_new_split_hand
+        bj_hand.total_bet += bet_for_new_split_hand
+        game_session.amount_wagered += bet_for_new_split_hand
+
+        # Update wagering progress for the bet on the new split hand
+        _update_wagering_progress(user, bet_for_new_split_hand, db.session)
 
         # Create additional wager transaction for the new hand's bet
         split_tx = Transaction(

@@ -1,6 +1,18 @@
 <template>
-  <!-- Apply dark mode class if enabled -->
   <div id="app" :class="{ 'dark': isDarkMode }" class="flex flex-col min-h-screen bg-gray-100 dark:bg-dark-bg text-gray-900 dark:text-dark-text transition-colors duration-300">
+
+    <!-- Global Loading Overlay -->
+    <div v-if="isLoadingGlobal" class="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center z-50">
+      <div class="flex flex-col items-center p-6 rounded-lg">
+        <!-- Simple Spinner -->
+        <svg class="animate-spin h-12 w-12 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="text-white text-lg font-medium">Loading...</p>
+      </div>
+    </div>
+
     <Header @toggle-dark-mode="toggleDarkMode" :is-dark-mode="isDarkMode" />
     <!-- Global Error Display -->
     <div v-if="globalError" class="container mx-auto px-4 py-2">
@@ -67,12 +79,15 @@ export default {
       store.commit('clearGlobalError'); // Using commit for mutation
     };
 
+    const isLoadingGlobal = computed(() => store.state.isLoadingGlobal);
+
     return {
       isDarkMode,
       toggleDarkMode,
       isAdmin,
       globalError, // Expose to template
       clearError,  // Expose to template
+      isLoadingGlobal, // Expose to template
     };
   },
 };
