@@ -30,7 +30,9 @@ This project is a Flask-based backend that implements user authentication, sessi
     ```bash
     export DATABASE_URL="postgresql://user:password@localhost/dbname"
     export JWT_SECRET_KEY="your-secret-key"
-    export BLOCKCYPHER_API_TOKEN="your-blockcypher-api-token"  # Optional
+    export ADMIN_PASSWORD="your-secure-admin-password"
+    export ADMIN_USERNAME="admin_user"  # Optional (Defaults to 'admin')
+    export ADMIN_EMAIL="admin@example.com"  # Optional (Defaults to 'admin@kingpincasino.local')
     ```
 
 4. **Initialize the Database**:

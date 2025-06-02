@@ -56,7 +56,8 @@ const gameSessionId = ref(null);
 const isLoading = ref(true);
 const loadingMessage = ref('Joining game...');
 const errorObject = ref(null); // For ErrorMessage.vue component
-const slotInfo = ref(null); // To store details about the current slot
+const slotInfo = ref(null); // To store details about the current slot (from API)
+const slotGameJsonConfigContent = ref(null); // To store content of gameConfig.json
 const isSpinning = ref(false); // Prevent concurrent spins
 
 // Constants for localStorage keys
@@ -76,13 +77,36 @@ const clearErrorObject = () => {
 };
 
 const fetchSlotDetailsAndConfig = async (slotId) => {
+  loadingMessage.value = 'Fetching slot details...';
+  errorObject.value = null; // Clear previous errors
+  slotInfo.value = null; // Reset
+  slotGameJsonConfigContent.value = null; // Reset
+
   const fetchedSlotInfo = await store.dispatch('fetchSlotConfig', slotId);
   if (fetchedSlotInfo && typeof fetchedSlotInfo === 'object' && !fetchedSlotInfo.status_message) {
     slotInfo.value = fetchedSlotInfo;
+
+    // Now fetch the gameConfig.json for this specific slot
+    if (slotInfo.value.short_name) {
+      loadingMessage.value = `Loading game configuration for ${slotInfo.value.name}...`;
+      try {
+        const gameConfigPath = `public/slots/${slotInfo.value.short_name}/gameConfig.json`;
+        const response = await axios.get(gameConfigPath);
+        slotGameJsonConfigContent.value = response.data;
+        console.log(`Successfully loaded gameConfig.json for ${slotInfo.value.short_name}`);
+      } catch (err) {
+        console.error(`Failed to load gameConfig.json for ${slotInfo.value.short_name}:`, err);
+        errorObject.value = { status_message: `Could not load detailed game configuration for ${slotInfo.value.name}. Some features might be unavailable or use defaults.` };
+        // Depending on how critical gameConfig.json is, you might stop here or allow Phaser to start with partial data.
+        // For now, we'll let it proceed and PreloadScene can handle missing parts.
+      }
+    } else {
+      console.error('Slot short_name is missing, cannot load gameConfig.json.');
+      errorObject.value = { status_message: 'Critical slot identifier missing, cannot load game configuration.' };
+    }
   } else {
-    console.error(`Slot with ID ${slotId} not found or fetch failed.`);
-    errorObject.value = fetchedSlotInfo || { status_message: 'Could not load slot configuration.'};
-    // router.push('/slots'); // Optionally redirect
+    console.error(`Slot with ID ${slotId} not found or API fetch failed.`);
+    errorObject.value = fetchedSlotInfo || { status_message: 'Could not load slot information from API.'};
   }
 };
 
@@ -90,15 +114,27 @@ const fetchSlotDetailsAndConfig = async (slotId) => {
 const joinGameAndInitPhaser = async (slotId) => {
     isLoading.value = true;
     loadingMessage.value = 'Joining game session...';
-    clearErrorObject();
+    clearErrorObject(); // Clear previous errors
     
+    // Ensure slotInfo and potentially slotGameJsonConfigContent are loaded before joining
+    if (!slotInfo.value || !slotInfo.value.short_name) {
+        await fetchSlotDetailsAndConfig(slotId); // This will also attempt to load gameConfig.json
+        if (!slotInfo.value || errorObject.value) { // If still not loaded or error occurred
+            isLoading.value = false;
+            // errorObject is already set by fetchSlotDetailsAndConfig
+            return; // Stop if essential slot info is missing
+        }
+    }
+    // If slotGameJsonConfigContent is strictly required before this point, add check here.
+    // For now, PreloadScene might have fallbacks.
+
     localStorage.setItem(SLOT_ID_STORAGE_KEY, slotId.toString());
     const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
 
     if (existingSessionId && isAuthenticated.value) {
         gameSessionId.value = existingSessionId;
         console.log('Attempting to reuse existing game session:', gameSessionId.value);
-    } else {
+    } else if (isAuthenticated.value) { // Only try to join if authenticated
         try {
             const response = await store.dispatch('joinGame', { slot_id: slotId, game_type: 'slot' });
             if (response.status && response.session_id) {
@@ -109,29 +145,27 @@ const joinGameAndInitPhaser = async (slotId) => {
             }
         } catch (err) {
             console.error('Error joining game:', err);
-            errorObject.value = { status_message: `Failed to join game: ${err.message}. Ensure you are logged in.` };
+            errorObject.value = { status_message: `Failed to join game: ${err.message}.` };
             isLoading.value = false;
-            throw err;
+            return; // Stop if cannot join game
         }
-    }
-    
-    // If slotInfo is available (implies config is loaded), start Phaser
-    if (slotInfo.value) {
-        startPhaserGame(slotId);
     } else {
-        // This case should ideally be prevented by ensuring slotInfo is loaded before calling this
-        console.error("Slot info not available before starting Phaser.");
-        errorObject.value = { status_message: "Slot configuration missing, cannot start game."};
-        isLoading.value = false;
+        // Not authenticated, and no existing session. Game can be played without session (demo mode).
+        console.log('User not authenticated, proceeding without game session.');
+        gameSessionId.value = null; // Ensure no old session ID is used
+        localStorage.removeItem(SESSION_STORAGE_KEY); // Clear any stale session ID
     }
+
+    // Proceed to start Phaser
+    startPhaserGame(slotId);
 };
 
-const startPhaserGame = (slotId) => {
+const startPhaserGame = (slotId) => { // slotId is passed for preBoot, though short_name is primary now
   if (game.value) {
     console.warn("Phaser game already exists. Destroying previous instance.");
     game.value.destroy(true); game.value = null;
   }
-  loadingMessage.value = 'Loading game assets...';
+  loadingMessage.value = 'Initializing game engine...'; // Changed from "Loading game assets" as PreloadScene handles that
   const parentElement = document.getElementById('phaser-slot-machine');
   if (!parentElement) {
     console.error("Phaser parent element 'phaser-slot-machine' not found.");
@@ -140,19 +174,27 @@ const startPhaserGame = (slotId) => {
   }
 
   const mergedConfig = {
-    ...phaserConfig,
+    ...phaserConfig, // Base Phaser config (scenes, physics, etc.)
     parent: 'phaser-slot-machine',
     callbacks: {
       preBoot: (bootingGame) => {
-        bootingGame.registry.set('slotId', slotId);
+        // slotId might be useful for some initial setup if needed before full config is parsed
+        bootingGame.registry.set('slotIdFromVue', slotId);
       },
       postBoot: (bootedGame) => {
-        bootedGame.registry.set('userBalance', userBalance.value); // Use computed prop
-        bootedGame.registry.set('slotConfigData', slotInfo.value); // Full config from Vuex
+        bootedGame.registry.set('userBalance', userBalance.value);
+        // API Data (from /api/slots/:id) - contains short_name, symbol list with img_link etc.
+        bootedGame.registry.set('slotApiData', slotInfo.value);
+        // Game JSON Config (from public/slots/{short_name}/gameConfig.json) - contains layout, paylines, assets paths etc.
+        bootedGame.registry.set('slotGameJsonConfig', slotGameJsonConfigContent.value);
+
         bootedGame.registry.set('soundEnabled', soundEnabled.value);
         bootedGame.registry.set('turboEnabled', turboEnabled.value);
-        bootedGame.registry.set('eventBus', EventBus); // Provide EventBus to Phaser
-        console.log('Phaser game booted. Initial data set in registry.');
+        bootedGame.registry.set('eventBus', EventBus);
+        console.log('Phaser game booted. Initial data (API, JSON config, settings) set in registry.');
+        // isLoading is now set by Phaser's PreloadScene on its 'complete' event,
+        // or by GameScene once it's fully ready if PreloadScene is quick.
+        // For now, we can set it to false here, assuming PreloadScene will show its own progress.
         isLoading.value = false;
       }
     }

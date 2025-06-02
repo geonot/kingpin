@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 # Assuming your Flask app instance is named 'app' and SQLAlchemy instance is 'db'
 # in 'casino_be.app' and models are in 'casino_be.models'.
 from casino_be.app import app, db
-from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction
+from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction, BonusCode, UserBonus # Added BonusCode, UserBonus
 #SATOSHI_FACTOR might be needed if amounts are converted
 from casino_be.config import Config
+from datetime import timedelta # Added timedelta
 
 
 class BaseTestCase(unittest.TestCase):
@@ -64,6 +65,24 @@ class BaseTestCase(unittest.TestCase):
             # Refresh user to get ID etc.
             db.session.refresh(user)
         return user
+
+    def _create_bonus_code(self, code_id="TESTCODE", type="deposit", subtype="percentage", amount=10.0, amount_sats=None, wagering_multiplier=30, uses_remaining=100, is_active=True):
+        with self.app.app_context():
+            bonus_code = BonusCode(
+                code_id=code_id,
+                type=type,
+                subtype=subtype,
+                amount=amount,
+                amount_sats=amount_sats,
+                wagering_requirement_multiplier=wagering_multiplier,
+                uses_remaining=uses_remaining,
+                is_active=is_active,
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30)
+            )
+            db.session.add(bonus_code)
+            db.session.commit()
+            db.session.refresh(bonus_code)
+        return bonus_code
 
 
 class AuthApiTests(BaseTestCase):
@@ -191,9 +210,18 @@ class AuthApiTests(BaseTestCase):
 class GameApiTests(BaseTestCase):
     """Tests for game related API endpoints."""
 
-    def _login_and_get_token(self, username="gameuser", password="gamepassword"):
+    def _login_and_get_token(self, username="gameuser", password="gamepassword", email_suffix="@example.com"):
         """Helper to register, login a user and return their access token."""
-        self._create_user(username=username, password=password, email=f"{username}@example.com")
+        # Ensure email is unique if called multiple times with same username in different test classes
+        # or if user is not cleaned up properly between tests (though BaseTestCase should handle this)
+        user_email = f"{username}{email_suffix}"
+        # Check if user already exists to avoid re-creating, useful if helper is called multiple times in a single test method
+        # However, for test isolation, typically we create fresh users or rely on setUp/tearDown.
+        # For this helper, let's assume it might be called for a user that needs to be created.
+        existing_user = User.query.filter_by(username=username).first()
+        if not existing_user:
+            self._create_user(username=username, password=password, email=user_email)
+
         login_payload = {"username": username, "password": password}
         response = self.client.post('/api/login', json=login_payload)
         data = json.loads(response.data.decode())
@@ -323,6 +351,221 @@ class GameApiTests(BaseTestCase):
         self.assertEqual(response.status_code, 400) # Bad Request or 402 Payment Required
         self.assertFalse(data['status'])
         self.assertEqual(data['status_message'], 'Insufficient balance')
+
+
+# === Billing API Tests ===
+class BillingApiTests(BaseTestCase):
+
+    def _login_and_get_token(self, username="billinguser", password="billingpassword"):
+        """Helper to create, login a user and return their access token for billing tests."""
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            user = self._create_user(username=username, password=password, email=f"{username}@example.com")
+
+        login_payload = {"username": username, "password": password}
+        response = self.client.post('/api/login', json=login_payload)
+        data = json.loads(response.data.decode())
+        self.assertTrue(data.get('status', False), f"Login failed for {username}: {data.get('status_message')}")
+        return data['access_token'], user.id # Return user_id as well for convenience
+
+    def test_deposit_success_no_bonus(self):
+        token, user_id = self._login_and_get_token(username="deposit_no_bonus_user")
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 1000 # Initial balance in satoshis
+            db.session.commit()
+            initial_balance = user.balance
+
+        deposit_amount = 500
+        payload = {"deposit_amount_sats": deposit_amount}
+
+        response = self.client.post('/api/deposit', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, data.get('status_message'))
+        self.assertTrue(data['status'])
+        self.assertIn("Deposit of 500 sats successful", data['status_message'])
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            self.assertEqual(user.balance, initial_balance + deposit_amount)
+
+            transaction = Transaction.query.filter_by(user_id=user_id, amount=deposit_amount, transaction_type='deposit').first()
+            self.assertIsNotNone(transaction)
+            self.assertEqual(transaction.status, 'completed')
+
+    def test_deposit_success_with_valid_percentage_bonus(self):
+        token, user_id = self._login_and_get_token(username="deposit_perc_bonus_user")
+        bonus_code_obj = self._create_bonus_code(code_id="PERC50", type="deposit", subtype="percentage", amount=50.0, wagering_multiplier=20) # 50% bonus
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 1000 # Initial balance
+            db.session.commit()
+            initial_balance = user.balance
+
+        deposit_amount = 1000
+        expected_bonus_amount = int(deposit_amount * 0.50)
+        payload = {"deposit_amount_sats": deposit_amount, "bonus_code": bonus_code_obj.code_id}
+
+        response = self.client.post('/api/deposit', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, data.get('status_message'))
+        self.assertTrue(data['status'])
+        self.assertIn(f"Deposit of {deposit_amount} sats successful.", data['status_message'])
+        self.assertIn(f"Bonus '{bonus_code_obj.code_id}' applied successfully", data['status_message'])
+        self.assertEqual(data.get('bonus_applied_sats'), expected_bonus_amount)
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            self.assertEqual(user.balance, initial_balance + deposit_amount + expected_bonus_amount)
+
+            user_bonus = UserBonus.query.filter_by(user_id=user_id, bonus_code_id=bonus_code_obj.id).first()
+            self.assertIsNotNone(user_bonus)
+            self.assertEqual(user_bonus.bonus_amount_awarded_sats, expected_bonus_amount)
+            self.assertEqual(user_bonus.wagering_requirement_sats, (deposit_amount + expected_bonus_amount) * bonus_code_obj.wagering_requirement_multiplier)
+            self.assertTrue(user_bonus.is_active)
+
+            deposit_tx = Transaction.query.filter_by(user_id=user_id, amount=deposit_amount, transaction_type='deposit').first()
+            self.assertIsNotNone(deposit_tx)
+            bonus_tx = Transaction.query.filter_by(user_id=user_id, amount=expected_bonus_amount, transaction_type='bonus').first()
+            self.assertIsNotNone(bonus_tx) # Assuming bonus service creates a 'bonus' transaction
+
+    def test_deposit_success_with_valid_fixed_bonus(self):
+        token, user_id = self._login_and_get_token(username="deposit_fixed_bonus_user")
+        fixed_bonus_sats = 10000
+        bonus_code_obj = self._create_bonus_code(code_id="FIXED10K", type="deposit", subtype="fixed", amount=None, amount_sats=fixed_bonus_sats, wagering_multiplier=25)
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 5000 # Initial balance
+            db.session.commit()
+            initial_balance = user.balance
+
+        deposit_amount = 20000
+        payload = {"deposit_amount_sats": deposit_amount, "bonus_code": bonus_code_obj.code_id}
+
+        response = self.client.post('/api/deposit', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, data.get('status_message'))
+        self.assertTrue(data['status'])
+        self.assertIn(f"Deposit of {deposit_amount} sats successful.", data['status_message'])
+        self.assertIn(f"Bonus '{bonus_code_obj.code_id}' applied successfully", data['status_message'])
+        self.assertEqual(data.get('bonus_applied_sats'), fixed_bonus_sats)
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            self.assertEqual(user.balance, initial_balance + deposit_amount + fixed_bonus_sats)
+
+            user_bonus = UserBonus.query.filter_by(user_id=user_id, bonus_code_id=bonus_code_obj.id).first()
+            self.assertIsNotNone(user_bonus)
+            self.assertEqual(user_bonus.bonus_amount_awarded_sats, fixed_bonus_sats)
+            self.assertEqual(user_bonus.wagering_requirement_sats, (deposit_amount + fixed_bonus_sats) * bonus_code_obj.wagering_requirement_multiplier) # Or just bonus_amount * multiplier, depending on T&C
+            self.assertTrue(user_bonus.is_active)
+
+    def test_deposit_fail_invalid_bonus_code(self):
+        token, user_id = self._login_and_get_token(username="deposit_invalid_bonus_user")
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 1000
+            db.session.commit()
+            initial_balance = user.balance
+
+        deposit_amount = 500
+        payload = {"deposit_amount_sats": deposit_amount, "bonus_code": "NONEXISTENTCODE"}
+
+        response = self.client.post('/api/deposit', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200) # Deposit is successful, bonus fails
+        self.assertTrue(data['status'])
+        self.assertIn(f"Deposit of {deposit_amount} sats successful.", data['status_message'])
+        self.assertIn("Bonus application failed: Bonus code 'NONEXISTENTCODE' not found or not active.", data['status_message'])
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            self.assertEqual(user.balance, initial_balance + deposit_amount) # Balance only reflects deposit
+            user_bonus = UserBonus.query.filter(UserBonus.user_id == user_id).first() # Check no bonus applied
+            self.assertIsNone(user_bonus)
+
+    def test_withdraw_success(self):
+        token, user_id = self._login_and_get_token(username="withdraw_success_user")
+        withdraw_amount = 100
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 1000 # Initial balance
+            db.session.commit()
+            initial_balance = user.balance
+
+        payload = {"amount_sats": withdraw_amount, "withdraw_wallet_address": "test_btc_address_valid"}
+        response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 201, data.get('status_message'))
+        self.assertTrue(data['status'])
+        self.assertEqual(data['status_message'], 'Withdrawal request submitted.')
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            self.assertEqual(user.balance, initial_balance - withdraw_amount)
+
+            transaction = Transaction.query.filter_by(user_id=user_id, amount=withdraw_amount, transaction_type='withdraw').first()
+            self.assertIsNotNone(transaction)
+            self.assertEqual(transaction.status, 'pending') # Withdrawals are pending
+
+    def test_withdraw_fail_insufficient_funds(self):
+        token, user_id = self._login_and_get_token(username="withdraw_insufficient_user")
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 50 # Initial balance
+            db.session.commit()
+
+        payload = {"amount_sats": 100, "withdraw_wallet_address": "test_btc_address"}
+        response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 400, data.get('status_message')) # API returns 400 for this
+        self.assertFalse(data['status'])
+        self.assertEqual(data['status_message'], 'Insufficient funds')
+
+    def test_withdraw_fail_active_bonus_wagering_incomplete(self):
+        token, user_id = self._login_and_get_token(username="withdraw_wagering_user")
+        bonus_code_obj = self._create_bonus_code(code_id="WAGERBONUS", type="deposit", subtype="fixed", amount_sats=500, wagering_multiplier=10)
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 2000 # Sufficient balance for withdrawal itself
+
+            # Create an active UserBonus with incomplete wagering
+            user_bonus = UserBonus(
+                user_id=user.id,
+                bonus_code_id=bonus_code_obj.id,
+                bonus_amount_awarded_sats=500,
+                wagering_requirement_multiplier=bonus_code_obj.wagering_requirement_multiplier,
+                # Let's say deposit was 500, bonus 500. Total 1000. Wagering req = 1000 * 10 = 10000
+                wagering_requirement_sats= (500 + 500) * bonus_code_obj.wagering_requirement_multiplier,
+                wagering_progress_sats=100, # Clearly incomplete
+                is_active=True,
+                is_completed=False,
+                is_cancelled=False,
+                activated_at=datetime.now(timezone.utc)
+            )
+            db.session.add(user_bonus)
+            db.session.commit()
+
+        payload = {"amount_sats": 200, "withdraw_wallet_address": "test_btc_address_wagering"}
+        response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 403, data.get('status_message')) # Forbidden
+        self.assertFalse(data['status'])
+        self.assertIn("Withdrawal blocked. You have an active bonus with unmet wagering requirements.", data['status_message'])
 
 
 if __name__ == '__main__':

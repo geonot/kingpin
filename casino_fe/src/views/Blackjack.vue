@@ -9,7 +9,7 @@
 </div>
 
 <!-- Error Message Display -->
-<error-message v-if="isErrorVisible" :message="errorMessage" @dismiss="clearErrorMessage" class="mb-4" />
+<error-message :error="errorObject" @dismiss="errorObject = null" class="mb-4" />
 
 <!-- Game Container -->
 <div class="blackjack-container relative bg-gradient-to-b from-gray-800 to-black dark:from-neutral-800 dark:to-black rounded-lg shadow-2xl p-1 md:p-2">
@@ -38,10 +38,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'; // Removed shallowRef, Phaser
+import { shallowRef, ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useStore } from 'vuex';
 import { useRoute, useRouter } from 'vue-router';
-// import EventBus from '@/event-bus'; // Not needed for placeholder
+import Phaser from 'phaser';
+import blackjackGameConfig from '@/blackjack/main.js'; // Assuming this is your Phaser game config
+import EventBus from '@/event-bus';
 import ErrorMessage from '@components/ErrorMessage.vue';
 import { formatSatsToBtc } from '@utils/currencyFormatter';
 
@@ -49,29 +51,152 @@ const store = useStore();
 const route = useRoute();
 const router = useRouter();
 
+// Refs
+const game = shallowRef(null);
+const gameSessionId = ref(null);
+const currentHandId = ref(null);
+const tableInfo = ref(null);
+const errorObject = ref(null);
 const isLoading = ref(true);
 const loadingMessage = ref('Loading table information...');
-const errorObject = ref(null); // For ErrorMessage.vue component
-const tableInfo = ref(null);
-
 const isAuthenticated = computed(() => store.getters.isAuthenticated);
 
-const clearErrorObject = () => {
-  errorObject.value = null;
-};
+// --- Phaser Game Initialization ---
+const initPhaserGame = (tableApiData, phaserBaseConfig) => {
+  loadingMessage.value = 'Initializing game engine...';
+  const parentElement = document.getElementById('phaser-blackjack');
+  if (!parentElement) {
+    console.error("Phaser parent element 'phaser-blackjack' not found.");
+    handleErrorFromPhaser("Failed to initialize game display area.");
+    return;
+  }
 
-const fetchTableDetailsAndConfig = async (tableId) => {
-  loadingMessage.value = 'Fetching table details...';
-  clearErrorObject();
-  const fetchedTableInfo = await store.dispatch('fetchTableConfig', tableId);
+  const mergedConfig = {
+    ...phaserBaseConfig,
+    parent: 'phaser-blackjack',
+    callbacks: {
+      preBoot: (gameInstance) => {
+        gameInstance.registry.set('eventBus', EventBus);
+        gameInstance.registry.set('tableAPIData', tableApiData); // Table config from API
+        // Assuming phaserBaseConfig.gameConfig is your specific Blackjack game rules/assets
+        gameInstance.registry.set('gameDefinition', phaserBaseConfig.gameConfig || {});
+      },
+      postBoot: (gameInstance) => {
+        gameInstance.registry.set('userBalance', store.state.user?.balance || 0);
+        gameInstance.registry.set('soundEnabled', store.state.soundSettings?.enabled ?? true);
+        isLoading.value = false;
+        loadingMessage.value = 'Game ready. Place your bet.';
+        console.log('Phaser game postBoot complete.');
+      },
+      ...(phaserBaseConfig.callbacks || {}) // Merge any other callbacks from base config
+    },
+  };
 
-  if (fetchedTableInfo && typeof fetchedTableInfo === 'object' && !fetchedTableInfo.status_message) {
-    tableInfo.value = fetchedTableInfo;
-  } else {
-    console.error(`Table with ID ${tableId} not found or fetch failed.`);
-    errorObject.value = fetchedTableInfo || { status_message: 'Could not load table configuration.' };
+  try {
+    game.value = new Phaser.Game(mergedConfig);
+    game.value.events.on('error', (err) => {
+      console.error('Phaser runtime error in game instance:', err);
+      handleErrorFromPhaser('A Phaser runtime error occurred.');
+    });
+  } catch (error) {
+    console.error('Failed to create Phaser game instance:', error);
+    handleErrorFromPhaser('Could not start the game engine.');
   }
 };
+
+// --- Event Handlers for Phaser Events via EventBus ---
+const handleDealRequest = async (payload) => {
+  if (!tableInfo.value || !tableInfo.value.id) {
+    errorObject.value = { status_message: 'Table information is not loaded.' };
+    return;
+  }
+  loadingMessage.value = 'Dealing cards...';
+  isLoading.value = true;
+  errorObject.value = null;
+
+  try {
+    const response = await store.dispatch('joinBlackjack', {
+      table_id: tableInfo.value.id,
+      bet_amount: payload.betAmount,
+    });
+
+    if (response && response.status && response.hand) {
+      gameSessionId.value = response.hand.session_id; // Assuming session_id is part of hand response
+      currentHandId.value = response.hand.id;
+      EventBus.emit('initialDeal', response.hand); // Emit to Phaser scene
+      loadingMessage.value = 'Waiting for player action...';
+    } else {
+      errorObject.value = { status_message: response.status_message || 'Failed to deal cards. Please try again.' };
+      EventBus.emit('dealFailed', errorObject.value); // Inform Phaser scene if needed
+    }
+  } catch (err) {
+    console.error('Error during deal request:', err);
+    errorObject.value = { status_message: err.message || 'An unexpected error occurred while dealing.' };
+    EventBus.emit('dealFailed', errorObject.value);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const handlePlayerActionRequest = async (payload) => {
+  if (!currentHandId.value) {
+    errorObject.value = { status_message: 'No active hand ID. Cannot perform action.' };
+    return;
+  }
+  loadingMessage.value = `Processing ${payload.action}...`;
+  isLoading.value = true;
+  errorObject.value = null;
+
+  try {
+    const response = await store.dispatch('blackjackAction', {
+      hand_id: currentHandId.value,
+      action_type: payload.action,
+      hand_index: payload.hand_index, // Optional, for split hands
+    });
+
+    if (response && response.status && response.action_result) {
+      currentHandId.value = response.action_result.id; // Update currentHandId if it changes (e.g. after split, though usually same)
+      EventBus.emit('actionResult', response.action_result); // Emit to Phaser scene
+
+      if (response.action_result.status === 'completed') {
+        loadingMessage.value = 'Round ended. Place your bet for the next round.';
+      } else {
+        loadingMessage.value = 'Waiting for player action...';
+      }
+    } else {
+      errorObject.value = { status_message: response.status_message || 'Action failed. Please try again.' };
+      EventBus.emit('actionFailed', errorObject.value); // Inform Phaser scene
+    }
+  } catch (err) {
+    console.error(`Error during ${payload.action} request:`, err);
+    errorObject.value = { status_message: err.message || `An unexpected error occurred during ${payload.action}.` };
+    EventBus.emit('actionFailed', errorObject.value);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const handleErrorFromPhaser = (message) => {
+  errorObject.value = { status_message: message || 'An error occurred in the game.' };
+  isLoading.value = false; // Stop loading if game error occurs
+};
+
+// --- Session Management ---
+const endGameSession = async () => {
+  if (gameSessionId.value) {
+    try {
+      await store.dispatch('endSession'); // This action should handle its own errors
+      console.log('Blackjack game session ended:', gameSessionId.value);
+    } catch (error) {
+      console.error('Failed to end game session:', error);
+      // Optionally inform user, though usually silent on unmount
+    } finally {
+      gameSessionId.value = null;
+      currentHandId.value = null;
+    }
+  }
+};
+
 
 // --- Lifecycle Hooks ---
 onMounted(async () => {
@@ -88,27 +213,46 @@ onMounted(async () => {
   }
 
   isLoading.value = true;
-  await store.dispatch('fetchUserProfile'); // Ensure user balance is fresh for future use
-  await fetchTableDetailsAndConfig(tableIdNum);
+  errorObject.value = null;
+  loadingMessage.value = 'Fetching user profile...';
+  await store.dispatch('fetchUserProfile'); // Ensure user balance is fresh
 
-  if (tableInfo.value && !errorObject.value) {
-    console.log(`Phaser Blackjack game instance for table ${tableIdNum} would be created here.`);
-    // In a real scenario, you might still join a game session on the backend here
-    // await store.dispatch('joinGame', { table_id: tableIdNum, game_type: 'blackjack' });
-    // This would return a gameSessionId if needed.
-    loadingMessage.value = 'Table ready (Phaser game would load here).';
-    // No actual Phaser game instance for this placeholder
+  loadingMessage.value = 'Fetching table configuration...';
+  const fetchedTableInfo = await store.dispatch('fetchTableConfig', tableIdNum);
+
+  if (fetchedTableInfo && typeof fetchedTableInfo === 'object' && !fetchedTableInfo.status_message) {
+    tableInfo.value = fetchedTableInfo;
+    // Setup EventBus listeners
+    EventBus.on('blackjackDealRequest', handleDealRequest);
+    EventBus.on('blackjackActionRequest', handlePlayerActionRequest);
+    EventBus.on('phaserBlackjackError', handleErrorFromPhaser);
+
+    initPhaserGame(tableInfo.value, blackjackGameConfig);
+  } else {
+    console.error(`Table with ID ${tableIdNum} not found or fetch failed.`);
+    errorObject.value = fetchedTableInfo || { status_message: 'Could not load table configuration.' };
+    isLoading.value = false;
   }
-  isLoading.value = false;
+  // isLoading state is managed by initPhaserGame or error condition above
 });
 
 onBeforeUnmount(async () => {
-  if (tableInfo.value) {
-    console.log(`Phaser Blackjack game instance for table ${tableInfo.value.id} would be destroyed here.`);
+  await endGameSession();
+
+  // Remove EventBus listeners
+  EventBus.off('blackjackDealRequest', handleDealRequest);
+  EventBus.off('blackjackActionRequest', handlePlayerActionRequest);
+  EventBus.off('phaserBlackjackError', handleErrorFromPhaser);
+
+  if (game.value) {
+    console.log('Destroying Phaser game instance.');
+    game.value.destroy(true);
+    game.value = null;
   }
-  // If a game session was started, it should be ended.
-  // Example: if (gameSessionId.value) await store.dispatch('endSession');
 });
+
+// Helper for template if needed, though formatSatsToBtc is already imported
+// const formatCurrency = (value) => formatSatsToBtc(value) + ' BTC';
 </script>
 
 <style scoped>

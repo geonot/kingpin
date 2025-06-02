@@ -28,11 +28,13 @@ class User(db.Model):
 
     @staticmethod
     def hash_password(password):
+        """Hashes a password using PBKDF2-SHA256."""
         # Increase rounds for better security (default is 29000, adjust based on server capability)
         return sha256.using(rounds=600000).hash(password)
 
     @staticmethod
     def verify_password(hash_str, password):
+        """Verifies a password against a stored PBKDF2-SHA256 hash."""
         # Use constant time comparison if possible, though passlib might handle this.
         return sha256.verify(password, hash_str)
 

@@ -20,6 +20,15 @@ class Config:
     JWT_BLACKLIST_ENABLED = True
     JWT_BLACKLIST_TOKEN_CHECKS = ['access', 'refresh'] # Check both token types
 
+    # Rate Limiter Storage URI
+    # For production, set e.g., RATELIMIT_STORAGE_URI='redis://localhost:6379/0'
+    RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
+
+    # Flask Debug Mode
+    # For production, ensure FLASK_DEBUG is not set or set to 'False'.
+    # Set FLASK_DEBUG to 'True' or '1' for development.
+    DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
+
     # Satoshi Conversion Factor (1 BTC = 100,000,000 Satoshis)
     SATOSHI_FACTOR = 100_000_000
 

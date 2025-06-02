@@ -165,7 +165,7 @@ class WithdrawSchema(Schema):
 class DepositSchema(Schema):
     # Primarily for bonus code application during deposit flow
     bonus_code = fields.Str(required=False, validate=Length(min=1, max=50))
-    deposit_amount_sats = fields.Integer(required=False, allow_none=True, validate=Range(min=1), metadata={"description": "The amount of the deposit in Satoshis, used for percentage bonus calculation."})
+    deposit_amount_sats = fields.Integer(required=True, validate=Range(min=1), metadata={"description": "The amount of the deposit in Satoshis."})
 
 class BalanceTransferSchema(Schema):
     from_user_id = fields.Int(required=False, allow_none=True, metadata={"description": "Source User ID (null for system)"})
@@ -250,8 +250,8 @@ class SlotSchema(SQLAlchemyAutoSchema):
     num_rows = auto_field()
     num_columns = auto_field()
     num_symbols = auto_field(metadata={"description": "Total distinct symbols defined"})
-    wild_symbol_id = auto_field(metadata={"description": "Internal ID of the Wild symbol"})
-    scatter_symbol_id = auto_field(metadata={"description": "Internal ID of the Scatter symbol"})
+    wild_symbol_id = fields.Int(dump_only=True, allow_none=True, metadata={"description": "Internal ID of the Wild symbol, from gameConfig.json"})
+    scatter_symbol_id = fields.Int(dump_only=True, allow_none=True, metadata={"description": "Internal ID of the Scatter symbol, from gameConfig.json"})
     bonus_type = auto_field()
     bonus_subtype = auto_field()
     bonus_multiplier = auto_field(metadata={"description": "Multiplier during bonus rounds"})

@@ -98,7 +98,27 @@ def _create_player_hand_obj(cards_list=None, bet_sats=0, bet_multiplier=1.0):
         "result": "pending"  # 'win', 'lose', 'push', 'blackjack_win'
     }
 
-def _update_wagering_progress(user, bet_amount_sats_for_wagering, db_session):
+def _update_wagering_progress(user: User, bet_amount_sats_for_wagering: int, db_session):
+    """
+    Updates the wagering progress for a user's active bonus, if any.
+
+    This function is called when a user makes a bet that should count towards
+    wagering requirements (e.g., initial blackjack bet, slot spin bet).
+
+    Args:
+        user (User): The user object whose bonus wagering progress is to be updated.
+        bet_amount_sats_for_wagering (int): The amount of the bet in satoshis
+            that counts towards wagering.
+        db_session (Session): The SQLAlchemy database session to use for querying
+            and potentially updating the UserBonus record.
+
+    Side Effects:
+        - Modifies `user_bonus.wagering_progress_sats` if an active UserBonus is found.
+        - May change `user_bonus.is_active` to False and `user_bonus.is_completed` to True
+          if the wagering requirement is met.
+        - Adds changes to the provided `db_session`. The caller is responsible for
+          committing the session.
+    """
     if bet_amount_sats_for_wagering <= 0:
         return
 
