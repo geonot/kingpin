@@ -1,6 +1,7 @@
 import random
 import json
 import os
+import secrets
 from datetime import datetime, timezone
 from casino_be.models import db, SlotSpin, GameSession, User, Transaction # Added GameSession, User, Transaction
 # SlotSymbol might not be directly used if all config comes from JSON, but keep for now
@@ -317,8 +318,9 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
 
 
     grid = []
+    secure_random = secrets.SystemRandom()
     for r in range(rows):
-        row_symbols = random.choices(symbols_for_choice, weights=weights, k=columns)
+        row_symbols = secure_random.choices(symbols_for_choice, weights=weights, k=columns)
         grid.append(row_symbols)
     return grid
 

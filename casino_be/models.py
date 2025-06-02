@@ -108,8 +108,9 @@ class BonusCode(db.Model):
     code_id = db.Column(db.String(50), unique=True, nullable=False, index=True) # Added index
     description = db.Column(db.Text, nullable=True) # Added description
     type = db.Column(db.String(50), nullable=False) # e.g., 'deposit', 'registration', 'free_spins'
-    subtype = db.Column(db.String(50), nullable=False) # e.g., 'percentage', 'fixed', 'spins'
-    amount = db.Column(db.Float, nullable=False) # For 'percentage', this is the percentage value. For 'fixed', this is Satoshis (use Float here to accommodate percentage, but handle conversion in logic)
+    subtype = db.Column(db.String(50), nullable=False) # e.g., 'percentage' (uses 'amount'), 'fixed' (uses 'amount_sats'), 'spins' (amount/amount_sats might represent number of spins or be unused if spins come from elsewhere)
+    amount = db.Column(db.Float, nullable=True) # Percentage value (e.g., 10.5 for 10.5%) if subtype is 'percentage'. Not used for 'fixed' or 'spins' subtypes.
+    amount_sats = db.Column(db.BigInteger, nullable=True) # Fixed Satoshi amount if subtype is 'fixed'. Not used for 'percentage' or 'spins' subtypes.
     # Consider adding a separate column for 'spins_awarded' if type is 'free_spins'
     max_uses = db.Column(db.Integer, nullable=True) # Max total uses
     uses_remaining = db.Column(db.Integer, nullable=True) # Track remaining uses
@@ -129,8 +130,6 @@ class Slot(db.Model):
     num_rows = db.Column(db.Integer, nullable=False)
     num_columns = db.Column(db.Integer, nullable=False)
     num_symbols = db.Column(db.Integer, nullable=False) # Total distinct symbols defined for this slot
-    wild_symbol_id = db.Column(db.Integer, nullable=True) # FK to SlotSymbol ID (allow null if no wild)
-    scatter_symbol_id = db.Column(db.Integer, nullable=True) # FK to SlotSymbol ID (allow null if no scatter)
     bonus_type = db.Column(db.String(50), nullable=True) # e.g., 'free_spins', 'pick_em', etc.
     bonus_subtype = db.Column(db.String(50), nullable=True) # Further details
     bonus_multiplier = db.Column(db.Float, nullable=False, default=1.0) # Default multiplier for bonus rounds
