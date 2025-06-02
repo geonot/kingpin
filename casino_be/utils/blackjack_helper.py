@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import random
+import secrets # Added import
 # import json # Not strictly needed if BlackjackHand.details is handled by SQLAlchemy's JSON type directly
 from casino_be.models import db, User, GameSession, BlackjackHand, BlackjackAction, BlackjackTable, Transaction # Ensure BlackjackAction is used or removed if not.
 
@@ -19,8 +20,9 @@ def _create_deck(num_decks=1):
     return deck
 
 def _shuffle_deck(deck):
-    """Shuffles the deck in place."""
-    random.shuffle(deck)
+    """Shuffles the deck in place using a cryptographically secure RNG."""
+    secure_random = secrets.SystemRandom()
+    secure_random.shuffle(deck)
 
 def _deal_card(deck_list):
     """Deals a card from the deck_list. Modifies the deck_list."""

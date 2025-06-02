@@ -61,6 +61,9 @@ export default createStore({
     tablesLoaded: false,
     currentTableConfig: null,
     globalError: null, // For global error notifications
+    adminDashboardData: null,
+    adminDashboardError: null,
+    isAdminDataLoading: false, // For loading state
   },
   mutations: {
     setGlobalError(state, errorMessage) {
@@ -114,6 +117,20 @@ export default createStore({
         state.user.balance = newBalanceSats;
       }
     },
+    setAdminDashboardData(state, data) {
+      state.adminDashboardData = data;
+      state.adminDashboardError = null;
+      state.isAdminDataLoading = false;
+    },
+    setAdminDashboardError(state, error) {
+      state.adminDashboardData = null;
+      state.adminDashboardError = error;
+      state.isAdminDataLoading = false;
+    },
+    setAdminDataLoading(state) {
+      state.isAdminDataLoading = true;
+      state.adminDashboardError = null; // Clear previous error on new load
+    }
   },
   actions: {
     // --- Authentication ---
@@ -428,7 +445,7 @@ export default createStore({
           commit('setUser', response.data.user);
         }
         return response.data;
-      } catch (error)_ { // Typo here, should be (error)
+      } catch (error) { // Typo here, should be (error)
         const errData = error.response?.data;
         const defaultMessage = "Network error updating settings.";
         if (error.response?.status !== 400 && error.response?.status !== 401 && error.response?.status !== 409) { // 409 email exists
@@ -455,6 +472,27 @@ export default createStore({
         return errData || { status: false, status_message: defaultMessage };
       }
     },
+    async fetchAdminDashboardData({ commit }) {
+      commit('setAdminDataLoading');
+      try {
+        const response = await apiClient.get('/admin/dashboard');
+        if (response.data.status && response.data.dashboard_data) {
+          commit('setAdminDashboardData', response.data.dashboard_data);
+          return response.data.dashboard_data;
+        } else {
+          const errorMsg = response.data.status_message || 'Failed to fetch admin dashboard data.';
+          commit('setAdminDashboardError', errorMsg);
+          // Optionally commit to globalError as well if appropriate for this error
+          // commit('setGlobalError', errorMsg);
+          return null;
+        }
+      } catch (error) {
+        const errorMsg = error.response?.data?.status_message || error.message || 'Network error fetching admin dashboard data.';
+        commit('setAdminDashboardError', errorMsg);
+        // commit('setGlobalError', errorMsg);
+        return null;
+      }
+    }
   },
   getters: {
     isAuthenticated: (state) => !!state.userSession,
@@ -466,7 +504,7 @@ export default createStore({
     },
     getTables: (state) => state.tables,
     getTableById: (state) => (id) => {
-      return state.tables.find(table => table.id === Number(table.id));
+      return state.tables.find(table => table.id === Number(id));
     },
   },
   modules: {},

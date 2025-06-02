@@ -1,4 +1,4 @@
-from marshmallow import Schema, fields, validate, ValidationError, pre_load, validates
+from marshmallow import Schema, fields, validate, ValidationError, pre_load, validates, validates_schema
 from marshmallow_sqlalchemy import SQLAlchemyAutoSchema, auto_field # For easier model mapping
 from marshmallow.validate import OneOf, Range, Length, Email, Regexp
 from datetime import datetime, timezone
@@ -284,8 +284,8 @@ class BonusCodeSchema(SQLAlchemyAutoSchema):
                                                      # For Schema-level description, use metadata on the field if not auto-generated.
     type = auto_field(required=True, validate=validate.OneOf(['deposit', 'registration', 'free_spins', 'other']))
     subtype = auto_field(required=True, validate=validate.OneOf(['percentage', 'fixed', 'spins']))
-    # Amount validation happens in the route based on subtype
-    amount = fields.Float(required=True, metadata={"description": "Percentage value (e.g., 10.5 for 10.5%) or fixed Satoshi amount"})
+    amount = fields.Float(required=False, allow_none=True, metadata={"description": "Percentage value (e.g., 10.5 for 10.5%) for 'percentage' subtype. Not for 'fixed' or 'spins'."})
+    amount_sats = fields.Integer(required=False, allow_none=True, validate=Range(min=1), metadata={"description": "Fixed Satoshi amount for 'fixed' subtype bonus codes."})
     max_uses = fields.Int(allow_none=True, validate=Range(min=1))
     uses_remaining = fields.Int(dump_only=True, allow_none=True)
     expires_at = fields.DateTime(allow_none=True)
@@ -307,9 +307,47 @@ class BonusCodeSchema(SQLAlchemyAutoSchema):
             data['code_id'] = data['code_id'].strip().upper()
         return data
 
+    @validates_schema
+    def validate_amount_based_on_subtype(self, data, **kwargs):
+        subtype = data.get('subtype')
+        amount = data.get('amount')
+        amount_sats = data.get('amount_sats')
+
+        if subtype == 'fixed':
+            if amount_sats is None:
+                raise ValidationError("amount_sats is required and must be a positive integer for 'fixed' subtype.", "amount_sats")
+            if amount is not None:
+                raise ValidationError("amount should not be provided for 'fixed' subtype.", "amount")
+            if amount_sats is not None and amount_sats <= 0: # validate=Range(min=1) should cover this
+                 raise ValidationError("amount_sats must be a positive integer for 'fixed' subtype.", "amount_sats")
+
+        elif subtype == 'percentage':
+            if amount is None:
+                raise ValidationError("amount is required and must be a positive value for 'percentage' subtype.", "amount")
+            if amount_sats is not None:
+                raise ValidationError("amount_sats should not be provided for 'percentage' subtype.", "amount_sats")
+            if amount is not None and amount <= 0:
+                 raise ValidationError("amount must be a positive value for 'percentage' subtype.", "amount")
+
+        elif subtype == 'spins':
+            # For 'spins', amount & amount_sats are optional.
+            # If provided, they should be positive.
+            if amount is not None and amount <= 0:
+                raise ValidationError("If 'amount' is provided for 'spins' subtype, it must be positive.", "amount")
+            if amount_sats is not None and amount_sats <= 0: # validate=Range(min=1) should cover this
+                raise ValidationError("If 'amount_sats' is provided for 'spins' subtype, it must be a positive integer.", "amount_sats")
+        return data
+
 
 class BonusCodeListSchema(PaginationSchema):
     items = fields.Nested(BonusCodeSchema, many=True, dump_only=True)
+
+# --- Admin Schemas ---
+class AdminCreditDepositSchema(Schema):
+    user_id = fields.Int(required=True)
+    amount_sats = fields.Int(required=True, validate=Range(min=1))
+    external_tx_id = fields.Str(required=False, allow_none=True, validate=Length(max=256)) # e.g., Bitcoin transaction hash
+    admin_notes = fields.Str(required=False, allow_none=True, validate=Length(max=500))
 
 # --- WinLine Schema (For Spin Response) ---
 class WinLineSchema(Schema):

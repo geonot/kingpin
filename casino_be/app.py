@@ -14,7 +14,8 @@ from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
-    BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema
+    BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema,
+    AdminCreditDepositSchema
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
@@ -278,30 +279,38 @@ def join_game():
     if errors:
         return jsonify({'status': False, 'status_message': errors}), 400
 
-    game_type = data.get('game_type', 'slot')
+    game_type = data.get('game_type') # Schema already validates game_type presence and values
 
-    if game_type == 'slot':
-        if 'slot_id' not in data:
+    slot_id = None
+    table_id = None
+
+    if game_type == 'blackjack':
+        # Direct users to the specific endpoint for joining blackjack games
+        logger.info(f"Blackjack join attempt via /api/join by user {current_user.id}. Redirecting to /api/join_blackjack.")
+        return jsonify({
+            'status': False,
+            'status_message': 'For blackjack games, please use the /api/join_blackjack endpoint.',
+            'use_endpoint': '/api/join_blackjack'
+        }), 400
+
+    elif game_type == 'slot':
+        slot_id_from_request = data.get('slot_id')
+        if slot_id_from_request is None: # Check if None, not just falsy (e.g. 0 if it were valid)
+            logger.warning(f"slot_id missing in request for slot game join by user {current_user.id}")
             return jsonify({'status': False, 'status_message': 'slot_id is required for slot games'}), 400
 
-        slot_id = data['slot_id']
-        slot = Slot.query.get(slot_id)
+        slot = Slot.query.get(slot_id_from_request)
         if not slot:
-            return jsonify({'status': False, 'status_message': f'Slot with ID {slot_id} not found'}), 404
+            logger.warning(f"Slot with ID {slot_id_from_request} not found for join attempt by user {current_user.id}")
+            return jsonify({'status': False, 'status_message': f'Slot with ID {slot_id_from_request} not found'}), 404
 
-        table_id = None
-    elif game_type == 'blackjack':
-        if 'table_id' not in data:
-            return jsonify({'status': False, 'status_message': 'table_id is required for blackjack games'}), 400
+        slot_id = slot_id_from_request # Assign validated slot_id
+        table_id = None # Explicitly None for slot games
 
-        table_id = data['table_id']
-        table = BlackjackTable.query.get(table_id)
-        if not table:
-            return jsonify({'status': False, 'status_message': f'Table with ID {table_id} not found'}), 404
-
-        # Use a default slot_id (1) instead of None to avoid not-null constraint
-        slot_id = 1
     else:
+        # This case should ideally not be reached if JoinGameSchema.game_type has OneOf(['slot', 'blackjack'])
+        # and the schema is validated before this logic.
+        logger.error(f"Invalid game_type '{game_type}' encountered in /api/join for user {current_user.id} despite schema validation.")
         return jsonify({'status': False, 'status_message': f'Invalid game type: {game_type}'}), 400
 
     user_id = current_user.id
@@ -517,60 +526,105 @@ def deposit():
         return jsonify({'status': False, 'status_message': errors}), 400
 
     user = current_user
-    bonus_applied_amount = 0
+    bonus_value_sats = 0 # Renamed from bonus_applied_amount and initialized
 
     if 'bonus_code' in data and data['bonus_code']:
         bonus_code_str = data['bonus_code'].strip().upper() # Normalize code
         bonus_code = BonusCode.query.filter_by(code_id=bonus_code_str, is_active=True).first()
 
         if bonus_code:
-            # Add logic here to check if user already redeemed this code, expiry, usage limits etc.
+            # TODO: Add logic here to check if user already redeemed this code, expiry, usage limits etc.
+            # Example:
+            # existing_tx = Transaction.query.filter_by(user_id=user.id, details={"bonus_code_id": bonus_code.id}).first()
+            # if existing_tx:
+            #     logger.warning(f"Bonus code '{bonus_code_str}' already used by user {user.id}.")
+            #     return jsonify({'status': False, 'status_message': 'Bonus code already used.'}), 400
+            # if bonus_code.expires_at and bonus_code.expires_at < datetime.now(timezone.utc):
+            #     logger.warning(f"Bonus code '{bonus_code_str}' expired.")
+            #     return jsonify({'status': False, 'status_message': 'Bonus code expired.'}), 400
+            # if bonus_code.uses_remaining is not None and bonus_code.uses_remaining <= 0:
+            #     logger.warning(f"Bonus code '{bonus_code_str}' has no uses remaining.")
+            #     return jsonify({'status': False, 'status_message': 'Bonus code has no uses remaining.'}), 400
 
             try:
-                # Apply bonus logic (simple example, needs refinement based on bonus types)
-                bonus_amount_sats = 0
                 if bonus_code.subtype == 'percentage':
-                    # Usually percentage bonuses apply to the DEPOSITED amount, not current balance.
-                    # This example applies to current balance, which might not be desired.
-                    # Needs context of an actual deposit amount.
-                    # Let's assume a fixed bonus for simplicity here.
-                    # bonus_amount_sats = int(user.balance * (bonus_code.amount / 100.0))
-                    logger.warning(f"Percentage bonus code '{bonus_code_str}' used by user {user.id}, but logic is placeholder.")
-                    # Using fixed amount for now as placeholder
-                    bonus_amount_sats = int(bonus_code.amount) # Assume 'amount' is in Satoshis for fixed bonuses
+                    # Percentage bonuses require a deposit amount to calculate against.
+                    # This endpoint currently doesn't handle actual deposit amounts.
+                    logger.warning(f"Percentage bonus code '{bonus_code_str}' (ID: {bonus_code.id}) used by user {user.id}, but this endpoint doesn't process deposit amounts. Bonus not applied.")
+                    bonus_value_sats = 0
+                    # To implement fully:
+                    # deposit_amount_sats = data.get('deposit_amount_sats') # Requires schema update
+                    # if not deposit_amount_sats or deposit_amount_sats <= 0:
+                    #     return jsonify({'status': False, 'status_message': 'Deposit amount required for percentage bonus.'}), 400
+                    # bonus_value_sats = int(deposit_amount_sats * (bonus_code.amount / 100.0))
 
                 elif bonus_code.subtype == 'fixed':
-                    bonus_amount_sats = int(bonus_code.amount) # Assume 'amount' is in Satoshis
+                    if bonus_code.amount_sats is not None and bonus_code.amount_sats > 0:
+                        bonus_value_sats = int(bonus_code.amount_sats)
+                    else:
+                        logger.error(f"Fixed bonus code '{bonus_code_str}' (ID: {bonus_code.id}) has invalid amount_sats: {bonus_code.amount_sats}")
+                        bonus_value_sats = 0
+
+
+                elif bonus_code.subtype == 'spins':
+                    logger.warning(f"'spins' subtype bonus code '{bonus_code_str}' (ID: {bonus_code.id}) used at deposit endpoint by user {user.id}. Monetary value not applied here.")
+                    bonus_value_sats = 0
+                    # Logic for awarding free spins should be handled elsewhere (e.g., game entry, specific bonus claim endpoint)
 
                 else:
-                     logger.error(f"Unknown bonus subtype '{bonus_code.subtype}' for code {bonus_code_str}")
+                     logger.error(f"Unknown bonus subtype '{bonus_code.subtype}' for code {bonus_code_str} (ID: {bonus_code.id})")
                      return jsonify({'status': False, 'status_message': 'Invalid bonus code type.'}), 400
 
-                if bonus_amount_sats > 0:
-                    user.balance += bonus_amount_sats
-                    bonus_applied_amount = bonus_amount_sats
-                    # Log the bonus application transaction?
-                    # Mark bonus code as used by this user?
-                    # bonus_code.uses_remaining -= 1?
-                    db.session.commit()
-                    logger.info(f"Bonus code '{bonus_code_str}' applied for user {user.id}. Amount: {bonus_amount_sats} sats.")
-                else:
-                    logger.warning(f"Calculated bonus amount is zero or negative for code {bonus_code_str}, user {user.id}.")
+                if bonus_value_sats > 0:
+                    user.balance += bonus_value_sats
 
+                    # Create a transaction record for the bonus
+                    bonus_transaction = Transaction(
+                        user_id=user.id,
+                        amount=bonus_value_sats,
+                        transaction_type='bonus', # Or 'deposit_bonus'
+                        status='completed',
+                        details={
+                            'bonus_code_id': bonus_code.id,
+                            'bonus_code': bonus_code.code_id,
+                            'description': f"Bonus applied: {bonus_code.description or bonus_code.code_id}"
+                        }
+                    )
+                    db.session.add(bonus_transaction)
+
+                    # Update bonus code usage if applicable
+                    if bonus_code.uses_remaining is not None:
+                        bonus_code.uses_remaining = max(0, bonus_code.uses_remaining - 1)
+
+                    db.session.commit()
+                    logger.info(f"Bonus code '{bonus_code_str}' (ID: {bonus_code.id}) applied for user {user.id}. Value: {bonus_value_sats} sats. New balance: {user.balance}")
+                elif bonus_code.subtype != 'percentage' and bonus_code.subtype != 'spins': # Don't log warning if value is 0 due to placeholder logic
+                    logger.warning(f"Calculated bonus value is zero or negative for code {bonus_code_str} (ID: {bonus_code.id}), user {user.id}. Subtype: {bonus_code.subtype}")
 
             except Exception as e:
                 db.session.rollback()
-                logger.error(f"Error applying bonus code '{bonus_code_str}' for user {user.id}: {str(e)}", exc_info=True)
+                logger.error(f"Error applying bonus code '{bonus_code_str}' (ID: {bonus_code.id}) for user {user.id}: {str(e)}", exc_info=True)
                 return jsonify({'status': False, 'status_message': 'Failed to apply bonus code due to an internal error.'}), 500
-
         else:
             logger.warning(f"Invalid or inactive bonus code '{bonus_code_str}' attempted by user {user.id}.")
             return jsonify({'status': False, 'status_message': 'Invalid or expired bonus code'}), 400
 
     # Return updated user data, even if no bonus was applied
     user_data = UserSchema().dump(user)
-    message = f"Bonus of {bonus_applied_amount} sats applied." if bonus_applied_amount > 0 else "No bonus code applied."
-    return jsonify({'status': True, 'user': user_data, 'status_message': message}), 200
+    message = f"Bonus of {bonus_value_sats} sats applied." if bonus_value_sats > 0 else "No monetary bonus applied."
+    if 'bonus_code' in data and data['bonus_code'] and bonus_value_sats == 0:
+        # Provide more specific feedback if a code was entered but resulted in 0 value based on new logic
+        bonus_code_obj = BonusCode.query.filter_by(code_id=data['bonus_code'].strip().upper()).first()
+        if bonus_code_obj:
+            if bonus_code_obj.subtype == 'percentage':
+                message = "Percentage bonus code not applied: this endpoint requires deposit amount context."
+            elif bonus_code_obj.subtype == 'spins':
+                message = "Spins bonus code not applicable for direct monetary value here."
+            elif bonus_code_obj.subtype == 'fixed' and (bonus_code_obj.amount_sats is None or bonus_code_obj.amount_sats <= 0):
+                 message = "Fixed bonus code has an invalid or zero amount."
+
+
+    return jsonify({'status': True, 'user': user_data, 'status_message': message, 'bonus_applied_sats': bonus_value_sats}), 200
 
 # === Public Info ===
 @app.route('/api/slots', methods=['GET'])
@@ -1005,6 +1059,64 @@ def admin_balance_transfer():
         db.session.rollback()
         logger.error(f"Admin balance transfer failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Balance transfer failed.'}), 500
+
+@app.route('/api/admin/credit_deposit', methods=['POST'])
+@jwt_required()
+def admin_credit_deposit():
+    if not is_admin():
+        return jsonify({'status': False, 'status_message': 'Access denied: Administrator privileges required.'}), 403
+
+    data = request.get_json()
+    schema = AdminCreditDepositSchema()
+    errors = schema.validate(data)
+    if errors:
+        return jsonify({'status': False, 'status_message': errors}), 400
+
+    user_id = data['user_id']
+    amount_sats = data['amount_sats']
+    external_tx_id = data.get('external_tx_id')
+    admin_notes = data.get('admin_notes')
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'status': False, 'status_message': f'User with ID {user_id} not found.'}), 404
+
+    try:
+        user.balance += amount_sats
+
+        transaction_details = {
+            'credited_by_admin_id': current_user.id,
+            'credited_by_admin_username': current_user.username
+        }
+        if external_tx_id:
+            transaction_details['external_tx_id'] = external_tx_id
+        if admin_notes:
+            transaction_details['admin_notes'] = admin_notes
+
+        deposit_tx = Transaction(
+            user_id=user.id,
+            amount=amount_sats,
+            transaction_type='deposit', # Or 'admin_credit_deposit' for more specificity
+            status='completed',
+            details=transaction_details
+        )
+        db.session.add(deposit_tx)
+        db.session.commit()
+
+        logger.info(f"Admin {current_user.username} credited {amount_sats} sats to user {user.username} (ID: {user.id}). External TX: {external_tx_id or 'N/A'}")
+
+        return jsonify({
+            'status': True,
+            'status_message': 'Deposit credited successfully.',
+            'user_id': user.id,
+            'new_balance_sats': user.balance,
+            'transaction_id': deposit_tx.id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Admin credit deposit failed for user {user_id} by admin {current_user.username}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Failed to credit deposit due to an internal error.'}), 500
 
 
 # --- Main Execution ---
