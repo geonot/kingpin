@@ -3,6 +3,13 @@ from __future__ import with_statement
 import logging
 from logging.config import fileConfig
 import os # Import os
+import sys # Import sys
+
+# Add project root to sys.path
+# This assumes env.py is in casino_be/migrations/
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from flask import current_app
 from sqlalchemy import engine_from_config, pool # Import necessary components
@@ -33,7 +40,7 @@ logger = logging.getLogger('alembic.env')
 
 # Option 3: Import all models and use a shared MetaData instance
 # Ensure all your models use the same MetaData object (SQLAlchemy() usually handles this)
-from models import db # If db = SQLAlchemy() is defined in models.py
+from casino_be.models import db # If db = SQLAlchemy() is defined in models.py
 target_metadata = db.metadata
 # --- End Metadata Setup ---
 

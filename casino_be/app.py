@@ -11,17 +11,23 @@ from datetime import datetime, timedelta, timezone # Use timezone-aware datetime
 import logging # Add logging
 
 # Ensure UserBonus is imported from models
-from .models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus
+from .models import (
+    db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, 
+    BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
+    PokerTable, PokerHand, PokerPlayerState # Added Poker models
+)
 from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
     BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema,
-    AdminCreditDepositSchema, UserBonusSchema
+    AdminCreditDepositSchema, UserBonusSchema,
+    PokerTableSchema, PokerPlayerStateSchema, PokerHandSchema, JoinPokerTableSchema, PokerActionSchema # Added Poker schemas
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
 from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from .utils import poker_helper # Import the poker_helper module
 from .config import Config
 from .services.bonus_service import apply_bonus_to_deposit # Import the new service
 
@@ -33,9 +39,10 @@ app.config.from_object(Config)
 # It's important to configure RATELIMIT_STORAGE_URI before initializing Limiter if not using default memory
 app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
 limiter = Limiter(
-    app,
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    app
+    # key_func and default_limits are expected to be set in app.config via Config class
+    # key_func=get_remote_address, 
+    # default_limits=["200 per day", "50 per hour"]
 )
 
 # --- Database Setup ---
@@ -794,6 +801,215 @@ def admin_balance_transfer():
         db.session.rollback()
         logger.error(f"Admin balance transfer failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Transfer failed.'}), 500
+
+# === Poker Endpoints ===
+
+@app.route('/api/poker/tables', methods=['GET'])
+# @jwt_required() # Optional: Decide if listing tables requires login
+def list_poker_tables():
+    """Lists all active poker tables."""
+    try:
+        tables = PokerTable.query.filter_by(is_active=True).order_by(PokerTable.id).all()
+        # TODO: Use PokerTableSchema for serialization
+        # result = PokerTableSchema(many=True).dump(tables)
+        # Basic serialization for now:
+        result = [{
+            "id": t.id, "name": t.name, "description": t.description, 
+            "game_type": t.game_type, "limit_type": t.limit_type,
+            "small_blind": t.small_blind, "big_blind": t.big_blind,
+            "min_buy_in": t.min_buy_in, "max_buy_in": t.max_buy_in,
+            "max_seats": t.max_seats, "is_active": t.is_active
+        } for t in tables]
+        return jsonify({'status': True, 'tables': result}), 200
+    except Exception as e:
+        logger.error(f"Failed to retrieve poker tables: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Could not retrieve poker table information.'}), 500
+
+@app.route('/api/poker/tables/<int:table_id>', methods=['GET'])
+# @jwt_required() # Optional
+def get_poker_table_details(table_id):
+    """Gets detailed information for a specific poker table, including players."""
+    try:
+        table = PokerTable.query.get(table_id)
+        if not table:
+            return jsonify({'status': False, 'status_message': f'Poker table {table_id} not found.'}), 404
+
+        player_states = PokerPlayerState.query.filter_by(table_id=table.id).all()
+        
+        # TODO: Use PokerTableSchema and PokerPlayerStateSchema for serialization
+        # table_data = PokerTableSchema().dump(table)
+        # players_data = PokerPlayerStateSchema(many=True, exclude=("hole_cards",)).dump(player_states) # Exclude hole cards
+        
+        # Basic serialization for now:
+        table_data = {
+            "id": table.id, "name": table.name, "description": table.description,
+            "game_type": table.game_type, "limit_type": table.limit_type,
+            "small_blind": table.small_blind, "big_blind": table.big_blind,
+            "min_buy_in": table.min_buy_in, "max_buy_in": table.max_buy_in,
+            "max_seats": table.max_seats, "is_active": table.is_active
+        }
+        players_data = [{
+            "user_id": ps.user_id, "seat_id": ps.seat_id, "stack_sats": ps.stack_sats,
+            "is_sitting_out": ps.is_sitting_out, "username": User.query.get(ps.user_id).username # Basic username fetch
+        } for ps in player_states]
+
+        return jsonify({'status': True, 'table': table_data, 'players': players_data}), 200
+    except Exception as e:
+        logger.error(f"Failed to retrieve poker table {table_id} details: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Could not retrieve poker table details.'}), 500
+
+@app.route('/api/poker/join_table', methods=['POST'])
+@jwt_required()
+def join_poker_table():
+    """Allows a logged-in user to join a poker table."""
+    user = current_user
+    data = request.get_json()
+    
+    # TODO: Use JoinPokerTableSchema for validation
+    # errors = JoinPokerTableSchema().validate(data)
+    # if errors:
+    #     return jsonify({'status': False, 'status_message': errors}), 400
+
+    required_fields = ['table_id', 'seat_id', 'buy_in_amount']
+    if not all(field in data for field in required_fields):
+        return jsonify({'status': False, 'status_message': 'Missing required fields (table_id, seat_id, buy_in_amount).'}), 400
+
+    table_id = data['table_id']
+    seat_id = data['seat_id']
+    buy_in_amount = data['buy_in_amount']
+
+    if not isinstance(buy_in_amount, int) or buy_in_amount <= 0:
+        return jsonify({'status': False, 'status_message': 'Invalid buy_in_amount.'}), 400
+        
+    try:
+        result = poker_helper.handle_sit_down(user_id=user.id, table_id=table_id, seat_id=seat_id, buy_in_amount=buy_in_amount)
+        if 'error' in result:
+            status_code = result.get('status_code', 400) # Helper can suggest status code
+            logger.warning(f"User {user.id} failed to join table {table_id}: {result['error']}")
+            return jsonify({'status': False, 'status_message': result['error']}), status_code
+        
+        logger.info(f"User {user.id} joined poker table {table_id}, seat {seat_id} with buy-in {buy_in_amount}.")
+        # User object might have been updated by handle_sit_down (balance)
+        updated_user_data = UserSchema().dump(User.query.get(user.id))
+        return jsonify({
+            'status': True, 
+            'status_message': result.get('message', 'Successfully joined table.'),
+            'player_state': result.get('player_state'), # As returned by helper
+            'user': updated_user_data
+        }), 200
+    except Exception as e:
+        logger.error(f"Error joining poker table {table_id} for user {user.id}: {str(e)}", exc_info=True)
+        # db.session.rollback() # Ensure helper function handles rollback on its exceptions
+        return jsonify({'status': False, 'status_message': 'Failed to join poker table due to server error.'}), 500
+
+@app.route('/api/poker/leave_table', methods=['POST'])
+@jwt_required()
+def leave_poker_table():
+    """Allows a logged-in user to leave a poker table."""
+    user = current_user
+    data = request.get_json()
+
+    if 'table_id' not in data:
+        return jsonify({'status': False, 'status_message': 'Missing table_id field.'}), 400
+    table_id = data['table_id']
+
+    try:
+        result = poker_helper.handle_stand_up(user_id=user.id, table_id=table_id)
+        if 'error' in result:
+            status_code = result.get('status_code', 400)
+            logger.warning(f"User {user.id} failed to leave table {table_id}: {result['error']}")
+            return jsonify({'status': False, 'status_message': result['error']}), status_code
+
+        logger.info(f"User {user.id} left poker table {table_id}.")
+        updated_user_data = UserSchema().dump(User.query.get(user.id))
+        return jsonify({
+            'status': True,
+            'status_message': result.get('message', 'Successfully left table.'),
+            'user': updated_user_data
+        }), 200
+    except Exception as e:
+        logger.error(f"Error leaving poker table {table_id} for user {user.id}: {str(e)}", exc_info=True)
+        # db.session.rollback()
+        return jsonify({'status': False, 'status_message': 'Failed to leave poker table due to server error.'}), 500
+
+@app.route('/api/poker/action', methods=['POST'])
+@jwt_required()
+def poker_action():
+    """Handles player actions in a poker game (fold, check, call, bet, raise)."""
+    user = current_user
+    data = request.get_json()
+
+    # TODO: Use PokerActionSchema for validation
+    # errors = PokerActionSchema().validate(data)
+    # if errors:
+    #     return jsonify({'status': False, 'status_message': errors}), 400
+    
+    required_fields = ['table_id', 'hand_id', 'action_type']
+    if not all(field in data for field in required_fields):
+        return jsonify({'status': False, 'status_message': 'Missing required fields (table_id, hand_id, action_type).'}), 400
+
+    table_id = data['table_id']
+    hand_id = data['hand_id']
+    action_type = data['action_type'].lower()
+    amount = data.get('amount') # Optional, for bet/raise
+
+    if action_type in ["bet", "raise"] and (amount is None or not isinstance(amount, int) or amount <=0):
+        return jsonify({'status': False, 'status_message': 'Valid amount is required for bet/raise actions.'}), 400
+
+    try:
+        result = {}
+        if action_type == 'fold':
+            result = poker_helper.handle_fold(user_id=user.id, table_id=table_id, hand_id=hand_id)
+        elif action_type == 'check':
+            result = poker_helper.handle_check(user_id=user.id, table_id=table_id, hand_id=hand_id)
+        elif action_type == 'call':
+            result = poker_helper.handle_call(user_id=user.id, table_id=table_id, hand_id=hand_id)
+        elif action_type == 'bet':
+            result = poker_helper.handle_bet(user_id=user.id, table_id=table_id, hand_id=hand_id, amount=amount)
+        elif action_type == 'raise':
+            result = poker_helper.handle_raise(user_id=user.id, table_id=table_id, hand_id=hand_id, amount=amount)
+        else:
+            return jsonify({'status': False, 'status_message': 'Invalid action_type.'}), 400
+
+        if 'error' in result:
+            status_code = result.get('status_code', 400)
+            logger.warning(f"User {user.id} action '{action_type}' failed at table {table_id}, hand {hand_id}: {result['error']}")
+            return jsonify({'status': False, 'status_message': result['error']}), status_code
+        
+        logger.info(f"User {user.id} performed action '{action_type}' (amount: {amount if amount else 'N/A'}) at table {table_id}, hand {hand_id}.")
+        
+        # After an action, it's good to return the new table state.
+        # The helper function itself might return parts of the state, or we fetch it fresh.
+        # For now, let's assume the result from helper is sufficient or a subsequent table_state poll is expected.
+        # new_state = poker_helper.get_table_state(table_id, hand_id, user.id)
+        return jsonify({
+            'status': True, 
+            'status_message': result.get('message', f'Action {action_type} processed.'),
+            # 'table_state': new_state # Consider returning full state or just confirmation
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error processing poker action '{action_type}' for user {user.id} at table {table_id}: {str(e)}", exc_info=True)
+        # db.session.rollback()
+        return jsonify({'status': False, 'status_message': 'Failed to process poker action due to server error.'}), 500
+
+@app.route('/api/poker/table_state/<int:table_id>/<int:hand_id>', methods=['GET'])
+@jwt_required()
+def get_poker_table_state(table_id, hand_id):
+    """Fetches the current state of a poker table, tailored for the current user."""
+    user = current_user
+    try:
+        state_data = poker_helper.get_table_state(table_id=table_id, hand_id=hand_id, user_id=user.id)
+        if 'error' in state_data:
+            status_code = state_data.get('status_code', 404)
+            logger.warning(f"Failed to get table state for table {table_id}, hand {hand_id}, user {user.id}: {state_data['error']}")
+            return jsonify({'status': False, 'status_message': state_data['error']}), status_code
+        
+        # TODO: Serialize state_data using appropriate schemas if it's not already a dict from helper
+        return jsonify({'status': True, 'table_state': state_data}), 200
+    except Exception as e:
+        logger.error(f"Error fetching table state for table {table_id}, hand {hand_id}, user {user.id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Failed to fetch table state due to server error.'}), 500
 
 # --- Main Execution ---
 if __name__ == '__main__':

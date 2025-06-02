@@ -4,7 +4,13 @@ from marshmallow.validate import OneOf, Range, Length, Email, Regexp
 from datetime import datetime, timezone
 import re
 
-from .models import db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, BlackjackTable, BlackjackHand, BlackjackAction # Import models
+# Updated import to include Poker models
+from .models import (
+    db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet,
+    BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, # UserBonus was missing, added back
+    PokerTable, PokerHand, PokerPlayerState # Poker models
+)
+
 
 # --- Helper ---
 def validate_password(password):
@@ -116,8 +122,9 @@ class GameSessionSchema(SQLAlchemyAutoSchema):
 
     id = auto_field(dump_only=True)
     user_id = auto_field(dump_only=True)
-    slot_id = auto_field(dump_only=True)
-    table_id = auto_field(dump_only=True)
+    slot_id = auto_field(allow_none=True, dump_only=True)
+    table_id = auto_field(allow_none=True, dump_only=True) # For Blackjack
+    poker_table_id = fields.Int(allow_none=True, dump_only=True) # ADDED for Poker
     game_type = auto_field(dump_only=True)
     bonus_active = auto_field(dump_only=True)
     bonus_spins_remaining = auto_field(dump_only=True)
@@ -128,8 +135,17 @@ class GameSessionSchema(SQLAlchemyAutoSchema):
     session_start = auto_field(dump_only=True)
     session_end = auto_field(dump_only=True)
     # Include related slot info if useful
-    slot = fields.Nested('SlotBasicSchema', dump_only=True) # Basic info
-    blackjack_table = fields.Nested('BlackjackTableBasicSchema', dump_only=True) # Basic info
+    slot = fields.Nested('SlotBasicSchema', dump_only=True, allow_none=True) 
+    blackjack_table = fields.Nested('BlackjackTableBasicSchema', dump_only=True, allow_none=True)
+    # ADDED PokerTable relation to GameSessionSchema
+    poker_table = fields.Nested(
+        lambda: PokerTableSchema(
+            only=("id", "name", "game_type", "limit_type", "small_blind", "big_blind", "max_seats"),
+            allow_none=True
+        ), 
+        dump_only=True, 
+        allow_none=True
+    )
 
 class SpinRequestSchema(Schema):
     bet_amount = fields.Int(required=True, validate=Range(min=1), metadata={"description": "Bet amount in Satoshis"})
@@ -482,3 +498,143 @@ class BlackjackActionRequestSchema(Schema):
     hand_id = fields.Int(required=True, validate=Range(min=1))
     action_type = fields.Str(required=True, validate=OneOf(['hit', 'stand', 'double', 'split']))
     hand_index = fields.Int(required=True, validate=Range(min=0)) # Removed load_default for required field
+
+# --- Poker Schemas (New) ---
+
+class PokerPlayerStateSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = PokerPlayerState
+        load_instance = True
+        sqla_session = db.session
+        include_relationships = True
+        # Exclude hole_cards by default in general listings. API must handle conditional exposure.
+        exclude = ("table",) # Avoid circular dep with PokerTableSchema if it includes player_states
+
+    id = auto_field(dump_only=True)
+    seat_id = auto_field()
+    stack_sats = auto_field()
+    is_sitting_out = auto_field()
+    is_active_in_hand = auto_field()
+    last_action = auto_field()
+    hole_cards = fields.List(fields.String(), allow_none=True) # Defined, but API controls exposure
+    user = fields.Nested('UserSchema', only=("id", "username"), dump_only=True)
+    # table_id and user_id are implicitly handled by relationships or can be added if needed directly
+
+class PokerHandSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = PokerHand
+        load_instance = True
+        sqla_session = db.session
+        include_relationships = False # Usually part of a table context
+
+    id = auto_field(dump_only=True)
+    table_id = auto_field(dump_only=True)
+    hand_history = fields.Raw(allow_none=True) # JSON
+    board_cards = fields.List(fields.String(), allow_none=True) # JSON array of strings
+    pot_size_sats = auto_field()
+    rake_sats = auto_field()
+    start_time = auto_field(dump_only=True)
+    end_time = auto_field(dump_only=True)
+    winners = fields.Raw(allow_none=True) # JSON
+
+class PokerTableSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = PokerTable
+        load_instance = True
+        sqla_session = db.session
+        include_relationships = True
+        # Exclude game_sessions to avoid circular dependency with GameSessionSchema.
+        # Hands might be too much for a list view, consider a separate endpoint or flag.
+        exclude = ("game_sessions",)
+
+    id = auto_field(dump_only=True)
+    name = auto_field()
+    description = auto_field()
+    game_type = auto_field()
+    limit_type = auto_field()
+    small_blind = auto_field()
+    big_blind = auto_field()
+    min_buy_in = auto_field()
+    max_buy_in = auto_field()
+    max_seats = auto_field()
+    is_active = auto_field()
+    created_at = auto_field(dump_only=True)
+    updated_at = auto_field(dump_only=True)
+    
+    player_states = fields.Nested(PokerPlayerStateSchema, many=True, dump_only=True, exclude=('hole_cards',)) # Exclude sensitive cards in general table view
+    hands = fields.Nested(PokerHandSchema, many=True, dump_only=True) # Optional: might be too much for list view
+
+class PokerTableBasicInfoSchema(SQLAlchemyAutoSchema):
+    # Used for nesting inside PokerTableStateResponseSchema to avoid meta conflicts
+    class Meta:
+        model = PokerTable
+        load_instance = True
+        sqla_session = db.session
+        fields = (
+            "id", "name", "description", "game_type", "limit_type", 
+            "small_blind", "big_blind", "min_buy_in", "max_buy_in", 
+            "max_seats", "is_active", "created_at", "updated_at"
+        ) # Explicitly list fields, relationships are not included unless specified here
+
+    id = auto_field(dump_only=True)
+    name = auto_field()
+    description = auto_field()
+    game_type = auto_field()
+    limit_type = auto_field()
+    small_blind = auto_field()
+    big_blind = auto_field()
+    min_buy_in = auto_field()
+    max_buy_in = auto_field()
+    max_seats = auto_field()
+    is_active = auto_field()
+    created_at = auto_field(dump_only=True)
+    updated_at = auto_field(dump_only=True)
+
+# --- Poker API Request/Response Schemas (New) ---
+
+class JoinPokerTableSchema(Schema):
+    table_id = fields.Int(required=True, validate=Range(min=1))
+    seat_id = fields.Int(required=True, validate=Range(min=1, max=10, error="Seat ID must be between 1 and 10."))
+    buy_in_amount = fields.Int(required=True, validate=Range(min=1, error="Buy-in amount must be positive."))
+
+class LeavePokerTableSchema(Schema): # Usually table_id is in URL, user from JWT
+    table_id = fields.Int(required=True)
+
+class PokerActionSchema(Schema):
+    # table_id might be in URL path for some API designs
+    table_id = fields.Int(required=True) 
+    hand_id = fields.Int(required=True) # ID of the current hand being played
+    action_type = fields.Str(required=True, validate=OneOf(["fold", "check", "call", "bet", "raise"]))
+    amount = fields.Int(allow_none=True, validate=Range(min=0)) # Allow 0 for pot-limit pre-flop calls/checks that are technically amount 0
+
+    @validates_schema
+    def validate_action_amount(self, data, **kwargs):
+        action = data.get("action_type")
+        amount = data.get("amount")
+
+        if action in ("bet", "raise"):
+            if amount is None or amount <= 0: # Min bet/raise is usually > 0, but handled by game logic mostly
+                raise ValidationError("A positive amount is required for 'bet' or 'raise' actions.", "amount")
+        elif action in ("fold", "check", "call"): # Call can have an implicit amount (the current bet to match)
+            if amount is not None and amount < 0 : # Amount could be 0 for a call if it's a BB option pre-flop
+                 raise ValidationError(f"Amount should not be negative for '{action}' action.", "amount")
+        return data
+
+class PokerTableStateResponseSchema(Schema):
+    """
+    Complex schema to represent the full table state sent to clients.
+    Careful consideration for PokerPlayerStateSchema to hide other players' hole_cards.
+    """
+    table = fields.Nested(PokerTableBasicInfoSchema) # Use the new basic schema
+    current_hand = fields.Nested(PokerHandSchema, allow_none=True)
+    # player_states needs custom handling in the API to show/hide hole_cards
+    player_states = fields.List(fields.Nested(PokerPlayerStateSchema)) 
+    
+    current_player_to_act_user_id = fields.Int(allow_none=True, dump_only=True)
+    dealer_seat_id = fields.Int(allow_none=True, dump_only=True)
+    # Pot details often derived or part of PokerHandSchema
+    pot_total_sats = fields.Int(dump_only=True, allow_none=True) 
+    current_bet_to_match_sats = fields.Int(dump_only=True, allow_none=True)
+    min_raise_sats = fields.Int(allow_none=True, dump_only=True)
+    last_action_description = fields.Str(allow_none=True, dump_only=True)
+    active_betting_round = fields.Str(allow_none=True, dump_only=True) # e.g., 'preflop', 'flop', 'turn', 'river'

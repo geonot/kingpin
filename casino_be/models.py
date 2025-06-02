@@ -3,7 +3,8 @@ from datetime import datetime, timezone, timedelta
 from passlib.hash import pbkdf2_sha256 as sha256
 # from sqlalchemy.dialects.postgresql import JSONB # Use JSONB for better performance in Postgres
 # Use generic JSON for broader compatibility (SQLite in tests)
-from sqlalchemy import BigInteger, Index, JSON
+from sqlalchemy import BigInteger, Index, JSON, UniqueConstraint
+from datetime import datetime, timezone # Removed timedelta as it's not used directly in models
 db = SQLAlchemy()
 
 class User(db.Model):
@@ -311,8 +312,84 @@ class UserBonus(db.Model):
     cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     # Relationships
-    user = db.relationship('User', backref=db.backref('user_bonuses', lazy='dynamic'))
-    bonus_code = db.relationship('BonusCode', backref=db.backref('applications', lazy='dynamic'))
+    user = db.relationship('User', backref=db.backref('active_bonuses', lazy='dynamic')) # Changed backref to avoid conflict
+    bonus_code = db.relationship('BonusCode', backref=db.backref('applied_codes', lazy='dynamic')) # Changed backref
 
     def __repr__(self):
         return f"<UserBonus {self.id} (User: {self.user_id}, BonusCodeID: {self.bonus_code_id}, Active: {self.is_active})>"
+
+
+# Poker Models
+class PokerTable(db.Model):
+    __tablename__ = 'poker_table'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    game_type = db.Column(db.String(50), nullable=False, default='texas_holdem') # e.g., "texas_holdem", "omaha"
+    limit_type = db.Column(db.String(50), nullable=False, default='no_limit') # e.g., "no_limit", "pot_limit", "fixed_limit"
+    small_blind = db.Column(BigInteger, nullable=False) # In satoshis
+    big_blind = db.Column(BigInteger, nullable=False) # In satoshis
+    min_buy_in = db.Column(BigInteger, nullable=False) # In satoshis
+    max_buy_in = db.Column(BigInteger, nullable=False) # In satoshis
+    max_seats = db.Column(db.Integer, nullable=False, default=9)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # current_players: JSON - Decided to use PokerPlayerState relationship instead for better management.
+    # game_sessions: Relationship defined in GameSession model via backref
+    hands = db.relationship('PokerHand', backref='table', lazy='dynamic')
+    player_states = db.relationship('PokerPlayerState', backref='table', lazy='dynamic')
+
+    def __repr__(self):
+        return f"<PokerTable {self.id} ({self.name} - {self.game_type} {self.small_blind}/{self.big_blind})>"
+
+class PokerHand(db.Model):
+    __tablename__ = 'poker_hand'
+    id = db.Column(db.Integer, primary_key=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id'), nullable=False, index=True)
+    # game_session_id: ForeignKey to GameSession.id - This might be complex if multiple users' sessions are involved.
+    # For now, linking to table. Consider if direct session link is needed for specific analytics.
+    hand_history = db.Column(JSON, nullable=False) # Detailed log: actions, bets, board cards, timings
+    board_cards = db.Column(JSON, nullable=True) # e.g., ["HA", "DK", "S7", "C2", "H9"]
+    pot_size_sats = db.Column(BigInteger, nullable=False, default=0)
+    rake_sats = db.Column(BigInteger, nullable=False, default=0)
+    start_time = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    end_time = db.Column(db.DateTime(timezone=True), nullable=True)
+    winners = db.Column(JSON, nullable=True) # [{"user_id": X, "amount_won": Y, "winning_hand": "Full House"}]
+
+    # Relationship to GameSession (if needed, can be one-to-many if a hand is associated with one primary session)
+    # game_session_id = db.Column(db.Integer, db.ForeignKey('game_session.id'), nullable=True, index=True)
+    # game_session = db.relationship('GameSession', backref='poker_hands')
+
+
+    def __repr__(self):
+        return f"<PokerHand {self.id} (Table: {self.table_id}, Pot: {self.pot_size_sats}, Start: {self.start_time})>"
+
+class PokerPlayerState(db.Model):
+    __tablename__ = 'poker_player_state'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id'), nullable=False, index=True)
+    seat_id = db.Column(db.Integer, nullable=False) # 1 to max_seats
+    stack_sats = db.Column(BigInteger, nullable=False)
+    is_sitting_out = db.Column(db.Boolean, default=False, nullable=False)
+    is_active_in_hand = db.Column(db.Boolean, default=False, nullable=False) # Dealt into current hand
+    hole_cards = db.Column(JSON, nullable=True) # e.g., ["AS", "KH"] - Access control needed
+    last_action = db.Column(db.String(50), nullable=True) # e.g., "bet", "fold", "check"
+    time_to_act_ends = db.Column(db.DateTime(timezone=True), nullable=True) # For turn timers
+    joined_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    user = db.relationship('User', backref='poker_states')
+    # table relationship defined in PokerTable via backref 'player_states'
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'table_id', name='uq_user_table'),
+        UniqueConstraint('table_id', 'seat_id', name='uq_table_seat'),
+        Index('ix_poker_player_state_user_table_seat', 'user_id', 'table_id', 'seat_id'),
+    )
+
+    def __repr__(self):
+        return f"<PokerPlayerState {self.id} (User: {self.user_id}, Table: {self.table_id}, Seat: {self.seat_id}, Stack: {self.stack_sats})>"
+
