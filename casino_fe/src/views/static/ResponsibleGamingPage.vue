@@ -1,29 +1,91 @@
 <template>
-  <div class="container mx-auto py-8 px-4">
-    <div class="bg-white dark:bg-gray-800 shadow-xl rounded-lg p-6 md:p-10">
-      <h1 class="text-3xl font-bold mb-6 text-gray-900 dark:text-gray-100">Responsible Gaming</h1>
-      <div class="prose dark:prose-invert max-w-none">
-        <p>Information about our responsible gaming policies is currently being updated. Please check back later.</p>
-        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
-        <p>Donec euismod, nisl eget aliquam ultricies, nunc nisl aliquet nunc, eget aliquam nisl nunc eget nisl. Sed vitae nisl eget nisl aliquam ultricies. Sed vitae nisl eget nisl aliquam ultricies. Sed vitae nisl eget nisl aliquam ultricies.</p>
-        <h2 class="text-2xl font-semibold mt-6 mb-3 text-gray-800 dark:text-gray-200">Our Commitment</h2>
-        <p>We are committed to providing a safe and responsible gaming environment. Gambling should be an enjoyable form of entertainment and not a way to make money.</p>
-        <h2 class="text-2xl font-semibold mt-6 mb-3 text-gray-800 dark:text-gray-200">Tools and Resources</h2>
-        <ul class="list-disc pl-5 space-y-1">
-            <li>Set deposit limits to manage your spending.</li>
-            <li>Self-exclusion options are available if you need a break.</li>
-            <li>Links to professional help organizations (e.g., BeGambleAware, GamCare).</li>
-            <li>Tips for staying in control and recognizing problem gambling.</li>
-        </ul>
-      </div>
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-6 text-gray-800 dark:text-white">Responsible Gaming</h1>
+
+    <div class="prose dark:prose-invert max-w-none bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+      <p class="mb-4">
+        Kingpin Casino is committed to responsible gaming and providing a safe and enjoyable experience for all our players. We understand that gambling can be addictive for some individuals, and we aim to provide resources and tools to help manage your play.
+      </p>
+
+      <h2 class="text-2xl font-semibold mt-6 mb-3">1. Our Commitment</h2>
+      <p class="mb-4">
+        We are dedicated to:
+      </p>
+      <ul class="list-disc list-inside mb-4">
+        <li>Preventing underage gambling.</li>
+        <li>Providing tools for players to control their gambling habits.</li>
+        <li>Offering resources for those who may need help with problem gambling.</li>
+        <li>Ensuring a fair and transparent gaming environment.</li>
+      </ul>
+
+      <h2 class="text-2xl font-semibold mt-6 mb-3">2. Tools to Help You Stay in Control</h2>
+      <p class="mb-4">
+        We plan to offer the following tools to help you manage your gaming activity (These tools are currently NOT implemented and are listed as examples of what a responsible gaming policy might include):
+      </p>
+      <ul class="list-disc list-inside mb-4">
+        <li><strong>Deposit Limits:</strong> Set daily, weekly, or monthly limits on the amount you can deposit. (Placeholder - UI for this is not yet built)</li>
+        <li><strong>Session Time Limits:</strong> Set limits on how long you can play in a single session. (Placeholder)</li>
+        <li><strong>Cool-Off Periods:</strong> Take a short break from gambling for a specified period (e.g., 24 hours, 1 week, 1 month). (Placeholder)</li>
+        <li><strong>Self-Exclusion:</strong> Exclude yourself from accessing our platform for a longer period (e.g., 6 months, 1 year, permanently). (Placeholder)</li>
+      </ul>
+      <p class="mb-4">
+        To set any limits or to self-exclude, you will be able to access these options through your account settings page once implemented.
+      </p>
+
+      <h2 class="text-2xl font-semibold mt-6 mb-3">3. Understanding Problem Gambling</h2>
+      <p class="mb-4">
+        Problem gambling can affect anyone. Some signs may include:
+      </p>
+      <ul class="list-disc list-inside mb-4">
+        <li>Spending more money or time gambling than you can afford.</li>
+        <li>Chasing losses.</li>
+        <li>Gambling interfering with personal relationships or work.</li>
+        <li>Feeling anxious or stressed about your gambling.</li>
+        <li>Borrowing money to gamble.</li>
+      </ul>
+
+      <h2 class="text-2xl font-semibold mt-6 mb-3">4. Getting Help</h2>
+      <p class="mb-4">
+        If you feel you may have a problem with gambling, or know someone who does, confidential help and support are available from various organizations. Please consider reaching out to them:
+      </p>
+      <ul class="list-disc list-inside mb-4">
+        <li><strong>Gamblers Anonymous:</strong> (Link to relevant GA website - Placeholder)</li>
+        <li><strong>National Council on Problem Gambling:</strong> (Link to relevant NCPG website - Placeholder)</li>
+        <li>Local support groups and helplines.</li>
+      </ul>
+
+      <h2 class="text-2xl font-semibold mt-6 mb-3">5. Preventing Underage Gambling</h2>
+      <p class="mb-4">
+        It is illegal for anyone under the age of 18 (or the legal gambling age in your jurisdiction) to open an account or to play on Kingpin Casino. We take our responsibilities in this regard very seriously and perform age verification checks.
+      </p>
+
+      <p class="mt-6 font-semibold">
+        This is a placeholder responsible gaming policy. It is crucial to implement the described tools and provide accurate information and resources before production launch.
+      </p>
     </div>
   </div>
 </template>
+
 <script>
-export default {
+import { defineComponent } from 'vue';
+
+export default defineComponent({
   name: 'ResponsibleGamingPage',
-};
+  setup() {
+    return {};
+  },
+});
 </script>
+
 <style scoped>
-/* Assuming @tailwindcss/typography for prose styles */
+/* Using Tailwind's prose class for typography styling. */
+.prose h1, .prose-invert h1 {
+  font-size: 1.875rem; /* 30px */
+  margin-bottom: 1.5rem;
+}
+.prose h2, .prose-invert h2 {
+  font-size: 1.5rem; /* 24px */
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
 </style>

@@ -7,7 +7,14 @@
           Create your account
         </h2>
       </div>
-      <form class="mt-8 space-y-6" @submit.prevent="handleRegister">
+
+      <!-- Success Message -->
+      <div v-if="registrationSuccess" class="mb-4 p-4 bg-green-100 dark:bg-green-700 border border-green-400 dark:border-green-600 text-green-700 dark:text-green-100 rounded-md">
+        <p class="font-bold">Registration Successful!</p>
+        <p>You will be redirected shortly. If not, please <router-link to="/login" class="underline">click here to login</router-link>.</p>
+      </div>
+
+      <form v-if="!registrationSuccess" class="mt-8 space-y-6" @submit.prevent="handleRegister">
 
         <!-- General API Error Message -->
         <error-message :error="apiError" @dismiss="apiError = null" class="mb-4" />
@@ -122,6 +129,7 @@ const formErrors = reactive({}); // For field-specific client-side validation er
 const apiError = ref(null); // For general errors from the API, expects an object
 const isLoading = ref(false);
 const passwordHints = ref([]);
+const registrationSuccess = ref(false);
 
 // --- Validation Logic ---
 const validateUsername = () => {
@@ -245,35 +253,60 @@ const handleRegister = async () => {
       password: form.password,
     });
 
-    if (response.status && response.access_token) { // Successful registration includes tokens
-      // Login action (which includes fetchUserProfile) is typically called by store's register action on success.
-      // Or, if register action only returns tokens, dispatch login/fetchUserProfile here.
-      // Assuming store's register action handles setting tokens and fetching user.
-      router.push('/slots'); // Or to a welcome/verify email page
+    if (response.status && response.access_token) {
+        registrationSuccess.value = true;
+        apiError.value = null; // Clear any previous errors
+        Object.keys(formErrors).forEach(key => delete formErrors[key]); // Clear field errors
+
+        // Redirect after a delay
+        setTimeout(() => {
+            router.push('/login?registered=true');
+        }, 3000); // 3 seconds delay
     } else {
-      // Display backend error message via ErrorMessage component
-      apiError.value = response; // Store the whole response object
-      if (!apiError.value?.status_message) {
-         apiError.value = { status_message: 'Registration failed. Please try again.' };
-      }
-      // Optionally, try to map backend error to specific fields if backend provides structured errors
-      // For example, if response.errors is an object like { username: ['Username taken'] }
-      if (response.errors) {
-        for (const field in response.errors) {
-          if (formErrors.hasOwnProperty(field)) {
-            formErrors[field] = response.errors[field].join ? response.errors[field].join(' ') : response.errors[field];
-          }
+        registrationSuccess.value = false;
+        let generalMessage = 'Registration failed. Please try again.';
+        let handledByField = false;
+
+        if (response.status_message) {
+            if (typeof response.status_message === 'string') {
+                const msgLower = response.status_message.toLowerCase();
+                if (msgLower.includes('username already exists')) {
+                    formErrors.username = response.status_message;
+                    handledByField = true;
+                } else if (msgLower.includes('email already exists')) {
+                    formErrors.email = response.status_message;
+                    handledByField = true;
+                } else {
+                    generalMessage = response.status_message;
+                }
+            } else if (typeof response.status_message === 'object') {
+                // Marshmallow validation errors
+                for (const field in response.status_message) {
+                    if (form.hasOwnProperty(field) || field === '_schema') {
+                        const messages = response.status_message[field];
+                        if (field === '_schema') {
+                            generalMessage = messages.join ? messages.join(' ') : messages;
+                        } else {
+                            formErrors[field] = messages.join ? messages.join(' ') : messages;
+                            handledByField = true;
+                        }
+                    }
+                }
+                 if (!handledByField && !Object.keys(formErrors).length) generalMessage = "Please check the form for errors.";
+            }
         }
-      } else if (apiError.value.status_message) { // If only a general message, check for keywords
-          if (apiError.value.status_message.toLowerCase().includes('username')) {
-              formErrors.username = apiError.value.status_message;
-          } else if (apiError.value.status_message.toLowerCase().includes('email')) {
-              formErrors.email = apiError.value.status_message;
-          }
-      }
+
+        if (!handledByField && Object.keys(formErrors).length === 0) {
+             apiError.value = { status_message: generalMessage };
+        } else if (handledByField && Object.keys(formErrors).length > 0 && (!apiError.value || !apiError.value.status_message || !apiError.value.status_message.includes("correct the highlighted"))) {
+            apiError.value = { status_message: "Please correct the highlighted field(s)." };
+        } else if (!apiError.value && generalMessage) {
+             apiError.value = { status_message: generalMessage };
+        }
     }
   } catch (err) {
     console.error('Registration system error:', err);
+    registrationSuccess.value = false; // Ensure success is false on catch
     apiError.value = { status_message: 'An unexpected error occurred during registration. Please try again later.' };
   } finally {
     isLoading.value = false;

@@ -18,6 +18,7 @@ const Terms = () => import('@/views/static/TermsPage.vue');
 const Privacy = () => import('@/views/static/PrivacyPage.vue');
 const ResponsibleGaming = () => import('@/views/static/ResponsibleGamingPage.vue');
 const AdminDashboard = () => import('@/views/admin/AdminDashboard.vue');
+const AccessDeniedPage = () => import('@/views/AccessDeniedPage.vue');
 
 
 const routes = [
@@ -95,6 +96,12 @@ const routes = [
      component: AdminDashboard,
      meta: { title: 'Admin Dashboard', requiresAuth: true, requiresAdmin: true } // Requires admin privileges
    },
+  {
+    path: '/access-denied',
+    name: 'AccessDenied',
+    component: AccessDeniedPage,
+    meta: { title: 'Access Denied' }
+  },
 
    // Catch-all 404 route
    {
@@ -141,9 +148,9 @@ router.beforeEach((to, from, next) => {
 
   // Routes requiring Admin privileges
   if (to.meta.requiresAdmin && !isAdmin) {
-      console.warn(`Access denied: Route ${to.name} requires admin privileges.`);
-      // Redirect non-admins away (e.g., to home or slots page)
-      next({ name: 'Slots' }); // Or show an 'Access Denied' page
+      console.warn(`Access denied: Route ${to.name} requires admin privileges. User ID: ${store.state.user?.id}`); // Enhanced log
+      // Redirect non-admins away to AccessDenied page
+      next({ name: 'AccessDenied' }); // Changed from 'Slots'
       return;
   }
 

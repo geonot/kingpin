@@ -111,6 +111,7 @@ class BonusCode(db.Model):
     subtype = db.Column(db.String(50), nullable=False) # e.g., 'percentage' (uses 'amount'), 'fixed' (uses 'amount_sats'), 'spins' (amount/amount_sats might represent number of spins or be unused if spins come from elsewhere)
     amount = db.Column(db.Float, nullable=True) # Percentage value (e.g., 10.5 for 10.5%) if subtype is 'percentage'. Not used for 'fixed' or 'spins' subtypes.
     amount_sats = db.Column(db.BigInteger, nullable=True) # Fixed Satoshi amount if subtype is 'fixed'. Not used for 'percentage' or 'spins' subtypes.
+    wagering_requirement_multiplier = db.Column(db.Float, nullable=True, default=1.0) # Multiplier for wagering requirement (e.g., 30 for 30x). Applied to bonus_amount_awarded_sats. If null or 1, implies no wagering or wagering is fixed amount.
     # Consider adding a separate column for 'spins_awarded' if type is 'free_spins'
     max_uses = db.Column(db.Integer, nullable=True) # Max total uses
     uses_remaining = db.Column(db.Integer, nullable=True) # Track remaining uses
