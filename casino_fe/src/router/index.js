@@ -12,6 +12,7 @@ const Login = () => import('@views/Login.vue');
 const Deposit = () => import('@views/Deposit.vue');
 const Withdraw = () => import('@views/Withdraw.vue');
 const Settings = () => import('@views/Settings.vue');
+const Plinko = () => import('@views/Plinko.vue'); // Added Plinko
 
 // Placeholder components for routes added
 const Terms = () => import('@/views/static/TermsPage.vue');
@@ -101,6 +102,12 @@ const routes = [
     name: 'AccessDenied',
     component: AccessDeniedPage,
     meta: { title: 'Access Denied' }
+  },
+  {
+    path: '/plinko',
+    name: 'Plinko',
+    component: Plinko,
+    meta: { title: 'Plinko', requiresAuth: true }
   },
 
    // Catch-all 404 route

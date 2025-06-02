@@ -11,19 +11,22 @@ from datetime import datetime, timedelta, timezone # Use timezone-aware datetime
 import logging # Add logging
 
 # Ensure UserBonus is imported from models
-from .models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus
+from .models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, PlinkoDropLog # Added PlinkoDropLog
 from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
     BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema,
-    AdminCreditDepositSchema, UserBonusSchema
+    AdminCreditDepositSchema, UserBonusSchema,
+    PlinkoPlayRequestSchema, PlinkoPlayResponseSchema # Added Plinko Schemas
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
 from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS # Added Plinko Helpers and Configs
 from .config import Config
 from .services.bonus_service import apply_bonus_to_deposit # Import the new service
+from http import HTTPStatus # For HTTP status codes
 
 # --- App Initialization ---
 app = Flask(__name__)
@@ -33,14 +36,15 @@ app.config.from_object(Config)
 # It's important to configure RATELIMIT_STORAGE_URI before initializing Limiter if not using default memory
 app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
 limiter = Limiter(
-    app,
+    app=app, # Explicitly use keyword argument for app
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"]
 )
 
 # --- Database Setup ---
 db.init_app(app)
-migrate = Migrate(app, db, directory='casino_be/migrations')
+# Adjusted directory to be relative to the app root if FLASK_APP makes 'casino_be' the app root path
+migrate = Migrate(app, db, directory='migrations')
 
 # --- JWT Setup ---
 jwt = JWTManager(app)
@@ -528,6 +532,188 @@ def blackjack_action():
         db.session.rollback()
         logger.error(f"Error in blackjack action: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Error in blackjack action.'}), 500
+
+
+# === Plinko Endpoint ===
+@app.route('/api/plinko/play', methods=['POST'])
+@jwt_required()
+@limiter.limit("120 per minute") # Example: Allow 2 drops per second per user on average
+def plinko_play():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        # This should ideally not happen if JWT is valid and user_lookup_loader works
+        logger.error(f"Plinko play attempt by non-existent user ID: {current_user_id}")
+        return jsonify({'error': 'User not found after authentication.'}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+    try:
+        json_data = request.get_json()
+        if not json_data:
+            return jsonify({'error': 'Invalid JSON payload.'}), HTTPStatus.BAD_REQUEST
+        
+        schema = PlinkoPlayRequestSchema()
+        loaded_data = schema.load(json_data)
+    except Exception as e: # Catch Marshmallow's ValidationError and other potential errors during load
+        logger.warning(f"Plinko play validation error for user {current_user_id}: {str(e)}")
+        # Marshmallow's validate.ValidationError has 'messages' attribute
+        error_messages = e.messages if hasattr(e, 'messages') else str(e)
+        return jsonify({'error': 'Validation failed', 'messages': error_messages}), HTTPStatus.BAD_REQUEST
+
+    stake_amount = loaded_data['stake_amount']
+    chosen_stake_label = loaded_data['chosen_stake_label']
+    slot_landed_label = loaded_data['slot_landed_label']
+
+    # Use the refactored validation function from plinko_helper
+    validation_result = validate_plinko_params(stake_amount, chosen_stake_label, slot_landed_label)
+    if not validation_result['success']:
+        logger.warning(f"Plinko parameter validation failed for user {user.id}: {validation_result['error']}")
+        return jsonify(PlinkoPlayResponseSchema().dump({
+            'success': False,
+            'error': validation_result['error']
+        })), HTTPStatus.BAD_REQUEST
+
+    # Convert stake_amount to Satoshis (assuming frontend sends decimal value like 1.00 for 1 BTC or similar unit)
+    # For this example, let's assume stake_amount is already in Satoshis or a comparable integer unit used for user.balance
+    # If stake_amount is in a float unit (like BTC) and balance is in Satoshis, conversion is needed.
+    # For now, assume stake_amount from request is in the same unit as user.balance.
+    # If user.balance is in Satoshis, and stake_amount is float (e.g. 0.1 BTC), convert:
+    # stake_amount_sats = int(stake_amount * 100_000_000)
+    # For this subtask, we'll assume stake_amount is directly comparable to user.balance.
+    # The schema defines stake_amount as Float, so we should ensure consistent unit handling.
+    # Let's assume user.balance is in the smallest unit (e.g., satoshis) and stake_amount from FE is also in that smallest unit as a float.
+    # To be safe, we should ensure stake_amount is treated as an integer if balance is integer.
+    # Given User.balance is an Integer (typically Satoshis), let's cast stake_amount to int if it represents Satoshis.
+    # However, STAKE_CONFIG uses float for min_bet/max_bet. This implies stake_amount should be float.
+    # Let's clarify: if User.balance is integer (Satoshis), stake_amount from request should be converted to integer Satoshis.
+    # For now, if User.balance is float, direct comparison is fine. Assume User.balance can handle floats for now, or adjust if it's strictly int.
+# Define conversion factor for currency units (e.g., BTC to satoshis)
+# This should ideally be in a config or a shared constants module.
+SATOSHIS_PER_UNIT = 100_000_000
+
+# === Plinko Endpoint ===
+@app.route('/api/plinko/play', methods=['POST'])
+@jwt_required()
+@limiter.limit("120 per minute") # Example: Allow 2 drops per second per user on average
+def plinko_play():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        logger.error(f"Plinko play attempt by non-existent user ID: {current_user_id}")
+        return jsonify({'error': 'User not found after authentication.'}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+    try:
+        json_data = request.get_json()
+        if not json_data:
+            return jsonify({'error': 'Invalid JSON payload.'}), HTTPStatus.BAD_REQUEST
+        
+        schema = PlinkoPlayRequestSchema()
+        loaded_data = schema.load(json_data)
+    except Exception as e: 
+        logger.warning(f"Plinko play validation error for user {current_user_id}: {str(e)}")
+        error_messages = e.messages if hasattr(e, 'messages') else str(e)
+        return jsonify({'error': 'Validation failed', 'messages': error_messages}), HTTPStatus.BAD_REQUEST
+
+    stake_amount_float = loaded_data['stake_amount'] # This is in main unit (e.g., BTC)
+    chosen_stake_label = loaded_data['chosen_stake_label']
+    slot_landed_label = loaded_data['slot_landed_label']
+
+    validation_result = validate_plinko_params(stake_amount_float, chosen_stake_label, slot_landed_label)
+    if not validation_result['success']:
+        logger.warning(f"Plinko parameter validation failed for user {user.id}: {validation_result['error']}")
+        return jsonify(PlinkoPlayResponseSchema().dump({
+            'success': False,
+            'error': validation_result['error']
+        })), HTTPStatus.BAD_REQUEST
+
+    stake_amount_sats = int(stake_amount_float * SATOSHIS_PER_UNIT)
+    
+    # Ensure user.balance is treated as satoshis (BigInteger)
+    if user.balance < stake_amount_sats:
+        logger.warning(f"User {user.id} insufficient funds for Plinko: Balance {user.balance} sats, Stake {stake_amount_sats} sats")
+        return jsonify(PlinkoPlayResponseSchema().dump({
+            'success': False,
+            'error': 'Insufficient funds',
+            # Return balance in main unit for consistency in API response
+            'new_balance': float(user.balance) / SATOSHIS_PER_UNIT 
+        })), HTTPStatus.BAD_REQUEST
+
+    try:
+        multiplier = PAYOUT_MULTIPLIERS.get(slot_landed_label)
+        if multiplier is None: # Should be caught by schema validation, but good for defense
+            logger.error(f"Invalid slot_landed_label '{slot_landed_label}' made it past validation for user {user.id}.")
+            return jsonify(PlinkoPlayResponseSchema().dump({
+                'success': False, 'error': 'Internal error: Invalid slot outcome.'
+            })), HTTPStatus.INTERNAL_SERVER_ERROR
+
+        # 1. Create PlinkoDropLog entry (winnings_amount will be updated later)
+        plinko_log = PlinkoDropLog(
+            user_id=current_user_id,
+            stake_amount=stake_amount_sats,
+            chosen_stake_label=chosen_stake_label,
+            slot_landed_label=slot_landed_label,
+            multiplier_applied=multiplier,
+            winnings_amount=0 # Placeholder, updated after calculation
+        )
+        db.session.add(plinko_log)
+        db.session.flush() # To get plinko_log.id for FK in transactions
+
+        # 2. Debit stake
+        user.balance -= stake_amount_sats
+        bet_transaction = Transaction(
+            user_id=user.id, 
+            amount=-stake_amount_sats, 
+            transaction_type='plinko_bet', 
+            status='completed', 
+            details={'description': f'Plinko bet: {chosen_stake_label}, Landed: {slot_landed_label}'}, # Simplified details
+            plinko_drop_id=plinko_log.id # Link to PlinkoDropLog
+        )
+        db.session.add(bet_transaction)
+        
+        # 3. Calculate winnings (in satoshis)
+        winnings_sats = calculate_winnings(stake_amount_sats, slot_landed_label)
+        
+        # 4. Update PlinkoDropLog with actual winnings
+        plinko_log.winnings_amount = winnings_sats
+        
+        # 5. Credit winnings (if any)
+        if winnings_sats > 0:
+            user.balance += winnings_sats
+            win_transaction = Transaction(
+                user_id=user.id, 
+                amount=winnings_sats, 
+                transaction_type='plinko_win', 
+                status='completed', 
+                details={'description': f'Plinko win. Stake: {stake_amount_float}, Landed: {slot_landed_label}'}, # Simplified details
+                plinko_drop_id=plinko_log.id # Link to PlinkoDropLog
+            )
+            db.session.add(win_transaction)
+
+        db.session.commit()
+        
+        # Convert amounts back to main unit for API response
+        winnings_float = float(winnings_sats) / SATOSHIS_PER_UNIT
+        new_balance_float = float(user.balance) / SATOSHIS_PER_UNIT
+
+        logger.info(f"Plinko play successful for user {user.id}: Bet {stake_amount_float}, Won {winnings_float}. New balance: {new_balance_float}")
+        
+        response_data = {
+            'success': True,
+            'winnings': winnings_float,
+            'new_balance': new_balance_float,
+            'message': f"Bet {stake_amount_float} on {chosen_stake_label}, landed on {slot_landed_label}. Won {winnings_float}."
+        }
+        return jsonify(PlinkoPlayResponseSchema().dump(response_data)), HTTPStatus.OK
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Plinko play processing error for user {user.id}: {str(e)}", exc_info=True)
+        return jsonify(PlinkoPlayResponseSchema().dump({
+            'success': False,
+            'error': 'An internal error occurred during game processing.'
+        })), HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 # === Admin Routes ===
 # ... (other admin routes like /api/admin/dashboard, user management, etc. remain unchanged) ...

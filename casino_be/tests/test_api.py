@@ -548,9 +548,8 @@ class BillingApiTests(BaseTestCase):
                 bonus_code_id=bonus_code_obj.id,
                 bonus_amount_awarded_sats=500,
                 wagering_requirement_multiplier=bonus_code_obj.wagering_requirement_multiplier,
-                # Let's say deposit was 500, bonus 500. Total 1000. Wagering req = 1000 * 10 = 10000
-                wagering_requirement_sats= (500 + 500) * bonus_code_obj.wagering_requirement_multiplier,
-                wagering_progress_sats=100, # Clearly incomplete
+                wagering_requirement_sats= (500 + 500) * bonus_code_obj.wagering_requirement_multiplier, # Example calculation
+                wagering_progress_sats=100, 
                 is_active=True,
                 is_completed=False,
                 is_cancelled=False,
@@ -563,9 +562,144 @@ class BillingApiTests(BaseTestCase):
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
         data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 403, data.get('status_message')) # Forbidden
+        self.assertEqual(response.status_code, 403, data.get('status_message')) 
         self.assertFalse(data['status'])
         self.assertIn("Withdrawal blocked. You have an active bonus with unmet wagering requirements.", data['status_message'])
+
+
+class PlinkoApiTests(BaseTestCase):
+    """Tests for the Plinko API endpoint."""
+
+    SATOSHIS_PER_UNIT = 100_000_000 # Should match app.py or be imported from config if centralized
+
+    def _get_auth_headers(self, username="plinko_user", password="plinko_password"):
+        # Create user if not exists, then login
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            user = self._create_user(username=username, password=password, email=f"{username}@example.com")
+        
+        login_payload = {"username": username, "password": password}
+        response = self.client.post('/api/login', json=login_payload)
+        data = json.loads(response.data.decode())
+        self.assertTrue(data.get('status'))
+        access_token = data['access_token']
+        return {'Authorization': f'Bearer {access_token}'}, user.id
+
+    def test_plinko_play_success(self):
+        headers, user_id = self._get_auth_headers()
+        
+        initial_balance_units = 100.0
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = int(initial_balance_units * self.SATOSHIS_PER_UNIT)
+            db.session.commit()
+
+        stake_amount_units = 1.0 # e.g. 1 BTC
+        chosen_stake_label = 'Low' # Must match STAKE_CONFIG in plinko_helper
+        slot_landed_label = '2x'    # Must match PAYOUT_MULTIPLIERS
+
+        payload = {
+            "stake_amount": stake_amount_units,
+            "chosen_stake_label": chosen_stake_label,
+            "slot_landed_label": slot_landed_label
+        }
+        response = self.client.post('/api/plinko/play', headers=headers, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, data.get('error') or data.get('message'))
+        self.assertTrue(data['success'])
+        
+        expected_winnings_units = stake_amount_units * PAYOUT_MULTIPLIERS[slot_landed_label]
+        self.assertAlmostEqual(data['winnings'], expected_winnings_units)
+        
+        expected_new_balance_units = initial_balance_units - stake_amount_units + expected_winnings_units
+        self.assertAlmostEqual(data['new_balance'], expected_new_balance_units)
+
+        # Verify database records
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            self.assertEqual(user.balance, int(expected_new_balance_units * self.SATOSHIS_PER_UNIT))
+
+            plinko_log = PlinkoDropLog.query.filter_by(user_id=user_id).first()
+            self.assertIsNotNone(plinko_log)
+            self.assertEqual(plinko_log.stake_amount, int(stake_amount_units * self.SATOSHIS_PER_UNIT))
+            self.assertEqual(plinko_log.chosen_stake_label, chosen_stake_label)
+            self.assertEqual(plinko_log.slot_landed_label, slot_landed_label)
+            self.assertEqual(plinko_log.multiplier_applied, PAYOUT_MULTIPLIERS[slot_landed_label])
+            self.assertEqual(plinko_log.winnings_amount, int(expected_winnings_units * self.SATOSHIS_PER_UNIT))
+
+            transactions = Transaction.query.filter_by(user_id=user_id, plinko_drop_id=plinko_log.id).order_by(Transaction.id).all()
+            self.assertEqual(len(transactions), 2 if expected_winnings_units > 0 else 1)
+            
+            bet_tx = transactions[0]
+            self.assertEqual(bet_tx.transaction_type, 'plinko_bet')
+            self.assertEqual(bet_tx.amount, -int(stake_amount_units * self.SATOSHIS_PER_UNIT))
+            self.assertIsNotNone(bet_tx.details) # Check details if they are set
+
+            if expected_winnings_units > 0:
+                win_tx = transactions[1]
+                self.assertEqual(win_tx.transaction_type, 'plinko_win')
+                self.assertEqual(win_tx.amount, int(expected_winnings_units * self.SATOSHIS_PER_UNIT))
+                self.assertIsNotNone(win_tx.details)
+
+
+    def test_plinko_play_insufficient_funds(self):
+        headers, user_id = self._get_auth_headers(username="plinko_poor_user")
+        
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = int(0.5 * self.SATOSHIS_PER_UNIT) # 0.5 units
+            db.session.commit()
+
+        payload = {
+            "stake_amount": 1.0, # Trying to bet 1 unit
+            "chosen_stake_label": 'Low',
+            "slot_landed_label": '0.5x'
+        }
+        response = self.client.post('/api/plinko/play', headers=headers, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(data['success'])
+        self.assertEqual(data['error'], 'Insufficient funds')
+        self.assertAlmostEqual(data['new_balance'], 0.5) # Balance before bet attempt
+
+    def test_plinko_play_validation_errors(self):
+        headers, user_id = self._get_auth_headers(username="plinko_validation_user")
+        with self.app.app_context(): # Ensure user has some balance
+            user = User.query.get(user_id)
+            user.balance = int(10 * self.SATOSHIS_PER_UNIT)
+            db.session.commit()
+
+        test_cases = [
+            ({"chosen_stake_label": "Low", "slot_landed_label": "2x"}, "stake_amount", 400, "Validation failed"), # Missing stake_amount
+            ({"stake_amount": 1.0, "slot_landed_label": "2x"}, "chosen_stake_label", 400, "Validation failed"),    # Missing chosen_stake_label
+            ({"stake_amount": 1.0, "chosen_stake_label": "Low"}, "slot_landed_label", 400, "Validation failed"), # Missing slot_landed_label
+            ({"stake_amount": 1.0, "chosen_stake_label": "InvalidTier", "slot_landed_label": "2x"}, "error", 400, "Invalid stake label"), # Invalid stake tier
+            ({"stake_amount": 0.05, "chosen_stake_label": "Low", "slot_landed_label": "2x"}, "error", 400, "out of range for Low tier"), # Stake too low for tier
+            ({"stake_amount": 1.0, "chosen_stake_label": "Low", "slot_landed_label": "100x"}, "error", 400, "Invalid slot landed label"), # Invalid slot
+        ]
+
+        for payload, error_key, expected_status, expected_message_part in test_cases:
+            with self.subTest(payload=payload):
+                response = self.client.post('/api/plinko/play', headers=headers, json=payload)
+                data = json.loads(response.data.decode())
+                self.assertEqual(response.status_code, expected_status)
+                if 'success' in data: # Our custom success=False responses
+                    self.assertFalse(data['success'])
+                    self.assertIn(expected_message_part, data['error'])
+                else: # Marshmallow validation errors
+                    self.assertIn(expected_message_part, str(data.get('messages', data.get('error'))))
+
+
+    def test_plinko_play_no_auth(self):
+        payload = {
+            "stake_amount": 1.0,
+            "chosen_stake_label": "Low",
+            "slot_landed_label": "2x"
+        }
+        response = self.client.post('/api/plinko/play', json=payload)
+        self.assertEqual(response.status_code, 401) # Unauthorized
 
 
 if __name__ == '__main__':

@@ -76,7 +76,7 @@ def upgrade():
         sa.Column('img_link', sa.String(length=256), nullable=False),
         sa.Column('value_multiplier', sa.Float(), nullable=True), # Renamed, allow null
         # Removed is_wild, is_scatter
-        sa.Column('data', postgresql.JSONB(astext_type=sa.Text()), nullable=True), # Added, use JSONB
+        sa.Column('data', sa.JSON(), nullable=True), # Changed JSONB to JSON
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()), # Use timezone
         sa.ForeignKeyConstraint(['slot_id'], ['slot.id'], ),
         sa.PrimaryKeyConstraint('id')
@@ -120,7 +120,7 @@ def upgrade():
     op.create_table('slot_spin',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('game_session_id', sa.Integer(), nullable=False),
-        sa.Column('spin_result', postgresql.JSONB(astext_type=sa.Text()), nullable=False), # Use JSONB
+        sa.Column('spin_result', sa.JSON(), nullable=False), # Changed JSONB to JSON
         sa.Column('win_amount', sa.BigInteger(), nullable=False), # BigInt
         sa.Column('bet_amount', sa.BigInteger(), nullable=False), # BigInt
         sa.Column('is_bonus_spin', sa.Boolean(), nullable=False, server_default='false'), # Added
@@ -141,7 +141,7 @@ def upgrade():
         sa.Column('amount', sa.BigInteger(), nullable=False), # BigInt
         sa.Column('transaction_type', sa.String(length=20), nullable=False), # Increased length
         sa.Column('status', sa.String(length=15), nullable=False, server_default='completed'), # Increased length
-        sa.Column('details', postgresql.JSONB(astext_type=sa.Text()), nullable=True), # Added, use JSONB
+        sa.Column('details', sa.JSON(), nullable=True), # Changed JSONB to JSON
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()), # Use timezone
         sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
         sa.PrimaryKeyConstraint('id')

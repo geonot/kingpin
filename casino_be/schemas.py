@@ -4,7 +4,8 @@ from marshmallow.validate import OneOf, Range, Length, Email, Regexp
 from datetime import datetime, timezone
 import re
 
-from .models import db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, BlackjackTable, BlackjackHand, BlackjackAction # Import models
+from .models import db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, PlinkoDropLog # Import models
+from casino_be.utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Plinko specific imports
 
 # --- Helper ---
 def validate_password(password):
@@ -482,3 +483,27 @@ class BlackjackActionRequestSchema(Schema):
     hand_id = fields.Int(required=True, validate=Range(min=1))
     action_type = fields.Str(required=True, validate=OneOf(['hit', 'stand', 'double', 'split']))
     hand_index = fields.Int(required=True, validate=Range(min=0)) # Removed load_default for required field
+
+# --- Plinko Schemas ---
+class PlinkoPlayRequestSchema(Schema):
+    stake_amount = fields.Float(required=True, validate=validate.Range(min=0.01))
+    chosen_stake_label = fields.String(required=True, validate=validate.OneOf(list(STAKE_CONFIG.keys())))
+    slot_landed_label = fields.String(required=True, validate=validate.OneOf(list(PAYOUT_MULTIPLIERS.keys())))
+
+class PlinkoPlayResponseSchema(Schema):
+    success = fields.Boolean(required=True)
+    winnings = fields.Float(allow_none=True) # Allow none if error or no win
+    new_balance = fields.Float(allow_none=True) # Allow none if error
+    message = fields.String(allow_none=True)
+    error = fields.String(allow_none=True)
+
+    @validates_schema
+    def validate_response_fields(self, data, **kwargs):
+        if data.get('success'):
+            if data.get('winnings') is None:
+                raise ValidationError("winnings is required when success is true.", "winnings")
+            if data.get('new_balance') is None:
+                raise ValidationError("new_balance is required when success is true.", "new_balance")
+        else:
+            if data.get('error') is None:
+                raise ValidationError("error is required when success is false.", "error")
