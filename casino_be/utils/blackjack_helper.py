@@ -403,6 +403,9 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
         # Re-initialize current hand (it was split)
         current_player_hand['cards'] = [original_hand_first_card]
         # Deal one new card to it
+        # TODO: Table Rule - After splitting Aces, many casinos only allow one card per Ace.
+        # If original_hand_first_card was an Ace, and table.rules.get('one_card_after_split_ace'),
+        # then this hand should auto-stand after this one card.
         current_player_hand['cards'].append(_deal_card(current_deck))
         total, is_soft = _calculate_hand_value(current_player_hand['cards'])
         current_player_hand['total'] = total
@@ -414,12 +417,15 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
 
         # Create the new hand object for the list
         new_player_split_hand = _create_player_hand_obj(
-            cards_list=[new_hand_first_card, _deal_card(current_deck)],
+            cards_list=[new_hand_first_card, _deal_card(current_deck)], # TODO: Apply one_card_after_split_ace rule here too.
             bet_sats=current_player_hand['bet_sats'] # Same bet amount as the hand it split from
         )
         new_player_split_hand['is_blackjack'] = (new_player_split_hand['total'] == 21 and len(new_player_split_hand['cards']) == 2)
         if new_player_split_hand['is_blackjack']: # Auto-stand on BJ after split
             new_player_split_hand['is_standing'] = True
+
+        # TODO: Table Rule - Check for no re-splitting Aces if original_hand_first_card was an Ace.
+        # The can_split_flag calculation later should also incorporate this.
 
         player_hands_list.insert(active_hand_idx + 1, new_player_split_hand)
         action_taken_successfully = True
@@ -564,6 +570,9 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
     if not all_hands_played and len(current_active_p_hand['cards']) == 2 and \
        user.balance >= current_active_p_hand['bet_sats'] and \
        not (current_active_p_hand['is_standing'] or current_active_p_hand['is_busted'] or current_active_p_hand['is_blackjack']):
+        # TODO: Table Rule - Check table.rules.get('allow_double_after_split', True/False)
+        # If this hand is a result of a split (e.g., player_hands_list length > 1 and current_active_p_hand was created from a split),
+        # then this flag should be conditional on that rule.
         can_double_flag = True
 
     can_split_flag = False
@@ -571,7 +580,8 @@ def handle_blackjack_action(user, hand_id, action_type, hand_index_requested=0):
        user.balance >= current_active_p_hand['bet_sats'] and \
        current_active_p_hand['cards'][0][1] == current_active_p_hand['cards'][1][1] and \
        not (current_active_p_hand['is_standing'] or current_active_p_hand['is_busted'] or current_active_p_hand['is_blackjack']):
-        # Check if already 4 hands (common max split rule, not specified but good practice)
+        # TODO: Table Rule - Check table.rules.get('allow_resplit_aces', True/False) if current hand is a split Ace.
+        # TODO: Table Rule - Check if len(player_hands_list) < table.rules.get("max_split_hands", 4)
         if len(player_hands_list) < table.rules.get("max_split_hands", 4): # Default max 4 hands
              can_split_flag = True
 

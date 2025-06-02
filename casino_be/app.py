@@ -15,7 +15,7 @@ from .schemas import (
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
     BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema,
-    AdminCreditDepositSchema
+    AdminCreditDepositSchema, UserBonusSchema # Added UserBonusSchema
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
@@ -913,6 +913,66 @@ def admin_update_transaction(tx_id):
 
 
 # --- Admin Bonus Code Management ---
+
+@app.route('/api/admin/credit_deposit', methods=['POST'])
+@jwt_required()
+def admin_credit_deposit():
+    if not is_admin():
+        return jsonify({'status': False, 'status_message': 'Access denied: Administrator privileges required.'}), 403
+
+    data = request.get_json()
+    schema = AdminCreditDepositSchema()
+    errors = schema.validate(data)
+    if errors:
+        return jsonify({'status': False, 'status_message': errors}), 400
+
+    user_id = data['user_id']
+    amount_sats = data['amount_sats']
+    external_tx_id = data.get('external_tx_id')
+    admin_notes = data.get('admin_notes')
+
+    user = User.query.get(user_id)
+    if not user:
+        logger.warning(f"Admin credit deposit attempt for non-existent user ID: {user_id} by admin {current_user.username}")
+        return jsonify({'status': False, 'status_message': f'User with ID {user_id} not found.'}), 404
+
+    try:
+        user.balance += amount_sats
+
+        transaction_details = {
+            'credited_by_admin_id': current_user.id,
+            'credited_by_admin_username': current_user.username
+        }
+        if external_tx_id:
+            transaction_details['external_tx_id'] = external_tx_id
+        if admin_notes:
+            transaction_details['admin_notes'] = admin_notes
+
+        deposit_tx = Transaction(
+            user_id=user.id,
+            amount=amount_sats,
+            transaction_type='deposit', # Using 'deposit' for consistency, details specify admin credit
+            status='completed',
+            details=transaction_details
+        )
+        db.session.add(deposit_tx)
+        db.session.commit()
+
+        logger.info(f"Admin {current_user.username} (ID: {current_user.id}) credited {amount_sats} sats to user {user.username} (ID: {user.id}). External TX: {external_tx_id or 'N/A'}")
+
+        return jsonify({
+            'status': True,
+            'status_message': 'Deposit credited successfully.',
+            'user_id': user.id,
+            'new_balance_sats': user.balance,
+            'transaction_id': deposit_tx.id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Admin credit deposit failed for user {user_id} (User: {user.username}) by admin {current_user.username} (ID: {current_user.id}): {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Failed to credit deposit due to an internal error.'}), 500
+
 @app.route('/api/admin/bonus_codes', methods=['GET'])
 @jwt_required()
 def admin_get_bonus_codes():
