@@ -24,7 +24,7 @@ class User(db.Model):
     game_sessions = db.relationship('GameSession', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
     blackjack_hands = db.relationship('BlackjackHand', backref='user', lazy=True)
-    # user_bonuses = db.relationship('UserBonus', backref='user', lazy=True) # If UserBonus model exists
+    user_bonuses = db.relationship('UserBonus', backref='user_bonuses', lazy='dynamic') # Corrected backref
 
     @staticmethod
     def hash_password(password):
@@ -286,3 +286,30 @@ class TokenBlacklist(db.Model):
         return f"<TokenBlacklist {self.id} (JTI: {self.jti})>"
 
 # TODO: Add a periodic task (e.g., using Celery Beat or APScheduler) to clean up expired tokens from TokenBlacklist.
+
+class UserBonus(db.Model):
+    __tablename__ = 'user_bonus'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    bonus_code_id = db.Column(db.Integer, db.ForeignKey('bonus_code.id'), nullable=False, index=True) # Link to the BonusCode applied
+
+    bonus_amount_awarded_sats = db.Column(db.BigInteger, nullable=False) # The actual monetary value of the bonus given
+    wagering_requirement_multiplier = db.Column(db.Float, nullable=True) # e.g., 30 (for 30x wagering)
+    wagering_requirement_sats = db.Column(db.BigInteger, nullable=False) # Total sats to be wagered (bonus_amount * multiplier, or fixed)
+    wagering_progress_sats = db.Column(db.BigInteger, default=0, nullable=False)
+
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True) # True if bonus is currently active and wagering
+    is_completed = db.Column(db.Boolean, default=False, nullable=False, index=True) # True if wagering completed
+    is_cancelled = db.Column(db.Boolean, default=False, nullable=False, index=True) # True if admin cancelled or bonus expired
+
+    activated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True) # When wagering met or bonus ended
+    cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('user_bonuses', lazy='dynamic'))
+    bonus_code = db.relationship('BonusCode', backref=db.backref('applications', lazy='dynamic'))
+
+    def __repr__(self):
+        return f"<UserBonus {self.id} (User: {self.user_id}, BonusCodeID: {self.bonus_code_id}, Active: {self.is_active})>"

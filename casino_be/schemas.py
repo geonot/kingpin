@@ -349,6 +349,34 @@ class AdminCreditDepositSchema(Schema):
     external_tx_id = fields.Str(required=False, allow_none=True, validate=Length(max=256)) # e.g., Bitcoin transaction hash
     admin_notes = fields.Str(required=False, allow_none=True, validate=Length(max=500))
 
+class UserBonusSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = UserBonus # Ensure UserBonus model is imported
+        load_instance = True
+        sqla_session = db.session
+        include_relationships = True
+
+    id = auto_field(dump_only=True)
+    user_id = auto_field()
+    bonus_code_id = auto_field()
+
+    bonus_amount_awarded_sats = auto_field()
+    wagering_requirement_multiplier = auto_field()
+    wagering_requirement_sats = auto_field()
+    wagering_progress_sats = auto_field()
+
+    is_active = auto_field()
+    is_completed = auto_field()
+    is_cancelled = auto_field()
+
+    activated_at = auto_field(dump_only=True)
+    updated_at = auto_field(dump_only=True)
+    completed_at = auto_field(dump_only=True)
+    cancelled_at = auto_field(dump_only=True)
+
+    user = fields.Nested(lambda: UserSchema(only=("id", "username")), dump_only=True)
+    bonus_code = fields.Nested(lambda: BonusCodeSchema(exclude=("applications", "description")), dump_only=True)
+
 # --- WinLine Schema (For Spin Response) ---
 class WinLineSchema(Schema):
     line_index = fields.Field(required=True, metadata={"description": "Payline index (integer) or 'scatter'"})
