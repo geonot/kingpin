@@ -6,7 +6,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '25e593b1e95c'
-down_revision = '0004' # Check if 0004 is correct previous revision ID
+down_revision = '0005' # Linearize history: 0004 -> 0005 -> 25e593b1e95c
 branch_labels = None
 depends_on = None
 

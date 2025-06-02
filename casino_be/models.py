@@ -24,7 +24,7 @@ class User(db.Model):
     game_sessions = db.relationship('GameSession', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
     blackjack_hands = db.relationship('BlackjackHand', backref='user', lazy=True)
-    user_bonuses = db.relationship('UserBonus', backref='user_bonuses', lazy='dynamic') # Corrected backref
+    # user_bonuses relationship is now established by the backref in UserBonus.user
 
     @staticmethod
     def hash_password(password):
@@ -316,3 +316,46 @@ class UserBonus(db.Model):
 
     def __repr__(self):
         return f"<UserBonus {self.id} (User: {self.user_id}, BonusCodeID: {self.bonus_code_id}, Active: {self.is_active})>"
+
+
+# Spacecrash Game Models
+class SpacecrashGame(db.Model):
+    __tablename__ = 'spacecrash_game'
+    id = db.Column(db.Integer, primary_key=True)
+    server_seed = db.Column(db.String(255), nullable=False)
+    client_seed = db.Column(db.String(255), nullable=True)
+    nonce = db.Column(db.Integer, nullable=False)
+    crash_point = db.Column(db.Float, nullable=True)
+    public_seed = db.Column(db.String(255), nullable=True) # Hash of server_seed, revealed before game
+    status = db.Column(db.String(50), nullable=False, default='pending', index=True) # e.g., 'pending', 'betting', 'in_progress', 'completed', 'cancelled'
+    game_start_time = db.Column(db.DateTime(timezone=True), nullable=True)
+    game_end_time = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    # Relationships
+    bets = db.relationship('SpacecrashBet', backref='game', lazy='dynamic')
+
+    def __repr__(self):
+        return f"<SpacecrashGame {self.id} (Status: {self.status}, Crash: {self.crash_point})>"
+
+class SpacecrashBet(db.Model):
+    __tablename__ = 'spacecrash_bet'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('spacecrash_game.id'), nullable=False, index=True)
+    bet_amount = db.Column(db.BigInteger, nullable=False) # Amount in satoshis
+    auto_eject_at = db.Column(db.Float, nullable=True) # Optional preset eject multiplier
+    ejected_at = db.Column(db.Float, nullable=True) # Actual multiplier user ejected at
+    win_amount = db.Column(db.BigInteger, nullable=True) # Winnings in satoshis
+    status = db.Column(db.String(50), nullable=False, default='placed', index=True) # e.g., 'placed', 'ejected', 'busted'
+    placed_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('spacecrash_bets', lazy='dynamic'))
+    # game relationship is defined by backref in SpacecrashGame.bets
+
+    def __repr__(self):
+        return f"<SpacecrashBet {self.id} (User: {self.user_id}, Game: {self.game_id}, Bet: {self.bet_amount}, Status: {self.status})>"
+
+# Ensure User model has spacecrash_bets relationship if needed for querying User.spacecrash_bets
+# (It's added via backref from SpacecrashBet.user)

@@ -11,17 +11,18 @@ from datetime import datetime, timedelta, timezone # Use timezone-aware datetime
 import logging # Add logging
 
 # Ensure UserBonus is imported from models
-from .models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus
+from .models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, SpacecrashGame, SpacecrashBet
 from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
     BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema,
-    AdminCreditDepositSchema, UserBonusSchema
+    AdminCreditDepositSchema, UserBonusSchema, SpacecrashBetSchema, SpacecrashGameSchema, SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
 from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from .utils import spacecrash_handler # Import the new handler module
 from .config import Config
 from .services.bonus_service import apply_bonus_to_deposit # Import the new service
 
@@ -33,7 +34,7 @@ app.config.from_object(Config)
 # It's important to configure RATELIMIT_STORAGE_URI before initializing Limiter if not using default memory
 app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
 limiter = Limiter(
-    app,
+    app=app,
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"]
 )
@@ -816,3 +817,281 @@ def db_cleanup_expired_tokens_command():
     except Exception as e:
         db.session.rollback()
         print(f"Error during token cleanup: {str(e)}")
+
+# === Spacecrash Game Endpoints ===
+
+@app.route('/api/spacecrash/bet', methods=['POST'])
+@jwt_required()
+@limiter.limit("30 per minute") # Limit bet frequency
+def spacecrash_place_bet():
+    data = request.get_json()
+    schema = SpacecrashBetSchema()
+    try:
+        validated_data = schema.load(data)
+    except ValidationError as err:
+        return jsonify({'status': False, 'status_message': err.messages}), 400
+
+    user = current_user
+    bet_amount = validated_data['bet_amount']
+    auto_eject_at = validated_data.get('auto_eject_at') # Optional
+
+    if user.balance < bet_amount:
+        return jsonify({'status': False, 'status_message': 'Insufficient balance.'}), 400
+
+    # Find the current game in 'betting' status
+    # This logic might need to be more sophisticated, e.g., using a specific active game or creating one if none.
+    # For now, assume one game is in 'betting' phase.
+    current_game = SpacecrashGame.query.filter_by(status='betting').order_by(SpacecrashGame.created_at.desc()).first()
+
+    if not current_game:
+        return jsonify({'status': False, 'status_message': 'No active game accepting bets at the moment.'}), 404 # Or 400
+
+    # Check if user already placed a bet in this game
+    existing_bet = SpacecrashBet.query.filter_by(user_id=user.id, game_id=current_game.id).first()
+    if existing_bet:
+        return jsonify({'status': False, 'status_message': 'You have already placed a bet for this game.'}), 400
+        
+    try:
+        new_bet = SpacecrashBet(
+            user_id=user.id,
+            game_id=current_game.id,
+            bet_amount=bet_amount,
+            auto_eject_at=auto_eject_at,
+            status='placed' # Default, but explicit
+        )
+        user.balance -= bet_amount
+        
+        db.session.add(new_bet)
+        db.session.commit()
+        
+        # Use schema to return created bet details (excluding sensitive parts if any)
+        bet_dump_schema = SpacecrashPlayerBetSchema() # Or a more detailed one if needed
+        logger.info(f"User {user.id} placed Spacecrash bet {new_bet.id} for {bet_amount} on game {current_game.id}")
+        return jsonify({'status': True, 'status_message': 'Bet placed successfully.', 'bet': bet_dump_schema.dump(new_bet)}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error placing Spacecrash bet for user {user.id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Failed to place bet due to an internal error.'}), 500
+
+
+@app.route('/api/spacecrash/eject', methods=['POST'])
+@jwt_required()
+def spacecrash_eject_bet():
+    user = current_user
+
+    # Find user's active bet in an 'in_progress' game
+    active_bet = SpacecrashBet.query.join(SpacecrashGame).filter(
+        SpacecrashBet.user_id == user.id,
+        SpacecrashGame.status == 'in_progress', # Game must be running
+        SpacecrashBet.status == 'placed' # Bet must be active (not already ejected or busted)
+    ).first() # Assuming one active bet per user in an in_progress game
+
+    if not active_bet:
+        return jsonify({'status': False, 'status_message': 'No active bet to eject or game is not in progress.'}), 404
+
+    # --- Placeholder for current multiplier ---
+    # This needs to be obtained from the live game state, which is complex.
+    # For now, let's use a placeholder. In a real system, this would come from a game loop manager.
+    # If the game has already crashed below this, this eject would be a bust.
+    # This logic will be refined when the game loop is built.
+    # For now, assume eject is successful at a fixed or arbitrary multiplier if game is 'in_progress'
+    
+    # Placeholder: get current multiplier (e.g. from game object if it's updated in real-time by game loop)
+    # current_multiplier = calculate_current_multiplier(active_bet.game.game_start_time) 
+    # IMPORTANT: This is a placeholder and needs to be replaced with actual game logic.
+    # The game might have already crashed. This check should be atomic with game state.
+    if active_bet.game.status != 'in_progress': # Re-check game status
+        return jsonify({'status': False, 'status_message': 'Game is no longer in progress.'}), 400
+
+    current_multiplier = spacecrash_handler.get_current_multiplier(active_bet.game)
+
+    # Ensure crash_point is loaded for the game
+    if active_bet.game.crash_point is None:
+        # This should ideally not happen if game is 'in_progress' as crash_point is set then.
+        # However, if it does, it's an issue. For safety, could prevent eject or use a default.
+        logger.error(f"CRITICAL: Game {active_bet.game.id} is in_progress but crash_point is None during eject attempt by user {user.id}.")
+        return jsonify({'status': False, 'status_message': 'Cannot process eject: game data inconsistent.'}), 500
+
+    if current_multiplier >= active_bet.game.crash_point:
+        # User tried to eject at or after the crash point
+        active_bet.status = 'busted'
+        active_bet.ejected_at = active_bet.game.crash_point # Record they busted at the crash point
+        active_bet.win_amount = 0
+        message = 'Eject failed, game crashed before or at your eject point.'
+        status_code = 400 # Bad request or conflict
+        logger.info(f"User {user.id} busted Spacecrash bet {active_bet.id}. Attempted eject at {current_multiplier}x, crash was at {active_bet.game.crash_point}x.")
+    else:
+        # Successful eject
+        active_bet.ejected_at = current_multiplier
+        active_bet.win_amount = int(active_bet.bet_amount * active_bet.ejected_at)
+        active_bet.status = 'ejected'
+        user.balance += active_bet.win_amount
+        message = 'Successfully ejected.'
+        status_code = 200
+        logger.info(f"User {user.id} ejected Spacecrash bet {active_bet.id} at {active_bet.ejected_at}x, won {active_bet.win_amount}")
+
+    try:
+        db.session.commit()
+        
+        bet_dump_schema = SpacecrashPlayerBetSchema()
+        return jsonify({
+            'status': True, 
+            'status_message': 'Successfully ejected.', 
+            'ejected_at': active_bet.ejected_at,
+            'win_amount': active_bet.win_amount,
+            'bet': bet_dump_schema.dump(active_bet)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error ejecting Spacecrash bet for user {user.id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Failed to eject bet due to an internal error.'}), 500
+
+@app.route('/api/spacecrash/current_game', methods=['GET'])
+def spacecrash_current_game_state():
+    # Find the most relevant game: 'in_progress', then 'betting', then very recent 'completed'
+    game = SpacecrashGame.query.filter(
+        SpacecrashGame.status.in_(['in_progress', 'betting'])
+    ).order_by(
+        # Prioritize in_progress, then betting
+        db.case(
+            (SpacecrashGame.status == 'in_progress', 0),
+            (SpacecrashGame.status == 'betting', 1),
+            else_=2 # Should not happen with current filter
+        ),
+        SpacecrashGame.created_at.desc() # Get the latest if multiple in same state
+    ).first()
+
+    if not game:
+        # If no active game, try to get the most recently completed one
+        game = SpacecrashGame.query.filter_by(status='completed').order_by(SpacecrashGame.game_end_time.desc()).first()
+        if not game:
+            return jsonify({'status': False, 'status_message': 'No current or recent game found.'}), 404
+
+    game_data = SpacecrashGameSchema().dump(game)
+    
+    # Placeholder for current_multiplier if game is in_progress
+    if game.status == 'in_progress' and game.game_start_time:
+        # elapsed_seconds = (datetime.now(timezone.utc) - game.game_start_time).total_seconds()
+        game_data['current_multiplier'] = spacecrash_handler.get_current_multiplier(game)
+    elif game.status == 'betting':
+        game_data['current_multiplier'] = 1.0 # Betting phase starts at 1x
+    elif game.status == 'completed':
+        game_data['current_multiplier'] = game.crash_point # Show actual crash point
+
+    # Fetch bets for this game (using SpacecrashPlayerBetSchema for privacy)
+    # Consider pagination if many bets
+    bets_query = SpacecrashBet.query.filter_by(game_id=game.id).all()
+    game_data['player_bets'] = SpacecrashPlayerBetSchema(many=True).dump(bets_query)
+
+    return jsonify({'status': True, 'game': game_data}), 200
+
+
+@app.route('/api/spacecrash/history', methods=['GET'])
+def spacecrash_game_history():
+    # Fetch last 10-20 completed games
+    recent_games = SpacecrashGame.query.filter_by(status='completed').order_by(SpacecrashGame.game_end_time.desc()).limit(20).all()
+    
+    if not recent_games:
+        return jsonify({'status': True, 'history': []}), 200 # Return empty list if no history
+
+    history_data = SpacecrashGameHistorySchema(many=True).dump(recent_games)
+    return jsonify({'status': True, 'history': history_data}), 200
+
+
+@app.route('/api/spacecrash/admin/next_phase', methods=['POST'])
+@jwt_required()
+@limiter.limit("10 per minute") # Limit how often phases can be changed
+def spacecrash_admin_next_phase():
+    if not is_admin():
+        return jsonify({'status': False, 'status_message': 'Access denied. Admin rights required.'}), 403
+
+    data = request.get_json()
+    game_id = data.get('game_id')
+    target_phase = data.get('target_phase') # 'betting', 'in_progress', 'completed'
+    client_seed_param = data.get('client_seed', 'default_client_seed_for_testing_123') # Allow providing client_seed for starting game
+    nonce_param = data.get('nonce', 1) # Allow providing nonce
+
+    game = None
+    if game_id:
+        game = SpacecrashGame.query.get(game_id)
+    else:
+        # Try to find a game to operate on based on current typical flow
+        if target_phase == 'betting': # If moving to betting, find a pending game or create new
+            game = SpacecrashGame.query.filter_by(status='pending').order_by(SpacecrashGame.created_at.desc()).first()
+            if not game: # Or if we want to create one if none pending
+                game = spacecrash_handler.create_new_game()
+                db.session.add(game) # Handler doesn't commit
+                # db.session.commit() # Commit after creation before starting betting
+        elif target_phase == 'in_progress':
+            game = SpacecrashGame.query.filter_by(status='betting').order_by(SpacecrashGame.created_at.desc()).first()
+        elif target_phase == 'completed':
+            game = SpacecrashGame.query.filter_by(status='in_progress').order_by(SpacecrashGame.created_at.desc()).first()
+
+    if not game:
+        return jsonify({'status': False, 'status_message': f'No suitable game found to transition for ID {game_id or "any"}.'}), 404
+
+    original_status = game.status
+    success = False
+    message = f"Game {game.id} already in {game.status} state or invalid transition."
+
+    try:
+        if target_phase == 'betting':
+            if game.status == 'pending':
+                success = spacecrash_handler.start_betting_phase(game)
+                message = f"Game {game.id} moved to betting phase." if success else f"Failed to move game {game.id} to betting."
+            elif game.status == 'completed' or game.status == 'cancelled': # Allow creating a new game and moving it to betting
+                new_game_instance = spacecrash_handler.create_new_game()
+                db.session.add(new_game_instance)
+                db.session.flush() # Get ID for the new game
+                success = spacecrash_handler.start_betting_phase(new_game_instance)
+                if success:
+                    game = new_game_instance # Update game to the new instance
+                    message = f"New game {game.id} created and moved to betting phase."
+                else:
+                    message = "Failed to create and move new game to betting phase."
+
+
+        elif target_phase == 'in_progress':
+            if game.status == 'betting':
+                # For starting the game, a client_seed and nonce are needed.
+                # These would typically come from a trusted source or be revealed later for fairness.
+                # For admin endpoint, we might allow them as params or use defaults.
+                if not game.client_seed: # If not already set (e.g. if game allows client seed setting during betting)
+                    game.client_seed = client_seed_param 
+                # Nonce should be unique per server_seed + client_seed pair.
+                # If game object has a nonce field that's incremented, use that.
+                # For this handler, start_game_round expects nonce.
+                # Let's assume the game.nonce should be incremented or set for this round.
+                # If it's a global nonce for the seed pair, it might be okay.
+                # If it's per-round for the same seed pair, it must be unique for that game.
+                # The current handler sets it on the game object.
+                
+                # Determine next nonce for the game. Could be game.bets.count() or an incrementing field on game.
+                # For now, let's assume the provided nonce_param is okay or game.nonce is managed externally.
+                # The handler takes nonce_param.
+                
+                success = spacecrash_handler.start_game_round(game, game.client_seed or client_seed_param, nonce_param)
+                message = f"Game {game.id} started (in progress). Crash point: {game.crash_point}" if success else f"Failed to start game {game.id}."
+        
+        elif target_phase == 'completed':
+            if game.status == 'in_progress':
+                success = spacecrash_handler.end_game_round(game)
+                message = f"Game {game.id} ended. Final crash point: {game.crash_point}" if success else f"Failed to end game {game.id}."
+        
+        else:
+            return jsonify({'status': False, 'status_message': f'Invalid target phase: {target_phase}.'}), 400
+
+        if success:
+            db.session.commit()
+            logger.info(f"Admin {current_user.id} transitioned Spacecrash game {game.id} from {original_status} to {target_phase}.")
+            return jsonify({'status': True, 'status_message': message, 'game_state': SpacecrashGameSchema().dump(game)}), 200
+        else:
+            # No commit needed if no success
+            return jsonify({'status': False, 'status_message': message, 'current_status': original_status}), 400
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error transitioning Spacecrash game {game.id} to {target_phase} by admin {current_user.id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Failed to transition game phase due to an internal error.'}), 500

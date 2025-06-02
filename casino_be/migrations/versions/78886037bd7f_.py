@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '78886037bd7f'
-down_revision = '0005' # Removed '0009_manual_placeholder' as it was a no-op and its file deleted.
+down_revision = '0008' # Point to the end of the numbered sequence
 branch_labels = None
 depends_on = None
 

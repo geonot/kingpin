@@ -12,6 +12,7 @@
         <template v-if="isAuthenticated">
           <router-link to="/slots" class="nav-link">Slots</router-link>
           <router-link to="/tables" class="nav-link">Tables</router-link>
+          <router-link to="/spacecrash" class="nav-link">Spacecrash</router-link>
           <router-link to="/deposit" class="nav-link">Deposit</router-link>
           <div v-if="user && user.balance !== undefined" class="nav-link text-gold">
              <i class="fas fa-coins mr-1"></i> {{ formatSatsToBtc(user.balance, true) }}
@@ -65,6 +66,7 @@
           <template v-if="isAuthenticated">
             <router-link to="/slots" @click="closeMobileMenu" class="mobile-nav-link">Slots</router-link>
             <router-link to="/tables" @click="closeMobileMenu" class="mobile-nav-link">Tables</router-link>
+            <router-link to="/spacecrash" @click="closeMobileMenu" class="mobile-nav-link">Spacecrash</router-link>
             <router-link to="/deposit" @click="closeMobileMenu" class="mobile-nav-link">Deposit</router-link>
             <div v-if="user && user.balance !== undefined" class="mobile-nav-link text-gold">
                 <i class="fas fa-coins mr-1"></i> {{ formatSatsToBtc(user.balance, true) }}
