@@ -1,10 +1,18 @@
 import unittest
+import os # For BaseTestCase environment variable access
 from casino_be.utils.bitcoin import generate_bitcoin_wallet
 from casino_be.utils.spin_handler import calculate_win
-from casino_be.utils.blackjack_helper import _calculate_hand_value, _determine_winner_for_hand, _create_player_hand_obj
+from casino_be.utils.blackjack_helper import _calculate_hand_value, _determine_winner_for_hand, _create_player_hand_obj, _update_wagering_progress
+from casino_be.models import User, UserBonus, BonusCode, db # Added User, UserBonus, BonusCode, db
+from casino_be.app import app # Added app for app_context
+from datetime import datetime, timezone, timedelta
+
+# Importing BaseTestCase to leverage its setup for DB interactions
+from .test_api import BaseTestCase
+
 
 @unittest.skip("Skipping Bitcoin utils tests due to persistent python-bitcoinlib import issues in this environment.")
-class TestBitcoinUtils(unittest.TestCase):
+class TestBitcoinUtils(unittest.TestCase): # This could potentially inherit from BaseTestCase if it needed DB
     def test_generate_bitcoin_wallet(self):
         """
         Test that generate_bitcoin_wallet returns an address.
@@ -146,6 +154,62 @@ class TestBlackjackHelperUtils(unittest.TestCase):
                 amount_returned, result_str = _determine_winner_for_hand(p_hand, d_hand, table_rules)
                 self.assertEqual(amount_returned, expected_result[0], f"Amount returned: Expected {expected_result[0]}, got {amount_returned}")
                 self.assertEqual(result_str, expected_result[1], f"Result string: Expected '{expected_result[1]}', got '{result_str}'")
+
+
+class TestBonusLogicUtils(BaseTestCase): # Inherit from BaseTestCase for app_context and db session
+
+    # Re-using _create_user from BaseTestCase, and _create_bonus_code needs to be accessible
+    # We can either duplicate it here, or make it part of BaseTestCase in test_api.py (which was done)
+    # and ensure test_utils.py can use it. For now, assume BaseTestCase has it.
+
+    def test_update_wagering_progress(self):
+        # User created via BaseTestCase's _create_user helper
+        user = self._create_user(username="bonuswageruser", email="bwu@example.com", balance=5000)
+
+        # Bonus code created via BaseTestCase's _create_bonus_code helper
+        # Ensure this helper is available in BaseTestCase as defined in the previous step for test_api.py
+        bonus_code = self._create_bonus_code(code_id="WAGERTEST", wagering_multiplier=10)
+
+        with self.app.app_context(): # Ensure app context for DB operations
+            # Create a bonus that requires wagering
+            user_bonus = UserBonus(
+                user_id=user.id,
+                bonus_code_id=bonus_code.id, # Use the ID from the created bonus code
+                bonus_amount_awarded_sats=100,
+                wagering_requirement_multiplier=bonus_code.wagering_requirement_multiplier, # from bonus code
+                wagering_requirement_sats=100 * bonus_code.wagering_requirement_multiplier, # e.g. 100 * 10 = 1000
+                wagering_progress_sats=0,
+                is_active=True,
+                is_completed=False,
+                is_cancelled=False,
+                activated_at=datetime.now(timezone.utc)
+            )
+            db.session.add(user_bonus)
+            db.session.commit()
+            db.session.refresh(user_bonus)
+
+            # Simulate a bet of 50
+            # _update_wagering_progress is imported from blackjack_helper
+            _update_wagering_progress(user, 50, db.session)
+            # _update_wagering_progress itself does not commit the session,
+            # so we need to commit here to persist changes for subsequent assertions.
+            db.session.commit()
+            db.session.refresh(user_bonus) # Refresh to get the latest state from DB
+
+            self.assertEqual(user_bonus.wagering_progress_sats, 50)
+            self.assertTrue(user_bonus.is_active)
+            self.assertFalse(user_bonus.is_completed)
+
+            # Simulate another bet of (requirement - 50), e.g., 1000 - 50 = 950
+            remaining_wagering = user_bonus.wagering_requirement_sats - user_bonus.wagering_progress_sats
+            _update_wagering_progress(user, remaining_wagering, db.session)
+            db.session.commit()
+            db.session.refresh(user_bonus)
+
+            self.assertEqual(user_bonus.wagering_progress_sats, user_bonus.wagering_requirement_sats)
+            self.assertFalse(user_bonus.is_active, "Bonus should be inactive after wagering completion")
+            self.assertTrue(user_bonus.is_completed, "Bonus should be completed after wagering completion")
+
 
 if __name__ == '__main__':
     unittest.main()

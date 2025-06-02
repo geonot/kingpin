@@ -1,151 +1,177 @@
 import Phaser from 'phaser';
 
 export default class PreloadScene extends Phaser.Scene {
-    constructor() {
-        super({ key: 'PreloadScene' });
+  constructor() {
+    super({ key: 'PreloadScene' });
+  }
+
+  preload() {
+    console.log('Slots PreloadScene: preload()');
+    const slotApiData = this.registry.get('slotApiData');
+    const slotGameJsonConfig = this.registry.get('slotGameJsonConfig');
+
+    let criticalConfigError = false;
+    if (!slotApiData || !slotApiData.short_name) {
+      console.error('Slots PreloadScene: slotApiData (especially short_name) not found in registry.');
+      criticalConfigError = true;
+    }
+    if (!slotGameJsonConfig) {
+      console.error('Slots PreloadScene: slotGameJsonConfig not found in registry.');
+      criticalConfigError = true;
     }
 
-    preload() {
-        console.log('PreloadScene: Preload');
-        const gameConfig = this.registry.get('gameConfig');
-        const slotShortName = this.registry.get('slotShortName'); // Get slotShortName
-
-        if (!gameConfig) {
-            console.error("PreloadScene: Game config not found in registry!");
-            // Optionally emit an event or stop the scene
-            this.registry.get('eventBus')?.emit('phaserError', 'Game configuration missing in PreloadScene.');
-            return;
-        }
-        if (!slotShortName) {
-            console.error("PreloadScene: slotShortName not found in registry! Asset paths will be incorrect.");
-            // Fallback to a default or handle error
-            this.registry.get('eventBus')?.emit('phaserError', 'Slot identifier missing for assets.');
-            return;
-        }
-
-        this.createLoadingBar();
-
-        // --- Load Game Assets Based on Config ---
-        const assetBaseUrl = `/public/${slotShortName}/`; // Base path for this slot's assets e.g. /public/slot1/
-
-        // 1. Background Image
-        if (gameConfig.background?.image) {
-            // Assuming gameConfig.background.image is relative to the slot's asset folder e.g., "background.png" or "images/bg.jpg"
-            this.load.image('background', `${assetBaseUrl}${gameConfig.background.image.replace(/^\//, '')}`);
-        }
-
-        // 2. Symbol Images
-        if (gameConfig.symbols && Array.isArray(gameConfig.symbols)) {
-            gameConfig.symbols.forEach(symbol => {
-                if (symbol.icon) { // symbol.icon is like "symbols/symbol_0.png"
-                    this.load.image(`symbol_${symbol.id}`, `${assetBaseUrl}${symbol.icon.replace(/^\//, '')}`);
-                }
-            });
-        }
-
-        // 3. UI Button Images & Other UI Assets from gameConfig.json
-        // Assuming gameConfig.ui.buttons paths are also relative to assetBaseUrl
-        if (gameConfig.ui?.buttons) {
-            Object.entries(gameConfig.ui.buttons).forEach(([key, buttonData]) => {
-                // buttonData could be a string (path) or an object {name, icon}
-                let iconPath = '';
-                let loadKey = key; // Use the key from gameConfig.ui.buttons as the Phaser asset key
-
-                if (typeof buttonData === 'string') { // e.g. "spin_button": "ui/spin_button.png"
-                    iconPath = buttonData;
-                } else if (buttonData && buttonData.icon) { // e.g. "spin_button": { "name": "spinButton", "icon": "ui/spin_button.png" }
-                    iconPath = buttonData.icon;
-                    if(buttonData.name) loadKey = buttonData.name; // Use provided name if available
-                }
-
-                if (iconPath) {
-                    this.load.image(loadKey, `${assetBaseUrl}${iconPath.replace(/^\//, '')}`);
-                }
-            });
-        }
-        // Common UI assets (not slot-specific, loaded from /public/assets/ui/)
-        // These were already loaded in BootScene for the loader itself, but if others are needed:
-        this.load.image('settings-button', '/assets/ui/settings.png');
-        this.load.image('payline-dot', '/assets/ui/payline_dot.png');
-        this.load.image('win-particle', '/assets/ui/particle.png');
-
-
-        // 4. Audio Files
-        if (gameConfig.sound) {
-            Object.entries(gameConfig.sound).forEach(([key, path]) => {
-                if (path && typeof path === 'string') { // Ensure path is a string
-                    // Assuming sound paths in gameConfig are relative to the slot's asset folder
-                    const fullPath = `${assetBaseUrl}${path.replace(/^\//, '')}`;
-                    console.log(`Loading sound: ${key} from ${fullPath}`);
-                    this.load.audio(key, fullPath);
-                } else if (path && path.src && typeof path.src === 'string') { // Handle if path is an object like {src: "...", volume: 1}
-                    const fullPath = `${assetBaseUrl}${path.src.replace(/^\//, '')}`;
-                    console.log(`Loading sound: ${key} from ${fullPath}`);
-                    this.load.audio(key, fullPath);
-                }
-            });
-        }
-
-        // --- Loading Progress ---
-        this.load.on('progress', (value) => {
-            this.updateLoadingBar(value);
-        });
-
-        this.load.on('complete', () => {
-            console.log('PreloadScene: Asset loading complete.');
-            this.loadingFill?.destroy(); // Clean up loading bar elements
-            this.loadingBg?.destroy();
-            this.loadingText?.destroy();
-            this.percentText?.destroy();
-
-            // Start the main game scenes
-            console.log('PreloadScene: Starting GameScene and UIScene...');
-            this.scene.start('GameScene');
-            this.scene.start('UIScene'); // Start UI scene concurrently
-        });
-
-         this.load.on('loaderror', (file) => {
-            console.error('PreloadScene: Error loading file:', file.key, file.src);
-             // Optionally display error to user
-         });
+    if (criticalConfigError) {
+        this.add.text(this.cameras.main.width / 2, this.cameras.main.height / 2, 'Error: Critical slot configuration missing.\nPlease try reloading.', { font: '18px Arial', fill: '#ff0000', align: 'center' }).setOrigin(0.5);
+        // Stop further asset loading if critical configs are missing
+        return;
     }
 
-     createLoadingBar() {
-        const centerX = this.cameras.main.width / 2;
-        const centerY = this.cameras.main.height / 2;
+    // --- Display Loading Bar ---
+    const progressBar = this.add.graphics();
+    const progressBox = this.add.graphics();
+    const width = this.cameras.main.width;
+    const height = this.cameras.main.height;
 
-        this.loadingText = this.add.text(centerX, centerY - 50, 'Loading...', {
-            font: '24px Arial',
-            fill: '#ffffff'
-        }).setOrigin(0.5);
+    const loadingText = this.make.text({
+      x: width / 2,
+      y: height / 2 - 50,
+      text: 'Loading Slot...',
+      style: { font: '20px Arial', fill: '#ffffff' }, // Changed font for better default availability
+    }).setOrigin(0.5, 0.5);
 
-        // Background of the loading bar
-        this.loadingBg = this.add.image(centerX, centerY, 'loader-bg').setOrigin(0.5);
+    const percentText = this.make.text({
+      x: width / 2,
+      y: height / 2,
+      text: '0%',
+      style: { font: '18px Arial', fill: '#ffffff' }, // Changed font
+    }).setOrigin(0.5, 0.5);
 
-        // Filling part of the loading bar
-        this.loadingFill = this.add.image(centerX - this.loadingBg.width / 2 + 4, centerY, 'loader-fill').setOrigin(0, 0.5); // Align left edge
-        this.loadingFill.setCrop(0, 0, 0, this.loadingFill.height); // Initially crop to zero width
+    progressBox.fillStyle(0x222222, 0.8);
+    progressBox.fillRect(width / 2 - 160, height / 2 - 30 + 20, 320, 50);
+
+    this.load.on('progress', (value) => {
+      percentText.setText(parseInt(value * 100, 10) + '%');
+      progressBar.clear();
+      progressBar.fillStyle(0xffffff, 1);
+      progressBar.fillRect(width / 2 - 150, height / 2 - 20 + 20, 300 * value, 30);
+    });
+
+    this.load.on('complete', () => {
+      progressBar.destroy();
+      progressBox.destroy();
+      loadingText.destroy();
+      percentText.destroy();
+      console.log('Slots PreloadScene: Asset loading complete.');
+    });
+
+    // --- Load Common UI Assets ---
+    this.load.image('ui-spin-button', 'public/assets/slots/ui/spin_button.png');
+    this.load.image('ui-settings-button', 'public/assets/slots/ui/settings_button.png');
+    this.load.image('ui-turbo-button', 'public/assets/slots/ui/turbo_button.png');
+    this.load.image('ui-sound-on-button', 'public/assets/slots/ui/sound_on_button.png');
+    this.load.image('ui-sound-off-button', 'public/assets/slots/ui/sound_off_button.png');
+    this.load.image('ui-bet-increase-button', 'public/assets/slots/ui/bet_increase.png');
+    this.load.image('ui-bet-decrease-button', 'public/assets/slots/ui/bet_decrease.png');
+    this.load.image('ui-max-bet-button', 'public/assets/slots/ui/max_bet.png');
+    this.load.image('ui-paytable-button', 'public/assets/slots/ui/paytable_button.png');
+    this.load.image('ui-close-button', 'public/assets/slots/ui/close_button.png'); // For modals
 
 
-        this.percentText = this.add.text(centerX, centerY + 50, '0%', {
-            font: '18px Arial',
-            fill: '#ffffff'
-        }).setOrigin(0.5);
+    // --- Load Slot-Specific Assets ---
+    // Use slotApiData for the base path (via short_name)
+    // Use slotGameJsonConfig for the list of assets and their relative paths within the slot's folder
+
+    const basePath = `public/slots/${slotApiData.short_name}/`;
+
+    // Background
+    const bgAsset = slotGameJsonConfig.assets?.background;
+    if (bgAsset) {
+      this.load.image('background', `${basePath}${bgAsset}`);
+    } else {
+      console.warn(`Slots PreloadScene: Background image not defined in slotGameJsonConfig.assets for ${slotApiData.short_name}. Loading fallback.`);
+      this.load.image('background', 'public/assets/slots/default_background.png');
     }
 
-    updateLoadingBar(value) {
-        if (this.loadingFill) {
-            const fillWidth = (this.loadingBg.width - 8) * value; // Calculate width based on progress (-8 for padding)
-            this.loadingFill.setCrop(0, 0, fillWidth, this.loadingFill.height);
+    // Symbols - from slotGameJsonConfig.game.symbols
+    if (slotGameJsonConfig.game && slotGameJsonConfig.game.symbols && Array.isArray(slotGameJsonConfig.game.symbols)) {
+      slotGameJsonConfig.game.symbols.forEach(symbol => {
+        if (symbol.id !== undefined && symbol.image) {
+          // Key used here: `symbol-${symbol.id}` must match GameScene.js
+          this.load.image(`symbol-${symbol.id}`, `${basePath}${symbol.image}`);
+        } else {
+          console.warn('Slots PreloadScene: Symbol missing id or image path in slotGameJsonConfig.game.symbols.', symbol);
         }
-        if (this.percentText) {
-            this.percentText.setText(parseInt(value * 100) + '%');
+      });
+    } else {
+      console.warn(`Slots PreloadScene: Symbols array not found or invalid in slotGameJsonConfig.game.symbols for ${slotApiData.short_name}`);
+    }
+
+    // Optional Assets from slotGameJsonConfig.assets
+    if (slotGameJsonConfig.assets) {
+        if (slotGameJsonConfig.assets['reel-frame']) {
+            this.load.image('reel-frame', `${basePath}${slotGameJsonConfig.assets['reel-frame']}`);
+        }
+        if (slotGameJsonConfig.assets['paytable_bg']) {
+            this.load.image('paytable-bg', `${basePath}${slotGameJsonConfig.assets['paytable_bg']}`);
+        }
+        if (slotGameJsonConfig.assets['bonus_background']) {
+            this.load.image('bonus-background', `${basePath}${slotGameJsonConfig.assets['bonus_background']}`);
         }
     }
 
-    create() {
-        // This scene transitions immediately after preload is complete
-        console.log('PreloadScene: Create (should transition immediately)');
+    // Load Slot-Specific Audio Assets from slotGameJsonConfig.assets.sounds
+    if (slotGameJsonConfig.assets && slotGameJsonConfig.assets.sounds) {
+      for (const key in slotGameJsonConfig.assets.sounds) {
+        if (Object.prototype.hasOwnProperty.call(slotGameJsonConfig.assets.sounds, key)) {
+          const soundPathOrPaths = slotGameJsonConfig.assets.sounds[key];
+          // Create a unique key for slot-specific sounds to avoid clashes with common sounds
+          const soundKey = `snd-${slotApiData.short_name}-${key}`;
+
+          let assetPathArray;
+          if (typeof soundPathOrPaths === 'string') {
+            assetPathArray = [`${basePath}${soundPathOrPaths}`];
+          } else if (Array.isArray(soundPathOrPaths)) {
+            assetPathArray = soundPathOrPaths.map(p => `${basePath}${p}`);
+          } else {
+            console.warn(`Slots PreloadScene: Invalid sound path format for ${key} in ${slotApiData.short_name}`);
+            continue;
+          }
+          this.load.audio(soundKey, assetPathArray);
+        }
+      }
     }
+
+    // --- Load Common Audio Assets ---
+    // These keys should be different from slot-specific ones to avoid conflicts if a slot defines 'spin', 'reel_stop' etc.
+    this.load.audio('snd-common-spin', ['public/assets/slots/audio/spin.mp3', 'public/assets/slots/audio/spin.ogg']);
+    this.load.audio('snd-common-reel-stop', ['public/assets/slots/audio/reel_stop.mp3', 'public/assets/slots/audio/reel_stop.ogg']);
+    this.load.audio('snd-common-win-small', ['public/assets/slots/audio/win_small.mp3', 'public/assets/slots/audio/win_small.ogg']);
+    this.load.audio('snd-common-win-medium', ['public/assets/slots/audio/win_medium.mp3', 'public/assets/slots/audio/win_medium.ogg']);
+    this.load.audio('snd-common-win-large', ['public/assets/slots/audio/win_large.mp3', 'public/assets/slots/audio/win_large.ogg']);
+    this.load.audio('snd-common-bonus-trigger', ['public/assets/slots/audio/bonus_trigger.mp3', 'public/assets/slots/audio/bonus_trigger.ogg']);
+    this.load.audio('snd-common-button-click', ['public/assets/slots/audio/button_click.mp3', 'public/assets/slots/audio/button_click.ogg']);
+
+
+    // Particle Effects (Example)
+    this.load.image('win-particle-star', 'public/assets/slots/particles/star.png');
+    this.load.image('win-particle-coin', 'public/assets/slots/particles/coin.png');
+  }
+
+  create() {
+    console.log('Slots PreloadScene: create() - transitioning to scenes.');
+
+    // Check if critical configs were loaded before proceeding
+    if (criticalConfigError) { // This var was set at the beginning of preload()
+        console.error("Slots PreloadScene: Halting creation due to missing critical configuration.");
+        // Optionally, you could transition to a dedicated ErrorScene:
+        // this.scene.start('ErrorScene', { message: 'Slot configuration failed to load.' });
+        return;
+    }
+
+    this.scene.launch('UIScene');
+    this.scene.launch('SettingsModalScene');
+    this.scene.sleep('SettingsModalScene');
+
+    this.scene.start('GameScene');
+  }
 }
-

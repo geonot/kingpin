@@ -1,53 +1,6 @@
 import { createStore } from 'vuex';
-import axios from 'axios';
-
-// --- API Client Setup ---
-const apiClient = axios.create({
-  baseURL: '/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-let storeInstance; // To be set later
-export const setStoreForApiClient = (store) => {
-  storeInstance = store;
-};
-
-// Request interceptor for API token
-apiClient.interceptors.request.use(config => {
-  const token = localStorage.getItem('userSession');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-}, error => {
-  return Promise.reject(error);
-});
-
-// Response interceptor for handling 401 and token refresh
-apiClient.interceptors.response.use(response => {
-  return response;
-}, async error => {
-  const originalRequest = error.config;
-  if (error.response && error.response.status === 401 && !originalRequest._retry && storeInstance) {
-    originalRequest._retry = true;
-    try {
-      const refreshData = await storeInstance.dispatch('refreshToken');
-      if (refreshData && refreshData.access_token) {
-        originalRequest.headers.Authorization = `Bearer ${refreshData.access_token}`;
-        return apiClient(originalRequest);
-      } else {
-        await storeInstance.dispatch('logout');
-        return Promise.reject(error);
-      }
-    } catch (refreshError) {
-      await storeInstance.dispatch('logout');
-      return Promise.reject(refreshError);
-    }
-  }
-  return Promise.reject(error);
-});
+import axios from 'axios'; // Keep for /logout2 or other direct calls if necessary
+import apiService from '@/services/api';
 
 export default createStore({
   state: {
@@ -171,22 +124,23 @@ export default createStore({
     // --- Authentication ---
     async register({ dispatch }, payload) {
       try {
-        const response = await apiClient.post('/register', payload);
+        const response = await apiService.register(payload); // Use apiService
         const data = response.data;
         if (data.status && data.access_token && data.refresh_token) {
           dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token, refreshToken: data.refresh_token });
         }
         return data;
       } catch (error) {
-        // Assuming specific error messages for registration are handled by the component
         console.error("Registration Error:", error.response?.data || error.message);
+        // The interceptor in api.js will handle generic network errors or 401s.
+        // Specific error handling for registration (e.g., email already exists) can remain here.
         return error.response?.data || { status: false, status_message: "Network error during registration." };
       }
     },
     async login({ dispatch, commit }, payload) {
       commit('startGlobalLoading');
       try {
-        const response = await apiClient.post('/login', payload);
+        const response = await apiService.login(payload); // Use apiService
         const data = response.data;
         if (data.status && data.access_token && data.refresh_token) {
           dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token, refreshToken: data.refresh_token });
@@ -195,7 +149,8 @@ export default createStore({
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Login failed. Please try again later.";
-        if (error.response?.status !== 401) {
+        // Interceptor handles 401. Other errors (e.g., 400 bad request) can be handled here.
+        if (error.response && error.response.status !== 401) {
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Login Error:", errData || error.message);
@@ -212,80 +167,107 @@ export default createStore({
     },
     async refreshToken({ commit, state, dispatch }) {
       if (!state.refreshToken) {
-        await dispatch('logout');
-        return { status: false, status_message: "No refresh token available. Logged out." };
+        // No await dispatch('logout') here as it might cause loops if logout also fails.
+        // The interceptor in api.js will call logout if refresh fails.
+        // This action is primarily called by the interceptor.
+        commit('clearAuth'); // Clear auth state immediately
+        return { status: false, status_message: "No refresh token available." };
       }
       try {
-        const refreshApiClient = axios.create({ baseURL: '/api' });
-        const response = await refreshApiClient.post('/refresh', {}, {
-          headers: { Authorization: `Bearer ${state.refreshToken}` }
-        });
+        // apiService.refreshToken expects the token value and returns the axios response
+        const response = await apiService.refreshToken(state.refreshToken);
         const data = response.data;
         if (data.status && data.access_token) {
           commit('setAuthTokens', { accessToken: data.access_token, refreshToken: state.refreshToken });
+          // The interceptor in api.js will use this new token to retry the original request.
+          // We also need to update the Authorization header for subsequent requests made by the apiClient in api.js
+          // This is handled by the interceptor setting the new token in apiClient's defaults or by re-initializing.
+          // For now, the request interceptor in api.js should pick up the new token from store/localStorage.
           return { status: true, access_token: data.access_token };
         } else {
-          await dispatch('logout');
-          return { status: false, status_message: data.status_message || "Session refresh failed. Logged out." };
+          // Refresh failed, logout will be dispatched by the interceptor in api.js
+          // However, if this action is called directly, we should ensure logout.
+          await dispatch('logout'); // Ensure local state is cleared
+          return { status: false, status_message: data.status_message || "Session refresh failed." };
         }
       } catch (error) {
-        console.error("Token Refresh Error:", error.response?.data || error.message);
-        await dispatch('logout');
+        console.error("Token Refresh Action Error:", error.response?.data || error.message);
+        // Logout will be dispatched by the interceptor in api.js
+        await dispatch('logout'); // Ensure local state is cleared
         return { status: false, status_message: "Session expired. Please log in again." };
       }
     },
     async logout({ commit, state }) {
-      const accessToken = state.userSession;
-      const refreshToken = state.refreshToken;
-      commit('clearAuth');
+      const currentRefreshToken = state.refreshToken; // Store before clearing auth
+      commit('clearAuth'); // Clear local tokens and user state immediately
+
       try {
-        if (accessToken) {
-          await apiClient.post('/logout', {});
-        }
-        if (refreshToken) {
+        // Invalidate access token on backend (if it was still valid)
+        // This call will use the (now cleared) token from localStorage if interceptor adds it,
+        // or no token if interceptor doesn't find one. Backend should handle this gracefully.
+        await apiService.logout(); // No specific error handling needed for this call's failure here
+
+        // Invalidate refresh token on backend
+        if (currentRefreshToken) {
+          // Use a temporary direct axios call for logout2 to avoid interceptor complexities
+          // and to ensure the correct refresh token is sent.
           const tempApiClient = axios.create({ baseURL: '/api' });
-          await tempApiClient.post('/logout2', {}, { headers: { Authorization: `Bearer ${refreshToken}` } });
+          await tempApiClient.post('/logout2', {}, { headers: { Authorization: `Bearer ${currentRefreshToken}` } });
         }
-        return { status: true, status_message: "Logged out successfully from server." };
+        return { status: true, status_message: "Logged out successfully." };
       } catch (error) {
-        console.warn("Server Logout Error:", error.response?.data || error.message);
-        return { status: true, status_message: "Logged out locally. Server session might still be active." };
+        console.warn("Server Logout Error during logout action:", error.response?.data || error.message);
+        // Even if server logout fails, user is logged out locally.
+        return { status: true, status_message: "Logged out locally. Server session might have issues clearing." };
       }
     },
-    async loadSession({ dispatch, commit }) {
-      const accessToken = localStorage.getItem('userSession');
+    async loadSession({ dispatch, commit, state }) { // Added state
+      const accessToken = state.userSession; // Check state first, then localStorage
       if (accessToken) {
         commit('startGlobalLoading');
         try {
+            // fetchUserProfile will use the new apiService which has interceptors.
+            // If token is expired, interceptor should try to refresh.
+            // If refresh fails, interceptor should logout.
             await dispatch('fetchUserProfile');
+        } catch (error) {
+            // If fetchUserProfile itself fails (e.g. network error not caught by interceptor, or refresh fails and logs out)
+            // this catch might not be strictly necessary if interceptor handles all logout cases.
+            console.error("Error during loadSession's fetchUserProfile:", error);
+            // dispatch('logout'); // Consider if this is needed or if interceptor handles it.
         } finally {
             commit('stopGlobalLoading');
         }
-      } else {
-        // No action needed here if token doesn't exist, user is effectively logged out.
-        // dispatch('logout'); // This was removed as per instruction.
       }
+      // No 'else dispatch logout' here, app starts in logged-out state if no token.
     },
     async fetchUserProfile({ commit }) {
       try {
-        const response = await apiClient.get('/me');
+        const response = await apiService.fetchUserProfile(); // Use apiService
         if (response.data.status) {
           commit('setUser', response.data.user);
           return response.data.user;
         } else {
-          console.warn("Failed to fetch user profile:", response.data.status_message);
+          // Non-2xx responses that are not 401 should be caught by the .catch block
+          // This part might be redundant if apiService throws for non-ok responses.
+          console.warn("Failed to fetch user profile (API reported !status):", response.data.status_message);
           return null;
         }
       } catch (error) {
+        // Interceptor should handle 401. This catches other errors (500, network, etc.).
         console.error("Error fetching user profile:", error.response?.data || error.message);
+        // Do not dispatch logout here directly, interceptor in api.js should manage it on 401.
         return null;
       }
     },
 
     // --- Game Data ---
-    async fetchSlots({ commit }) { // Removed state from params as it's not used directly before try
+    // Placeholder for other actions that need to be refactored
+    // Example:
+    async fetchSlots({ commit }) {
       try {
-        const response = await apiClient.get('/slots');
+        // const response = await apiClient.get('/slots'); // OLD
+        const response = await apiService.getSlots(); // NEW - assuming getSlots method in apiService
         if (response.data.status && Array.isArray(response.data.slots)) {
           commit('setSlots', response.data.slots);
           return response.data;
@@ -298,7 +280,7 @@ export default createStore({
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Failed to load slot machines. Please try again.";
-        if (error.response?.status !== 401) {
+        if (error.response && error.response.status !== 401) { // Check error.response exists
           commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error('Network error fetching slots:', errData || error.message);
@@ -307,9 +289,9 @@ export default createStore({
     },
     async fetchSlotConfig({ commit, state, dispatch }, slotId) {
       if (!state.slotsLoaded) {
-        const fetchResult = await dispatch('fetchSlots');
-        if (fetchResult.status === false || !fetchResult.slots) {
-            console.error("fetchSlots failed, cannot filter for slot config");
+        const fetchResult = await dispatch('fetchSlots'); // Already uses apiService if fetchSlots is updated
+        if (!fetchResult || fetchResult.status === false || !fetchResult.slots) { // Adjusted condition
+            console.error("fetchSlots failed or returned no slots, cannot filter for slot config");
             return null;
         }
       }
@@ -322,34 +304,33 @@ export default createStore({
         return null;
       }
     },
-    async fetchTables({ commit }) { // Removed state from params
+    async fetchTables({ commit }) {
       try {
-        const response = await apiClient.get('/tables');
+        // const response = await apiClient.get('/tables'); // OLD
+        const response = await apiService.getTables(); // NEW - assuming getTables method in apiService
         if (response.data.status && Array.isArray(response.data.tables)) {
           commit('setTables', response.data.tables);
           return response.data;
         } else {
            const errorMessage = response.data.status_message || 'Failed to parse tables data.';
-           // Consider if this specific error should be global or handled by component
-           // commit('setGlobalError', errorMessage);
            console.error('Error fetching tables:', errorMessage);
            return { status: false, status_message: errorMessage };
         }
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Failed to load tables. Please try again.";
-        // if (error.response?.status !== 401) { // Example if global error is desired here too
-        //   commit('setGlobalError', errData?.status_message || defaultMessage);
-        // }
+        if (error.response && error.response.status !== 401) { // Check error.response exists
+           // commit('setGlobalError', errData?.status_message || defaultMessage);
+        }
         console.error('Network error fetching tables:', errData || error.message);
         return { status: false, status_message: errData?.status_message || defaultMessage };
       }
     },
     async fetchTableConfig({ commit, state, dispatch }, tableId) {
       if (!state.tablesLoaded) {
-        const fetchResult = await dispatch('fetchTables');
-        if (fetchResult.status === false || !fetchResult.tables) {
-            console.error("fetchTables failed, cannot filter for table config");
+        const fetchResult = await dispatch('fetchTables'); // Already uses apiService if fetchTables is updated
+        if (!fetchResult || fetchResult.status === false || !fetchResult.tables) { // Adjusted condition
+            console.error("fetchTables failed or returned no tables, cannot filter for table config");
             return null;
         }
       }
@@ -364,14 +345,15 @@ export default createStore({
     },
 
     // --- Gameplay Actions ---
-    async endSession({commit}) { // Added commit (not used yet, but good practice if global errors needed)
+    async endSession({commit}) {
       try {
-        const response = await apiClient.post('/end_session', {});
+        // const response = await apiClient.post('/end_session', {}); // OLD
+        const response = await apiService.endSession({}); // NEW - assuming endSession method in apiService
         return response.data;
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error ending game session.";
-        if (error.response?.status !== 401) {
+        if (error.response && error.response.status !== 401) { // Check error.response exists
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("End Session Error:", errData || error.message);
@@ -381,12 +363,13 @@ export default createStore({
     async joinGame({ commit }, payload) {
       try {
         payload.game_type = payload.game_type || (payload.slot_id ? 'slot' : (payload.table_id ? 'blackjack' : 'unknown'));
-        const response = await apiClient.post('/join', payload);
+        // const response = await apiClient.post('/join', payload); // OLD
+        const response = await apiService.joinGame(payload); // NEW - assuming joinGame method in apiService
         return response.data;
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error joining game.";
-        if (error.response?.status !== 401) {
+        if (error.response && error.response.status !== 401) { // Check error.response exists
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Join Game Error:", errData || error.message);
@@ -399,7 +382,8 @@ export default createStore({
         if (isNaN(betAmount) || betAmount <= 0) {
             return { status: false, status_message: "Invalid bet amount."};
         }
-        const response = await apiClient.post('/spin', { bet_amount: betAmount });
+        // const response = await apiClient.post('/spin', { bet_amount: betAmount }); // OLD
+        const response = await apiService.spin({ bet_amount: betAmount }); // NEW - assuming spin method in apiService
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
@@ -407,7 +391,7 @@ export default createStore({
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error during spin.";
-         if (error.response?.status !== 400 && error.response?.status !== 401 ) { // 400 might be "insufficient balance"
+         if (error.response && error.response.status !== 400 && error.response.status !== 401 ) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Spin Error:", errData || error.message);
@@ -424,7 +408,8 @@ export default createStore({
         if (isNaN(tableId) || tableId <= 0) {
             return { status: false, status_message: "Invalid table ID."};
         }
-        const response = await apiClient.post('/join_blackjack', { table_id: tableId, bet_amount: betAmount });
+        // const response = await apiClient.post('/join_blackjack', { table_id: tableId, bet_amount: betAmount }); // OLD
+        const response = await apiService.joinBlackjack({ table_id: tableId, bet_amount: betAmount }); // NEW
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
@@ -432,7 +417,7 @@ export default createStore({
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error joining blackjack.";
-        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 might be validation error
+        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Join Blackjack Error:", errData || error.message);
@@ -441,7 +426,8 @@ export default createStore({
     },
     async blackjackAction({ commit }, payload) {
       try {
-        const response = await apiClient.post('/blackjack_action', payload);
+        // const response = await apiClient.post('/blackjack_action', payload); // OLD
+        const response = await apiService.blackjackAction(payload); // NEW
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
@@ -449,7 +435,7 @@ export default createStore({
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error during blackjack action.";
-        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 might be validation error
+        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Blackjack Action Error:", errData || error.message);
@@ -464,7 +450,11 @@ export default createStore({
         if (isNaN(amountSats) || amountSats <= 0) {
             return { status: false, status_message: "Invalid withdrawal amount."};
         }
-        const response = await apiClient.post('/withdraw', {
+        // const response = await apiClient.post('/withdraw', { // OLD
+        //     amount_sats: amountSats,
+        //     withdraw_wallet_address: payload.withdraw_wallet_address
+        // });
+        const response = await apiService.withdraw({ // NEW
             amount_sats: amountSats,
             withdraw_wallet_address: payload.withdraw_wallet_address
         });
@@ -475,7 +465,7 @@ export default createStore({
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error during withdrawal.";
-        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 insufficient funds
+        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Withdraw Error:", errData || error.message);
@@ -484,15 +474,16 @@ export default createStore({
     },
     async updateSettings({ commit }, payload) {
       try {
-        const response = await apiClient.post('/settings', payload);
+        // const response = await apiClient.post('/settings', payload); // OLD
+        const response = await apiService.updateSettings(payload); // NEW
         if (response.data.status && response.data.user) {
           commit('setUser', response.data.user);
         }
         return response.data;
-      } catch (error) { // Typo here, should be (error)
+      } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error updating settings.";
-        if (error.response?.status !== 400 && error.response?.status !== 401 && error.response?.status !== 409) { // 409 email exists
+        if (error.response && error.response.status !== 400 && error.response.status !== 401 && error.response.status !== 409) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Update Settings Error:", errData || error.message);
@@ -501,7 +492,8 @@ export default createStore({
     },
     async applyBonusCode({ commit }, payload) {
       try {
-        const response = await apiClient.post('/deposit', payload);
+        // const response = await apiClient.post('/deposit', payload); // OLD
+        const response = await apiService.applyBonusCode(payload); // NEW
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
@@ -509,7 +501,7 @@ export default createStore({
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Network error applying bonus code.";
-        if (error.response?.status !== 400 && error.response?.status !== 401) { // 400 invalid code
+        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         console.error("Apply Bonus Code Error:", errData || error.message);
@@ -519,31 +511,30 @@ export default createStore({
     async fetchAdminDashboardData({ commit }) {
       commit('setAdminDataLoading');
       try {
-        const response = await apiClient.get('/admin/dashboard');
+        // const response = await apiClient.get('/admin/dashboard'); // OLD
+        const response = await apiService.fetchAdminDashboardData(); // NEW
         if (response.data.status && response.data.dashboard_data) {
           commit('setAdminDashboardData', response.data.dashboard_data);
           return response.data.dashboard_data;
         } else {
           const errorMsg = response.data.status_message || 'Failed to fetch admin dashboard data.';
           commit('setAdminDashboardError', errorMsg);
-          // Optionally commit to globalError as well if appropriate for this error
-          // commit('setGlobalError', errorMsg);
           return null;
         }
       } catch (error) {
         const errorMsg = error.response?.data?.status_message || error.message || 'Network error fetching admin dashboard data.';
         commit('setAdminDashboardError', errorMsg);
-        // commit('setGlobalError', errorMsg);
         return null;
       }
     },
     async fetchAdminUsers({ commit, state }, page = 1) {
       commit('setAdminUsersLoading', true);
       try {
-        const response = await apiClient.get(`/admin/users?page=${page}&per_page=${state.adminUsersPerPage}`);
-        if (response.data.status && response.data.users && response.data.users.items) {
+        // const response = await apiClient.get(`/admin/users?page=${page}&per_page=${state.adminUsersPerPage}`); // OLD
+        const response = await apiService.fetchAdminUsers(page, state.adminUsersPerPage); // NEW
+        if (response.data.status && response.data.users && response.data.users.items) { // Ensure this matches apiService response
           commit('setAdminUsersData', {
-            users: response.data.users.items,
+            users: response.data.users.items, // Or response.data.items if structure changed
             page: response.data.users.page,
             pages: response.data.users.pages,
             per_page: response.data.users.per_page,

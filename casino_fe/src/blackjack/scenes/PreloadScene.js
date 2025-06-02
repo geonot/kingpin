@@ -6,127 +6,112 @@ export default class PreloadScene extends Phaser.Scene {
   }
 
   preload() {
-    console.log('PreloadScene: Preload');
-    const gameConfig = this.registry.get('gameConfig'); // Get config from registry
+    // --- Display Loading Bar ---
+    const progressBar = this.add.graphics();
+    const progressBox = this.add.graphics();
+    const width = this.cameras.main.width;
+    const height = this.cameras.main.height;
+    const loadingText = this.make.text({
+      x: width / 2,
+      y: height / 2 - 50,
+      text: 'Loading...',
+      style: {
+        font: '20px monospace',
+        fill: '#ffffff',
+      },
+    });
+    loadingText.setOrigin(0.5, 0.5);
 
-    if (!gameConfig) {
-      console.error("PreloadScene: Game config not found in registry!");
-      // Handle error - perhaps return to main menu or show error
-      return;
-    }
+    const percentText = this.make.text({
+      x: width / 2,
+      y: height / 2,
+      text: '0%',
+      style: {
+        font: '18px monospace',
+        fill: '#ffffff',
+      },
+    });
+    percentText.setOrigin(0.5, 0.5);
 
-    this.createLoadingBar();
+    progressBox.fillStyle(0x222222, 0.8);
+    progressBox.fillRect(width / 2 - 160, height / 2 - 30 + 20, 320, 50);
 
-    // --- Load Game Assets ---
-    
-    // 1. Card Assets
-    // Load card back
-    this.load.image('card-back', '/cards/back.png');
-    
-    // Load card faces - we'll use a naming convention like 'card-hearts-A', 'card-spades-10', etc.
-    // Use default values if gameConfig.cards is undefined
-    const suits_code = gameConfig.cards?.suits_code || ['H', 'D', 'C', 'S'];
-    const suits_names = gameConfig.cards?.suits_names || ['hearts', 'diamonds', 'clubs', 'spades'];
-    const values = gameConfig.cards?.values || ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-    
-    // Iterate through both arrays in parallel
-    for (let i = 0; i < suits_code.length; i++) {
-      const suitCode = suits_code[i];
-      const suitName = suits_names[i];
-      
-      values.forEach(value => {
-      this.load.image(`card-${suitName}-${value}`, `/cards/${value}${suitCode}@1x.png`);
-      });
-    }
-
-    // 2. UI Button Images
-    this.load.image('hit-button', '/assets/blackjack/hit-button.png');
-    this.load.image('stand-button', '/assets/blackjack/stand-button.png');
-    this.load.image('double-button', '/assets/blackjack/double-button.png');
-    this.load.image('split-button', '/assets/blackjack/split-button.png');
-    this.load.image('bet-button', '/assets/blackjack/bet-button.png');
-    this.load.image('settings-button', '/assets/ui/settings.png');
-    
-    // 3. Background and Table
-    this.load.image('background', '/assets/blackjack/background.png');
-    this.load.image('table', '/assets/blackjack/table.png');
-    
-    // 4. Chip Images
-    this.load.image('chip-10', '/assets/blackjack/chip-10.png');
-    this.load.image('chip-20', '/assets/blackjack/chip-20.png');
-    this.load.image('chip-50', '/assets/blackjack/chip-50.png');
-    this.load.image('chip-100', '/assets/blackjack/chip-100.png');
-    this.load.image('chip-500', '/assets/blackjack/chip-500.png');
-    this.load.image('chip-1000', '/assets/blackjack/chip-1000.png');
-    
-    // 5. Sound Effects
-    this.load.audio('card-deal', '/assets/blackjack/sounds/card-deal.mp3');
-    this.load.audio('card-flip', '/assets/blackjack/sounds/card-flip.mp3');
-    this.load.audio('chip-place', '/assets/blackjack/sounds/chip-place.mp3');
-    this.load.audio('win', '/assets/blackjack/sounds/win.mp3');
-    this.load.audio('lose', '/assets/blackjack/sounds/lose.mp3');
-    this.load.audio('push', '/assets/blackjack/sounds/push.mp3');
-    this.load.audio('blackjack', '/assets/blackjack/sounds/blackjack.mp3');
-    this.load.audio('button-click', '/assets/blackjack/sounds/button-click.mp3');
-
-    // --- Loading Progress ---
     this.load.on('progress', (value) => {
-      this.updateLoadingBar(value);
+      percentText.setText(parseInt(value * 100, 10) + '%');
+      progressBar.clear();
+      progressBar.fillStyle(0xffffff, 1);
+      progressBar.fillRect(width / 2 - 150, height / 2 - 20 + 20, 300 * value, 30);
     });
 
     this.load.on('complete', () => {
-      console.log('PreloadScene: Asset loading complete.');
-      this.loadingFill?.destroy(); // Clean up loading bar elements
-      this.loadingBg?.destroy();
-      this.loadingText?.destroy();
-      this.percentText?.destroy();
-
-      // Start the main game scenes
-      console.log('PreloadScene: Starting GameScene and UIScene...');
-      this.scene.start('GameScene');
-      this.scene.start('UIScene'); // Start UI scene concurrently
+      progressBar.destroy();
+      progressBox.destroy();
+      loadingText.destroy();
+      percentText.destroy();
     });
 
-    this.load.on('loaderror', (file) => {
-      console.error('PreloadScene: Error loading file:', file.key, file.src);
-      // Optionally display error to user
+    // --- Load Game Assets ---
+
+    // Table and General UI
+    this.load.image('blackjack-background', 'public/assets/blackjack/background.png');
+    this.load.image('blackjack-table', 'public/assets/blackjack/table.png');
+    this.load.image('card-back', 'public/assets/cards/cardBack.png');
+
+    // Card Sprites (RankSuit@1x.png convention)
+    const suits = ['C', 'D', 'H', 'S']; // Clubs, Diamonds, Hearts, Spades
+    const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
+
+    suits.forEach(suit => {
+      ranks.forEach(rank => {
+        const cardKey = `card-${rank}${suit}`;
+        const cardPath = `public/cards/${rank}${suit}@1x.png`;
+        this.load.image(cardKey, cardPath);
+      });
     });
-  }
 
-  createLoadingBar() {
-    const centerX = this.cameras.main.width / 2;
-    const centerY = this.cameras.main.height / 2;
-
-    this.loadingText = this.add.text(centerX, centerY - 50, 'Loading...', {
-      font: '24px Arial',
-      fill: '#ffffff'
-    }).setOrigin(0.5);
-
-    // Background of the loading bar
-    this.loadingBg = this.add.image(centerX, centerY, 'loader-bg').setOrigin(0.5);
-
-    // Filling part of the loading bar
-    this.loadingFill = this.add.image(centerX - this.loadingBg.width / 2 + 4, centerY, 'loader-fill').setOrigin(0, 0.5); // Align left edge
-    this.loadingFill.setCrop(0, 0, 0, this.loadingFill.height); // Initially crop to zero width
-
-    this.percentText = this.add.text(centerX, centerY + 50, '0%', {
-      font: '18px Arial',
-      fill: '#ffffff'
-    }).setOrigin(0.5);
-  }
-
-  updateLoadingBar(value) {
-    if (this.loadingFill) {
-      const fillWidth = (this.loadingBg.width - 8) * value; // Calculate width based on progress (-8 for padding)
-      this.loadingFill.setCrop(0, 0, fillWidth, this.loadingFill.height);
+    // Chip Images (dynamically from gameDefinition)
+    // Retrieve gameDefinition from registry, set by Vue component
+    const gameDefinition = this.registry.get('gameDefinition');
+    if (gameDefinition && gameDefinition.settings && gameDefinition.settings.chipValues) {
+      gameDefinition.settings.chipValues.forEach(value => {
+        this.load.image(`chip-${value}`, `public/assets/chips/chip_${value}.png`);
+      });
+    } else {
+      // Fallback if gameDefinition is not available or chipValues are not set
+      const defaultChipValues = [5, 10, 25, 100, 500]; // Common default values
+      defaultChipValues.forEach(value => {
+        this.load.image(`chip-${value}`, `public/assets/chips/chip_${value}.png`);
+      });
+      console.warn('PreloadScene: Chip values not found in gameDefinition registry. Loading default chip images.');
     }
-    if (this.percentText) {
-      this.percentText.setText(parseInt(value * 100) + '%');
-    }
+
+    // UI Button Assets
+    this.load.image('button-deal', 'public/assets/blackjack/ui/button_deal.png');
+    this.load.image('button-hit', 'public/assets/blackjack/ui/button_hit.png');
+    this.load.image('button-stand', 'public/assets/blackjack/ui/button_stand.png');
+    this.load.image('button-double', 'public/assets/blackjack/ui/button_double.png');
+    this.load.image('button-split', 'public/assets/blackjack/ui/button_split.png');
+    this.load.image('button-rebet', 'public/assets/blackjack/ui/button_rebet.png');
+    this.load.image('button-new-round', 'public/assets/blackjack/ui/button_new_round.png');
+
+    // Audio Assets
+    // Providing both mp3 and ogg for wider browser compatibility
+    this.load.audio('snd-card-deal', ['public/assets/blackjack/audio/card_deal.mp3', 'public/assets/blackjack/audio/card_deal.ogg']);
+    this.load.audio('snd-chip-place', ['public/assets/blackjack/audio/chip_place.mp3', 'public/assets/blackjack/audio/chip_place.ogg']);
+    this.load.audio('snd-win', ['public/assets/blackjack/audio/win.mp3', 'public/assets/blackjack/audio/win.ogg']);
+    this.load.audio('snd-lose', ['public/assets/blackjack/audio/lose.mp3', 'public/assets/blackjack/audio/lose.ogg']);
+    this.load.audio('snd-push', ['public/assets/blackjack/audio/push.mp3', 'public/assets/blackjack/audio/push.ogg']);
+    this.load.audio('snd-blackjack', ['public/assets/blackjack/audio/blackjack.mp3', 'public/assets/blackjack/audio/blackjack.ogg']);
+    this.load.audio('snd-button-click', ['public/assets/blackjack/audio/button_click.mp3', 'public/assets/blackjack/audio/button_click.ogg']);
+    this.load.audio('snd-shuffle', ['public/assets/blackjack/audio/shuffle.mp3', 'public/assets/blackjack/audio/shuffle.ogg']);
   }
 
   create() {
-    // This scene transitions immediately after preload is complete
-    console.log('PreloadScene: Create (should transition immediately)');
+    // Start the main game scene and UI scene
+    // UIScene is launched in parallel to GameScene. It will typically overlay GameScene.
+    this.scene.launch('UIScene');
+    this.scene.start('GameScene'); // Start will shut down PreloadScene and start GameScene.
+
+    console.log('PreloadScene complete, starting GameScene and UIScene.');
   }
 }

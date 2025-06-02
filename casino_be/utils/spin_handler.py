@@ -40,14 +40,41 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         bet_amount_sats (int): The amount bet in Satoshis.
 
     Returns:
-        dict: A dictionary containing the results of the spin.
-              Includes spin_result, win_amount_sats, winning_lines, bonus info, etc.
+        dict: A dictionary containing the results of the spin, structured as follows:
+            {
+                "spin_result": list[list[int]],  # The grid of symbol IDs resulting from the spin.
+                "win_amount_sats": int,          # Total win amount in satoshis from this spin.
+                "winning_lines": list[dict],     # List of winning paylines and scatter wins. Each dict contains:
+                                                 #   "line_id": str (e.g., "payline_1", "scatter"),
+                                                 #   "symbol_id": int (winning symbol ID),
+                                                 #   "count": int (number of matching symbols),
+                                                 #   "positions": list[list[int]] (coordinates of winning symbols),
+                                                 #   "win_amount_sats": int (win for this specific line/scatter)
+                "bonus_triggered": bool,         # True if a bonus feature was triggered on this spin.
+                "bonus_active": bool,            # True if a bonus (e.g., free spins) is currently active.
+                "bonus_spins_remaining": int,    # Number of free spins remaining if bonus_active.
+                "bonus_multiplier": float,       # Multiplier for wins during bonus spins if bonus_active.
+                "user_balance_sats": int,        # The user's balance after the spin.
+                "session_stats": dict            # Statistics for the current game session:
+                                                 #   "num_spins": int,
+                                                 #   "amount_wagered_sats": int,
+                                                 #   "amount_won_sats": int
+            }
+
+    Side Effects:
+        - Modifies the `user` object's balance.
+        - Modifies the `game_session` object (e.g., `num_spins`, `amount_wagered`, `amount_won`, bonus states).
+        - Creates `SlotSpin` record in the database for the current spin.
+        - Creates `Transaction` records for wagers and wins.
+        - Updates `UserBonus` wagering progress if an active bonus exists and the spin is a paid spin.
+        - All database changes are added to the current `db.session` but NOT committed by this function.
+          The caller is responsible for committing the session.
 
     Raises:
-        ValueError: If the bet amount is invalid or user has insufficient balance (redundant check).
-    """
-    """
-    Handles the logic for a single slot machine spin using gameConfig.json.
+        FileNotFoundError: If the `gameConfig.json` for the slot is not found.
+        ValueError: If the bet amount is invalid, user has insufficient balance for a paid spin,
+                    or if there's a critical configuration error (e.g., no spinable symbols).
+        RuntimeError: For other unexpected errors during spin processing.
     """
     try:
         # --- Load Game Configuration ---
