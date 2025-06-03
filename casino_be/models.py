@@ -18,12 +18,21 @@ class User(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
+    # Relationships
+    game_sessions = db.relationship('GameSession', backref='user', lazy=True)
+    transactions = db.relationship('Transaction', backref='user', lazy=True)
+    blackjack_hands = db.relationship('BlackjackHand', backref='user', lazy=True)
+
     def check_password(self, password):
         return sha256.verify(password, self.password)
 
     @staticmethod
     def hash_password(password):
         return sha256.hash(password)
+
+    @staticmethod
+    def verify_password(hashed_password, password):
+        return sha256.verify(password, hashed_password)
 
     def __repr__(self):
         return f"<User {self.username}>"
@@ -78,11 +87,12 @@ class Transaction(db.Model):
     details = db.Column(JSON, nullable=True)
     slot_spin_id = db.Column(db.Integer, db.ForeignKey('slot_spin.id'), nullable=True, index=True)
     blackjack_hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id'), nullable=True, index=True)
-    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    plinko_drop_id = db.Column(db.Integer, db.ForeignKey('plinko_drop_log.id'), nullable=True, index=True) # ADDED THIS LINE
 
-    user = db.relationship('User', backref='transactions')
-    slot_spin = db.relationship('SlotSpin', backref='transactions')
-    blackjack_hand = db.relationship('BlackjackHand', backref='transactions')
+    # Relationships to game events
+    slot_spin = db.relationship('SlotSpin', backref=db.backref('transactions', lazy='dynamic'))
+    blackjack_hand = db.relationship('BlackjackHand', backref=db.backref('transactions', lazy='dynamic'))
+    plinko_drop_log = db.relationship('PlinkoDropLog', backref=db.backref('transactions', lazy='dynamic'))
 
     def __repr__(self):
         return f"<Transaction {self.id} (User: {self.user_id}, Type: {self.transaction_type}, Amount: {self.amount})>"
@@ -340,3 +350,25 @@ class PokerPlayerState(db.Model):
 
     def __repr__(self):
         return f"<PokerPlayerState {self.id} (User: {self.user_id}, Table: {self.table_id}, Seat: {self.seat_id}, Stack: {self.stack_sats})>"
+
+class PlinkoDropLog(db.Model):
+    __tablename__ = 'plinko_drop_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    stake_amount = db.Column(db.BigInteger, nullable=False)  # In satoshis
+    chosen_stake_label = db.Column(db.String(50), nullable=False)  # e.g., 'Low', 'Medium', 'High'
+    slot_landed_label = db.Column(db.String(50), nullable=False)  # e.g., '0.5x', '2x', '5x'
+    multiplier_applied = db.Column(db.Float, nullable=False) # The actual multiplier value, e.g., 0.5, 2.0
+    winnings_amount = db.Column(db.BigInteger, nullable=False) # Amount won from this drop, in satoshis
+    timestamp = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    
+    # Relationship to User
+    user = db.relationship('User', backref=db.backref('plinko_drops', lazy='dynamic'))
+
+    # Relationship to Transactions (optional, if needed for querying from PlinkoDropLog to Transaction)
+    # transactions = db.relationship('Transaction', backref='plinko_drop', lazy='dynamic') 
+    # This backref name 'plinko_drop' would need to be added to the Transaction model's FK if this side is defined.
+
+    def __repr__(self):
+        return f"<PlinkoDropLog {self.id} (User: {self.user_id}, Stake: {self.stake_amount}, Won: {self.winnings_amount})>"

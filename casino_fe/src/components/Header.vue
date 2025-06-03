@@ -13,6 +13,7 @@
           <router-link to="/slots" class="nav-link">Slots</router-link>
           <router-link to="/tables" class="nav-link">Tables</router-link>
           <router-link to="/spacecrash" class="nav-link">Spacecrash</router-link>
+          <router-link to="/plinko" class="nav-link">Plinko</router-link>
           <router-link to="/deposit" class="nav-link">Deposit</router-link>
           <div v-if="user && user.balance !== undefined" class="nav-link text-gold">
              <i class="fas fa-coins mr-1"></i> {{ formatSatsToBtc(user.balance, true) }}
@@ -67,6 +68,7 @@
             <router-link to="/slots" @click="closeMobileMenu" class="mobile-nav-link">Slots</router-link>
             <router-link to="/tables" @click="closeMobileMenu" class="mobile-nav-link">Tables</router-link>
             <router-link to="/spacecrash" @click="closeMobileMenu" class="mobile-nav-link">Spacecrash</router-link>
+            <router-link to="/plinko" @click="closeMobileMenu" class="mobile-nav-link">Plinko</router-link> <!-- Added Plinko Link -->
             <router-link to="/deposit" @click="closeMobileMenu" class="mobile-nav-link">Deposit</router-link>
             <div v-if="user && user.balance !== undefined" class="mobile-nav-link text-gold">
                 <i class="fas fa-coins mr-1"></i> {{ formatSatsToBtc(user.balance, true) }}
