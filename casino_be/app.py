@@ -21,6 +21,7 @@ from .schemas import (
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
+from .utils.multiway_helper import handle_multiway_spin # Added import
 from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
 from .utils import spacecrash_handler # Import the new handler module
 from .config import Config
@@ -294,18 +295,53 @@ def spin():
          return jsonify({'status': False, 'status_message': 'Slot not found for session.'}), 500
     if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0):
         return jsonify({'status': False, 'status_message': 'Insufficient balance'}), 400
+    
+    spin_result_data = None
     try:
-        result = handle_spin(user, slot, game_session, bet_amount_sats)
-        db.session.commit()
+        if slot.is_multiway:
+            if not slot.reel_configurations:
+                # It's generally better to let the handler manage internal consistency checks
+                # if reel_configurations are loaded within it.
+                # However, if it's a direct ORM field access needed by the handler's signature,
+                # this check is useful here.
+                # For now, assume handle_multiway_spin expects slot.reel_configurations to be populated.
+                # db.session.rollback() # No DB changes made yet to rollback for this specific error.
+                logger.error(f"Spin attempt on multiway slot {slot.id} without reel_configurations by user {user.id}")
+                return jsonify({"status": False, "status_message": "Slot is configured as multiway but lacks essential reel configurations."}), 400
+            
+            # Ensure slot.symbols is loaded if handle_multiway_spin relies on it directly
+            # This depends on how slot relationships are loaded (e.g. lazy='joined' or explicit loading)
+            # If slot.symbols is deferred, it might need explicit loading here or in the handler.
+            # For now, assume it's available as per Slot model definition (e.g. lazy='joined')
+            if not slot.symbols: # Basic check
+                 logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}")
+                 return jsonify({"status": False, "status_message": "Slot configuration incomplete (symbols missing)."}), 400
+
+            spin_result_data = handle_multiway_spin(user, slot, game_session, bet_amount_sats)
+        else:
+            spin_result_data = handle_spin(user, slot, game_session, bet_amount_sats)
+        
+        db.session.commit() # Commit all changes made by the spin handlers
+
+        # The structure of spin_result_data should be consistent from both handlers
+        # handle_multiway_spin needs to ensure its return dict matches this structure.
+        # 'result' key for spin_result_data['spin_result']
+        # 'win_amount' key for spin_result_data['win_amount_sats'] etc.
         return jsonify({
-            'status': True, 'result': result['spin_result'], 'win_amount': result['win_amount_sats'],
-            'winning_lines': result['winning_lines'], 'bonus_triggered': result['bonus_triggered'],
-            'bonus_active': result['bonus_active'], 'bonus_spins_remaining': result['bonus_spins_remaining'],
-            'bonus_multiplier': result['bonus_multiplier'], 'game_session': GameSessionSchema().dump(game_session),
-            'user': UserSchema().dump(user)
+            'status': True, 
+            'result': spin_result_data['spin_result'], # Contains grid (and panes_per_reel for multiway)
+            'win_amount': spin_result_data['win_amount_sats'],
+            'winning_lines': spin_result_data['winning_lines'], # Paylines or Ways/Scatter data
+            'bonus_triggered': spin_result_data['bonus_triggered'],
+            'bonus_active': spin_result_data['bonus_active'], 
+            'bonus_spins_remaining': spin_result_data['bonus_spins_remaining'],
+            'bonus_multiplier': spin_result_data['bonus_multiplier'], 
+            'game_session': GameSessionSchema().dump(game_session), # Session might have been updated
+            'user': UserSchema().dump(user) # User balance might have changed
         }), 200
     except ValueError as ve:
         db.session.rollback()
+        logger.warning(f"Spin ValueError for user {user.id} on slot {slot.id if slot else 'N/A'}: {str(ve)}")
         return jsonify({'status': False, 'status_message': str(ve)}), 400
     except Exception as e:
         db.session.rollback()

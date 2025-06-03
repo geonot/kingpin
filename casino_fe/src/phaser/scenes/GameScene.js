@@ -10,6 +10,7 @@ const REEL_STOP_DELAY = 250; // Additional delay between stopping each reel (ms)
 const SYMBOL_WIN_ANIM_DURATION = 250; // Duration for symbol scale/pulse animation
 const PAYLINE_SHOW_DURATION = 1500; // How long each winning payline is shown (ms)
 const TOTAL_WIN_DISPLAY_DURATION = 3000; // How long the total win amount is shown prominently
+const SYMBOL_WIN_ANIM_DURATION = 250; // Already defined, ensure this is the one used
 
 
 export default class GameScene extends Phaser.Scene {
@@ -18,6 +19,9 @@ export default class GameScene extends Phaser.Scene {
 
     // Game state properties
     this.isSpinning = false;
+    this.isMultiwayGame = false; // A.2
+    this.currentPanesPerReel = []; // A.2
+    this.targetPanesPerReel = []; // A.2
     this.reels = []; // Array of Phaser Groups, one for each reel column
     this.reelContainers = []; // Array of containers holding each reel's symbols
     this.symbolMap = {}; // Map to easily access symbols at [col, row] -> symbol object
@@ -35,7 +39,18 @@ export default class GameScene extends Phaser.Scene {
     this.gameConfig = null;
     this.slotId = null;
     this.symbolSize = { width: 100, height: 100 }; // Default, loaded from config
-    this.gridConfig = { rows: 3, cols: 5, startX: 0, startY: 0 }; // Default, loaded from config
+    // A.2 Initialize gridConfig with more comprehensive defaults
+    this.gridConfig = {
+        cols: 5,
+        rows: 3, // Base rows, will be overridden for multiway initial max height
+        startX: 0,
+        startY: 0,
+        width: 0,
+        height: 0,
+        initialRowsPerReel: [],
+        maxRowsForSymbolMap: 3, // Max possible rows any reel can show + buffers
+        currentActualMaxRows: 3 // Current max rows based on targetPanesPerReel or initial
+    };
   }
 
   // No preload here - assets are loaded in PreloadScene
@@ -49,32 +64,46 @@ export default class GameScene extends Phaser.Scene {
     // Apply initial sound setting
     this.sound.mute = !this.soundEnabled;
 
-
     if (!this.gameConfig || !this.slotId) {
         console.error("GameScene: Missing game configuration or Slot ID!");
-        // Handle error appropriately
         EventBus.$emit('phaserError', 'Game initialization failed: Missing configuration.');
         return;
     }
 
+    // A.3: Game Type and Grid Configuration
+    this.isMultiwayGame = (this.gameConfig.type === 'multiway');
+    const { rows, columns } = this.gameConfig.layout; // Base definitions
+
+    this.gridConfig.cols = columns;
+
+    if (this.isMultiwayGame) {
+        this.gridConfig.initialRowsPerReel = this.gameConfig.layout.default_pane_counts || Array(columns).fill(rows || 3);
+        // Effective rows for initial grid height calculation (max of initial panes)
+        this.gridConfig.rows = Math.max(...this.gridConfig.initialRowsPerReel);
+        // Max possible rows any symbol could occupy across all reels for symbol map buffer
+        this.gridConfig.maxRowsForSymbolMap = Math.max(...(this.gameConfig.layout.possible_pane_counts || [[rows || 3]]).flat());
+    } else {
+        this.gridConfig.rows = rows || 3;
+        this.gridConfig.initialRowsPerReel = Array(columns).fill(this.gridConfig.rows);
+        this.gridConfig.maxRowsForSymbolMap = this.gridConfig.rows;
+    }
+    this.currentPanesPerReel = [...this.gridConfig.initialRowsPerReel];
+    this.gridConfig.currentActualMaxRows = Math.max(...this.currentPanesPerReel, this.gridConfig.rows);
+
+
     this.symbolSize = this.gameConfig.reel.symbolSize || { width: 100, height: 100 };
-    const { rows, columns } = this.gameConfig.layout;
-    const totalReelWidth = columns * this.symbolSize.width + (columns - 1) * (this.gameConfig.reel.reelSpacing || 0);
-    const totalReelHeight = rows * this.symbolSize.height + (rows - 1) * (this.gameConfig.reel.symbolSpacing || 0);
+    // Calculate totalReelWidth and totalReelHeight based on the effective gridConfig.rows for multiway
+    const totalReelWidth = this.gridConfig.cols * this.symbolSize.width + (this.gridConfig.cols - 1) * (this.gameConfig.reel.reelSpacing || 0);
+    const totalReelHeight = this.gridConfig.rows * this.symbolSize.height + (this.gridConfig.rows - 1) * (this.gameConfig.reel.symbolSpacing || 0);
 
-    // Calculate starting position for the grid (centered with top margin)
     const configStartX = this.gameConfig.reel.position?.x ?? (this.cameras.main.width - totalReelWidth) / 2;
-    const configStartY = this.gameConfig.reel.position?.y ?? 100; // Default top margin
+    const configStartY = this.gameConfig.reel.position?.y ?? 100;
 
-    this.gridConfig = {
-        rows,
-        cols: columns,
-        startX: configStartX,
-        startY: configStartY,
-        width: totalReelWidth,
-        height: totalReelHeight
-    };
-
+    // Update gridConfig with calculated dimensions
+    this.gridConfig.startX = configStartX;
+    this.gridConfig.startY = configStartY;
+    this.gridConfig.width = totalReelWidth;
+    this.gridConfig.height = totalReelHeight;
 
     this.createBackground();
     this.createReels(); // Creates reel containers and initial symbols
@@ -116,50 +145,65 @@ export default class GameScene extends Phaser.Scene {
     this.reelContainers = [];
     this.symbolMap = {};
 
-    const { rows, cols, startX, startY } = this.gridConfig;
+    const { cols, startX, startY } = this.gridConfig; // Use gridConfig.cols
     const { symbolSize } = this;
     const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
-    const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0; // Vertical spacing (usually 0)
+    const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
 
-    // Number of symbols per reel: visible rows + buffer top/bottom (e.g., 1 top, 1 bottom)
-    const totalSymbolsPerReel = rows + 2; // Adjust buffer as needed for smooth wrapping
+    // B.1: Number of symbols per reel: max possible rows + buffer
+    const symbolsToCreatePerReel = this.gridConfig.maxRowsForSymbolMap + 2;
 
     for (let c = 0; c < cols; c++) {
       const reelX = startX + c * (symbolSize.width + reelSpacing);
-      const reelContainer = this.add.container(reelX, startY); // Container for this column
+      const reelContainer = this.add.container(reelX, startY);
       this.reelContainers.push(reelContainer);
 
-      const currentReelSymbols = []; // Array to hold symbol objects for this reel
+      const currentReelSymbols = [];
 
-      for (let i = 0; i < totalSymbolsPerReel; i++) {
-        const randomSymbolId = Phaser.Math.Between(1, this.gameConfig.symbol_count); // Use internal IDs 1 to N
-        const symbolY = i * (symbolSize.height + symbolSpacing); // Position symbols vertically within the container
+      for (let i = 0; i < symbolsToCreatePerReel; i++) {
+        const randomSymbolConfig = this.getRandomSymbolConfig();
+        const symbolKey = `${this.slotId}_${randomSymbolConfig.asset.replace(/\..+$/, '')}`; // Construct key like "slot1_symbol_1"
+        const symbolY = i * (symbolSize.height + symbolSpacing);
 
-        const symbol = this.add.image(symbolSize.width / 2, symbolY + symbolSize.height / 2, `symbol_${randomSymbolId}`)
+        const symbol = this.add.image(symbolSize.width / 2, symbolY + symbolSize.height / 2, symbolKey)
           .setDisplaySize(symbolSize.width, symbolSize.height)
-          .setOrigin(0.5); // Center origin
-
-        reelContainer.add(symbol); // Add symbol to the container
+          .setOrigin(0.5);
+        
+        reelContainer.add(symbol);
         currentReelSymbols.push(symbol);
 
-        // Map visible symbols for easy access [col, row]
-        if (i >= 0 && i < rows) { // Map the initially visible symbols
+        // B.2: Set visibility and map initially visible symbols
+        const isVisibleInitially = i < this.currentPanesPerReel[c];
+        symbol.setVisible(isVisibleInitially);
+        if (isVisibleInitially) {
            this.symbolMap[`${c},${i}`] = symbol;
-           symbol.setData('gridPosition', { col: c, row: i }); // Store grid position on symbol
+           symbol.setData('gridPosition', { col: c, row: i });
         }
       }
-      this.reels.push(currentReelSymbols); // Store array of symbols for this reel
+      this.reels.push(currentReelSymbols);
     }
   }
 
+  getRandomSymbolConfig() {
+    // Helper to get a random symbol config for initial reel population
+    const symbols = this.gameConfig.game.symbols;
+    return symbols[Phaser.Math.Between(0, symbols.length - 1)];
+  }
+
   createMask() {
+    // Mask height should be based on the maximum possible visible area for multiway
+    // or the standard grid height for normal slots.
+    // this.gridConfig.rows now represents the max initial height for multiway.
     const { rows, cols, startX, startY } = this.gridConfig;
     const { symbolSize } = this;
     const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
     const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
 
     const maskWidth = cols * symbolSize.width + (cols - 1) * reelSpacing;
-    const maskHeight = rows * symbolSize.height + (rows - 1) * symbolSpacing;
+    // For multiway, the mask height should accommodate the maximum possible symbols on any reel,
+    // but visually it's often tied to the initial display or a fixed max.
+    // For now, use this.gridConfig.rows which is set to max(initialPanes) for multiway.
+    const maskHeight = this.gridConfig.rows * symbolSize.height + (this.gridConfig.rows - 1) * symbolSpacing;
 
     const maskShape = this.make.graphics();
     maskShape.fillStyle(0xffffff);
@@ -242,432 +286,371 @@ export default class GameScene extends Phaser.Scene {
 
  // --- Spin Logic ---
 
-  handleSpinResult(response) {
-      console.log('GameScene received spin result:', response);
-      this.lastSpinResponse = response; // Store for later use (win display)
-      const spinResultGrid = response.result; // The final grid state
+  handleSpinResult(responseData) { // C
+      console.log('GameScene received spin result:', responseData);
+      this.lastSpinResponse = responseData;
+      let transposedTargetGrid;
 
-      if (!spinResultGrid || spinResultGrid.length !== this.gridConfig.rows) {
-          console.error('Invalid spin result grid received:', spinResultGrid);
-          this.isSpinning = false; // Reset spinning state
-          return;
+      if (this.isMultiwayGame) { // C.1
+          this.targetPanesPerReel = responseData.result.panes_per_reel; // result from API is spin_result_data.spin_result
+          this.gridConfig.currentActualMaxRows = Math.max(...this.targetPanesPerReel);
+          // Backend sends multiway as { "panes_per_reel": [...], "symbols_grid": [[col0_syms], [col1_syms],...] }
+          // symbols_grid is already effectively transposedTargetGrid
+          transposedTargetGrid = responseData.result.symbols_grid;
+      } else { // C.2
+          this.targetPanesPerReel = Array(this.gridConfig.cols).fill(this.gridConfig.rows);
+          const formattedGrid = this.formatSpinResult(responseData.result); // Expects [rows][cols] from API's "result" field for standard
+          transposedTargetGrid = this.transposeMatrix(formattedGrid);
       }
 
-      // Format result if needed (ensure it's [rows][cols])
-      const targetGrid = this.formatSpinResult(spinResultGrid);
-      const transposedTargetGrid = this.transposeMatrix(targetGrid); // Get [cols][rows] for reel processing
-
-      // Start the spinning animation sequence
-      this.startReelSpinAnimation(transposedTargetGrid);
+      this.startReelSpinAnimation(transposedTargetGrid); // C.3
   }
 
   startReelSpinAnimation(transposedTargetGrid) {
-      if (this.isSpinning) return; // Prevent overlap
+      if (this.isSpinning) return;
       this.isSpinning = true;
-
-      this.clearWinAnimations(); // Clear previous win effects
-      
-      // Reset win display in UI Scene when starting a new spin
-      EventBus.$emit('lineWinUpdate', {
-          winAmount: 0,
-          isScatter: false
-      });
-      
-      this.playSound('spin');
+      this.clearWinAnimations();
+      EventBus.$emit('lineWinUpdate', { winAmount: 0, isScatter: false, ways: undefined });
+      this.playSound(`${this.slotId}_spin_sound`); // Use slot-specific sound key
 
       const spinDuration = this.turboSpinEnabled ? REEL_SPIN_DURATION_TURBO : REEL_SPIN_DURATION_BASE;
       const numReels = this.gridConfig.cols;
       let completedReels = 0;
 
-      // Start all reels spinning with a stagger
       this.reels.forEach((reelSymbols, reelIndex) => {
           this.time.delayedCall(reelIndex * REEL_START_DELAY, () => {
               this.spinReel(reelIndex, reelSymbols, spinDuration, transposedTargetGrid[reelIndex], () => {
-                  // Callback when this specific reel finishes its stopping animation
                   completedReels++;
-                  this.playSound('reelStop');
+                  this.playSound(`${this.slotId}_reel_stop_sound`); // Use slot-specific sound key
                   if (completedReels === numReels) {
-                      this.onAllReelsStopped(); // All reels have visually stopped
+                      this.onAllReelsStopped();
                   }
               });
           });
       });
   }
 
-
- spinReel(reelIndex, reelSymbols, baseDuration, targetSymbols, onCompleteCallback) {
-    const { rows, startY } = this.gridConfig;
+  spinReel(reelIndex, reelSymbols, baseDuration, targetSymbolIdsForThisReel, onCompleteCallback) { // D
+    const { startY } = this.gridConfig; // rows is now dynamic for multiway
     const { symbolSize } = this;
     const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
     const symbolHeightWithSpacing = symbolSize.height + symbolSpacing;
     const reelContainer = this.reelContainers[reelIndex];
 
+    // totalReelHeight for wrapping based on max possible symbols
     const totalReelHeight = reelSymbols.length * symbolHeightWithSpacing;
-    const visibleHeight = rows * symbolHeightWithSpacing;
+    // visibleHeight based on *current* number of panes for this reel for stop positioning
+    // This might need adjustment if the reel "shrinks" or "grows" visually during spin.
+    // For now, assume it spins to fill its targetPanesPerReel space.
+    const targetVisibleHeightThisReel = (this.targetPanesPerReel[reelIndex] || this.gridConfig.rows) * symbolHeightWithSpacing;
 
-    // Calculate spin distance: multiple full wraps + stopping position
-    const wraps = 3; // Increased number of wraps for longer animation
+
+    const wraps = 3;
     const wrapDistance = wraps * totalReelHeight;
+    const spinDuration = (baseDuration + reelIndex * REEL_STOP_DELAY); // Removed *1.5 for now
+    const spinDistance = wrapDistance + targetVisibleHeightThisReel; // Spin relative to target height
 
-    // Extend the spin duration for a smoother experience
-    const spinDuration = (baseDuration + reelIndex * REEL_STOP_DELAY) * 1.5; // 50% longer
-    const spinDistance = wrapDistance + visibleHeight; // Spin at least one visible height further
-
-    // Prepare the final symbols array for smooth transition
-    const finalSymbols = [];
-    for (let i = 0; i < reelSymbols.length; i++) {
-        if (i < rows) {
-            finalSymbols.push(targetSymbols[i]);
-        } else {
-            // For buffer symbols, use random ones
-            finalSymbols.push(Phaser.Math.Between(1, this.gameConfig.symbol_count));
-        }
-    }
-
-    // --- Main Spin Tween ---
     this.tweens.add({
         targets: reelContainer,
-        y: `+=${spinDistance}`, // Move container down
+        y: `+=${spinDistance}`,
         duration: spinDuration,
-        ease: 'Cubic.easeOut', // Start fast, slow down at the end
-        onUpdate: (tween) => {
-            // --- Symbol Wrapping Logic ---
-            reelSymbols.forEach((symbol, symbolIndex) => {
-                // Calculate symbol's world Y position
+        ease: 'Cubic.easeOut',
+        onUpdate: () => {
+            reelSymbols.forEach((symbol) => {
                 const symbolWorldY = reelContainer.y + symbol.y;
-                
-                // If symbol center goes below the visible area's estimated bottom + buffer
-                if (symbolWorldY > startY + visibleHeight + symbolHeightWithSpacing) {
-                    // Wrap symbol from bottom to top
+                if (symbolWorldY > startY + targetVisibleHeightThisReel + symbolHeightWithSpacing) { // Adjust condition based on dynamic height?
                     symbol.y -= totalReelHeight;
-                    
-                    // Always use a random symbol during the spinning phase
-                    // This creates a more uniform blur effect
-                    const randomSymbolId = Phaser.Math.Between(1, this.gameConfig.symbol_count);
-                    symbol.setTexture(`symbol_${randomSymbolId}`);
+                    const randomSymbolConfig = this.getRandomSymbolConfig();
+                    symbol.setTexture(`${this.slotId}_${randomSymbolConfig.asset.replace(/\..+$/, '')}`);
                 }
             });
-            
-            // In the last 10% of the animation, slow down the visual updates
-            // This creates a smoother transition to the final state
-            if (tween.progress > 0.9) {
-                // Reduce the frequency of texture changes as we approach the end
-                if (Math.random() > 0.7) {
-                    // Only update some symbols occasionally
-                    const randomIndex = Math.floor(Math.random() * reelSymbols.length);
-                    if (randomIndex < reelSymbols.length) {
-                        const symbol = reelSymbols[randomIndex];
-                        const randomSymbolId = Phaser.Math.Between(1, this.gameConfig.symbol_count);
-                        symbol.setTexture(`symbol_${randomSymbolId}`);
-                    }
-                }
-            }
         },
-        onComplete: () => {
-            // --- Smooth Transition to Final Position ---
-            
-            // First, set all symbols to their exact final positions
-            reelSymbols.forEach((symbol, index) => {
-                // Set exact final positions without randomness
-                symbol.y = index * symbolHeightWithSpacing + symbolSize.height / 2;
-                
-                // Set the final textures
-                if (index < rows) {
-                    symbol.setTexture(`symbol_${finalSymbols[index]}`);
+        onComplete: () => { // D.1
+            const landedPanesCount = this.targetPanesPerReel[reelIndex];
+            this.currentPanesPerReel[reelIndex] = landedPanesCount;
+
+            // D.1 Clear old symbolMap entries for this reel
+            for (let r = 0; r < this.gridConfig.maxRowsForSymbolMap; r++) {
+                delete this.symbolMap[`${reelIndex},${r}`];
+            }
+
+            reelSymbols.forEach((symbol, i) => { // D.1 Loop through all symbols in reel column
+                if (i < landedPanesCount) {
+                    const symbolConfig = this.gameConfig.game.symbols.find(s => s.id === targetSymbolIdsForThisReel[i]);
+                    if (symbolConfig) {
+                         symbol.setTexture(`${this.slotId}_${symbolConfig.asset.replace(/\..+$/, '')}`);
+                    }
+                    // Position based on landedPanesCount
+                    symbol.y = i * symbolHeightWithSpacing + symbolSize.height / 2;
+                    symbol.setVisible(true).setDepth(2); // Ensure visible and set depth
+                    this.symbolMap[`${reelIndex},${i}`] = symbol; // Update map for new visible symbols
+                    symbol.setData('gridPosition', { col: reelIndex, row: i });
                 } else {
-                    const randomSymbolId = Phaser.Math.Between(1, this.gameConfig.symbol_count);
-                    symbol.setTexture(`symbol_${randomSymbolId}`);
-                }
-                
-                // Update the symbolMap for the final visible state
-                if (index < rows) {
-                    this.symbolMap[`${reelIndex},${index}`] = symbol;
-                    symbol.setData('gridPosition', { col: reelIndex, row: index });
+                    symbol.setVisible(false); // Hide symbols beyond landedPanesCount
                 }
             });
-            
-            // Position the container at the exact final position
-            reelContainer.y = startY;
-            
-            // No additional animations - just call the callback
+            reelContainer.y = startY; // Reset container to initial Y
             onCompleteCallback();
         }
     });
 }
 
-
   onAllReelsStopped() {
       console.log('GameScene: All reels stopped.');
       this.isSpinning = false;
-      
-      // Emit event to signal that spin animation is complete
-      // This allows the UI to add any wins to the balance
       EventBus.$emit('spinAnimationComplete', this.lastSpinResponse);
-      
-      // Now check for wins based on the final grid state stored in lastSpinResponse
+
       if (this.lastSpinResponse && this.lastSpinResponse.win_amount > 0 && this.lastSpinResponse.winning_lines) {
-          this.playSoundWin(this.lastSpinResponse.win_amount); // Play appropriate win sound
+          this.playSoundWin(this.lastSpinResponse.win_amount);
           this.displayWinningLines(this.lastSpinResponse.winning_lines, this.lastSpinResponse.win_amount);
-      } else {
-          // No win, ready for next spin
       }
   }
 
   displayWinningLines(winningLines, totalWinAmountSats) {
       if (!winningLines || winningLines.length === 0) {
-           // Just show total win briefly if there's a scatter win but no line details?
            if (totalWinAmountSats > 0) {
                 this.showTotalWinAmount(totalWinAmountSats);
-                this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
-                    this.clearWinAnimations();
-                });
+                this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => this.clearWinAnimations());
            }
           return;
       }
-
       let currentLineIndex = 0;
       const displayNextLine = () => {
-            this.clearWinAnimations(false); // Clear previous line/symbol highlights, but keep total win if shown
-
+            this.clearWinAnimations(false);
             if (currentLineIndex >= winningLines.length) {
-                 // Finished showing all lines, show total win amount prominently
                  this.showTotalWinAmount(totalWinAmountSats);
-                 // Set timer to clear everything after a delay
                  if (this.paylineTimer) this.paylineTimer.remove();
-                 this.paylineTimer = this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
-                    this.clearWinAnimations();
-                });
+                 this.paylineTimer = this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => this.clearWinAnimations());
                 return;
             }
-
-            const winLine = winningLines[currentLineIndex];
-            this.highlightWin(winLine); // Highlight symbols and draw line
-
-            // Show amount for this specific line (optional)
-            this.showLineWinAmount(winLine.win_amount);
-
+            const winData = winningLines[currentLineIndex]; // winData is the individual line/way/scatter object
+            this.highlightWin(winData);
+            this.showIndividualWinAmount(winData.win_amount_sats, winData); // Pass full winData
             currentLineIndex++;
-
-            // Schedule the next line display
-             if (this.paylineTimer) this.paylineTimer.remove();
+            if (this.paylineTimer) this.paylineTimer.remove();
             this.paylineTimer = this.time.delayedCall(PAYLINE_SHOW_DURATION, displayNextLine);
         };
-
-        // Start the display cycle
         displayNextLine();
   }
 
- highlightWin(winLine) {
-   this.paylineGraphics.clear(); // Clear previous lines
-   const { symbolSize } = this;
-   const { startX, startY } = this.gridConfig;
-   const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
-   const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
+  highlightWin(winData) { // F
+    this.paylineGraphics.clear();
+    this.activeWinTweens.forEach(({symbol, tween}) => { // F.2 Reset existing
+        if (tween && tween.isPlaying()) tween.stop();
+        if (symbol && symbol.active) symbol.setScale(1).setDepth(2);
+    });
+    this.activeWinTweens = [];
 
-   // Store whether this is a scatter win for later use
-   this.isScatterWin = winLine.line_index === 'scatter';
-
-   // 1. Animate Winning Symbols
-   winLine.positions.forEach(([row, col]) => {
-       const symbol = this.getSymbolAt(col, row);
-       if (symbol) {
-           // Bring symbol slightly forward
+    const animateSymbol = (col, row) => { // F.1 Helper
+        const symbol = this.getSymbolAt(col, row);
+        if (symbol && symbol.active) {
             symbol.setDepth(5);
+            const existingTween = this.tweens.getTweensOf(symbol).find(tw => tw.callbacks && tw.callbacks.onYoyo);
+            if(existingTween) existingTween.stop();
 
-           // Add a scale/pulse animation
-           const tween = this.tweens.add({
-               targets: symbol,
-               duration: SYMBOL_WIN_ANIM_DURATION,
-               ease: 'Sine.easeInOut',
-               yoyo: true, // Scale back down
-               repeat: -1, // Loop until cleared
-                // delay: index * 50 // Optional stagger
-           });
-           this.activeWinTweens.push({symbol, tween}); // Store tween to stop later
-
-            // Optional: Add particle burst at symbol location
-            const worldPos = this.getSymbolWorldPosition(col, row);
-            this.winEmitter?.explode(10, worldPos.x, worldPos.y); // Emit particles
-       }
-   });
-
-   // 2. Draw Payline (if not a scatter win)
-   if (!this.isScatterWin) {
-       const paylineConfig = this.gameConfig.paylines.find(p => p.id === winLine.line_index);
-       if (paylineConfig) {
-            const lineColor = this.getPaylineColor(winLine.line_index);
-            this.paylineGraphics.lineStyle(5, lineColor, 0.9); // Thicker line
-            this.paylineGraphics.fillStyle(lineColor, 0.8);
-
-           const linePoints = [];
-           // Use only the winning positions for drawing the line segment
-            winLine.positions.forEach(([row, col], index) => {
-               const pos = this.getSymbolWorldPosition(col, row);
-               linePoints.push(new Phaser.Math.Vector2(pos.x, pos.y));
-
-                // Draw small circles at each symbol position on the line
-                this.paylineGraphics.fillCircle(pos.x, pos.y, 8);
-               // Or use a small dot image:
-               // this.add.image(pos.x, pos.y, 'payline-dot').setTint(lineColor).setDepth(this.paylineGraphics.depth + 1);
+            const tween = this.tweens.add({
+                targets: symbol,
+                scale: { from: 1, to: 1.2 },
+                ease: 'Sine.easeInOut',
+                duration: SYMBOL_WIN_ANIM_DURATION,
+                yoyo: true,
+                repeat: -1,
             });
+            this.activeWinTweens.push({ symbol, tween });
+            const worldPos = this.getSymbolWorldPosition(col, row);
+            if (worldPos) this.winEmitter?.explode(10, worldPos.x, worldPos.y);
+        }
+    };
 
+    const positionsToProcess = winData.positions; // F.3
 
-           // Draw connecting lines only between the winning symbols
-            if (linePoints.length > 1) {
-                for (let i = 0; i < linePoints.length - 1; i++) {
-                    this.paylineGraphics.lineBetween(linePoints[i].x, linePoints[i].y, linePoints[i+1].x, linePoints[i+1].y);
+    if (this.isMultiwayGame && !winData.is_scatter) { // F.4 Multiway (non-scatter)
+        // positionsToProcess is expected as [[reel0_pos_list], [reel1_pos_list], ...]
+        // where pos_list is [[c,r], [c,r], ...]
+        if (Array.isArray(positionsToProcess)) {
+            positionsToProcess.forEach(reelMatchPositions => { // Iterate over each reel's matches
+                if (Array.isArray(reelMatchPositions)) {
+                    reelMatchPositions.forEach(pos => { // Iterate over [c,r] in that reel
+                        if (Array.isArray(pos) && pos.length === 2) {
+                           animateSymbol(pos[0], pos[1]); // pos[0] is col, pos[1] is row
+                        }
+                    });
                 }
+            });
+        }
+    } else if (winData.is_scatter) { // F.5 Scatter (for both game types)
+        // positionsToProcess is [[c,r], [c,r], ...]
+         if (Array.isArray(positionsToProcess)) {
+            positionsToProcess.forEach(pos => {
+                if (Array.isArray(pos) && pos.length === 2) {
+                    animateSymbol(pos[0], pos[1]); // pos[0] is col, pos[1] is row
+                }
+            });
+        }
+    } else { // F.6 Standard Payline game
+        // positionsToProcess is [[r_backend,c_backend], ...]
+        const linePoints = [];
+        if (Array.isArray(positionsToProcess)) {
+            positionsToProcess.forEach(pos => { // pos is [backend_row, backend_col]
+                 if (Array.isArray(pos) && pos.length === 2) {
+                    const col = pos[1]; // Backend sends [row, col]
+                    const row = pos[0];
+                    animateSymbol(col, row);
+                    const worldPos = this.getSymbolWorldPosition(col, row);
+                    if (worldPos) linePoints.push(new Phaser.Math.Vector2(worldPos.x, worldPos.y));
+                }
+            });
+        }
+        if (linePoints.length > 1) {
+            const lineColor = this.getPaylineColor(winData.line_id || 0); // Use line_id or default
+            this.paylineGraphics.lineStyle(5, lineColor, 0.9);
+            this.paylineGraphics.fillStyle(lineColor, 0.8);
+            for (let i = 0; i < linePoints.length - 1; i++) {
+                this.paylineGraphics.lineBetween(linePoints[i].x, linePoints[i].y, linePoints[i + 1].x, linePoints[i + 1].y);
             }
-       }
-   }
+            linePoints.forEach(p => this.paylineGraphics.fillCircle(p.x, p.y, 8));
+        }
+    }
 }
 
-
-  showLineWinAmount(amountSats) {
+  showIndividualWinAmount(amountSats, winData) { // G
       if (!this.currentWinDisplay) return;
-      const amountBtc = formatSatsToBtc(amountSats); // Format for display
-      
-      // Use different text for scatter wins vs line wins
-      const winType = this.isScatterWin ? 'Scatter Win' : 'Line Win';
-      this.currentWinDisplay.setText(`${winType}: ${amountBtc} BTC`)
-          .setAlpha(0)
-          .setVisible(true);
+      let textToShow = ''; // G.1
+      if (this.isMultiwayGame && !winData.is_scatter) {
+          const waysCount = winData.ways_count || winData.ways; // Support "ways" or "ways_count"
+          textToShow = `Way Win: ${formatSatsToBtc(amountSats)} (${waysCount} Ways)`;
+      } else if (winData.is_scatter || winData.type === 'scatter') { // Check type for robustness
+          textToShow = `Scatter: ${formatSatsToBtc(amountSats)}`;
+      } else { // Standard payline
+          const lineIdText = typeof winData.line_id === 'string' ? winData.line_id : (winData.line_index !== undefined ? `Line ${winData.line_index + 1}` : 'Line Win');
+          textToShow = `${lineIdText}: ${formatSatsToBtc(amountSats)}`;
+      }
 
-      // Emit event to update the UI Scene with this line win
-      // Include the win type (scatter or line) in the event data
+      this.currentWinDisplay.setText(textToShow).setAlpha(0).setVisible(true); // G.2
+      this.tweens.killTweensOf(this.currentWinDisplay);
+      this.tweens.add({
+          targets: this.currentWinDisplay, alpha: 1, duration: 300, ease: 'Linear', yoyo: true,
+          hold: PAYLINE_SHOW_DURATION - 600,
+          onComplete: () => { if (this.currentWinDisplay) this.currentWinDisplay.setVisible(false); }
+      });
+      // G.3 Emit event
       EventBus.$emit('lineWinUpdate', {
           winAmount: amountSats,
-          isScatter: this.isScatterWin
+          isScatter: (winData.is_scatter || winData.type === 'scatter'),
+          ways: (this.isMultiwayGame && !(winData.is_scatter || winData.type === 'scatter')) ? (winData.ways_count || winData.ways) : undefined
       });
-
-       // Fade in/out effect
-       this.tweens.add({
-            targets: this.currentWinDisplay,
-            alpha: 1,
-            duration: 300,
-            ease: 'Linear',
-            yoyo: true, // Fade out again
-            hold: PAYLINE_SHOW_DURATION - 600, // Hold visible for most of the line duration
-            onComplete: () => {
-                 if(this.currentWinDisplay) this.currentWinDisplay.setVisible(false);
-            }
-        });
   }
 
    showTotalWinAmount(amountSats) {
         if (!this.currentWinDisplay) return;
         const amountBtc = formatSatsToBtc(amountSats);
-        this.currentWinDisplay.setText(`Total Win: ${amountBtc} BTC`)
-             .setAlpha(0)
-             .setVisible(true); // Make total win larger initially
-
-        // Emit event to update the UI Scene with the total win
-        // For total win, we don't use the scatter flag since it's the sum of all wins
-        EventBus.$emit('lineWinUpdate', {
-            winAmount: amountSats,
-            isScatter: false // Total win is not a scatter win
-        });
-
-        // Clear any existing tweens on this text
-         this.tweens.killTweensOf(this.currentWinDisplay);
-
-        // Scale down and fade in, then hold
-        this.tweens.add({
-            targets: this.currentWinDisplay,
-            alpha: 1,
-            duration: 500,
-            ease: 'Back.easeOut' // Add a slight bounce effect
-        });
+        this.currentWinDisplay.setText(`Total Win: ${amountBtc}`) // Removed BTC suffix, formatter adds it
+             .setAlpha(0).setVisible(true);
+        EventBus.$emit('lineWinUpdate', { winAmount: amountSats, isScatter: false, ways: undefined }); // Total win update
+        this.tweens.killTweensOf(this.currentWinDisplay);
+        this.tweens.add({ targets: this.currentWinDisplay, alpha: 1, duration: 500, ease: 'Back.easeOut' });
     }
 
-  clearWinAnimations(clearTotalWinText = true) {
-     // Stop and remove symbol animations/tweens
+  clearWinAnimations(clearTotalWinText = true) { // H
     this.activeWinTweens.forEach(({symbol, tween}) => {
-        if (tween && tween.isPlaying()) {
-            tween.stop();
+        if (tween && tween.isPlaying()) tween.stop();
+        if (symbol && symbol.active) {
+            symbol.setScale(1); // Reset scale
+            symbol.setDepth(2); // H.1 Reset depth
         }
-         if (symbol && symbol.active) { // Check if symbol still exists
-             //symbol.setScale(1); // Reset scale
-             symbol.setDepth(0); // Reset depth
-         }
     });
     this.activeWinTweens = [];
-
-    // Clear drawn paylines
     this.paylineGraphics?.clear();
-
-    // Stop particle emitter? (It might stop automatically if frequency is -1)
-    // this.winEmitter?.stop();
-
-    // Clear timers
-     if (this.paylineTimer) {
-         this.paylineTimer.remove(false); // Don't run callback on removal
-         this.paylineTimer = null;
-     }
-
-    // Hide win amount text
-     if (this.currentWinDisplay && clearTotalWinText) {
-         this.tweens.killTweensOf(this.currentWinDisplay); // Stop any active tweens
-         this.currentWinDisplay.setVisible(false).setText('');
-     }
+    if (this.paylineTimer) {
+        this.paylineTimer.remove(false);
+        this.paylineTimer = null;
+    }
+    if (this.currentWinDisplay && clearTotalWinText) {
+        this.tweens.killTweensOf(this.currentWinDisplay);
+        this.currentWinDisplay.setVisible(false).setText('');
+    }
   }
 
   // --- Helper Methods ---
-   getSymbolAt(col, row) {
-    // Ensure indices are within bounds
-    if (col < 0 || col >= this.gridConfig.cols || row < 0 || row >= this.gridConfig.rows) {
-        return null;
+   getSymbolAt(col, row) { // E
+    if (this.isMultiwayGame) { // E.1
+        if (!this.currentPanesPerReel || col < 0 || col >= this.gridConfig.cols || row < 0 || !this.currentPanesPerReel[col] || row >= this.currentPanesPerReel[col]) {
+            return null;
+        }
+    } else { // E.1
+        if (row < 0 || col < 0 || col >= this.gridConfig.cols || row >= this.gridConfig.rows) {
+            return null;
+        }
     }
-    return this.symbolMap[`${col},${row}`];
+    return this.symbolMap[`${col},${row}`]; // E.1
   }
 
-  getSymbolWorldPosition(col, row) {
-      const symbol = this.getSymbolAt(col, row);
-      if (!symbol || !symbol.parentContainer) {
-          // Fallback calculation if symbol not found or structure changed
+  getSymbolWorldPosition(col, row) { // I
+      const symbol = this.getSymbolAt(col, row); // I.1
+      if (!symbol) return null; // I.1
+
+      if (!symbol.parentContainer) {
             const { startX, startY } = this.gridConfig;
             const { symbolSize } = this;
             const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
-            const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
+            const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0; // Not typically used for Y per symbol in container
             return {
                 x: startX + col * (symbolSize.width + reelSpacing) + symbolSize.width / 2,
-                y: startY + row * (symbolSize.height + symbolSpacing) + symbolSize.height / 2
+                y: startY + row * (symbolSize.height + symbolSpacing) + symbolSize.height / 2 // This Y is relative to grid top for this symbol
             };
       }
-      // Get position relative to the container, then add container's position
        const symbolLocalX = symbol.x;
        const symbolLocalY = symbol.y;
        const containerX = symbol.parentContainer.x;
        const containerY = symbol.parentContainer.y;
-
        return { x: containerX + symbolLocalX, y: containerY + symbolLocalY };
   }
 
-   getPaylineColor(lineIndex) {
+   getPaylineColor(lineIndexOrId) { // Accept ID too
+        // If lineIndexOrId is a string (like "payline_1"), try to parse an index from it
+        let numericIndex = 0;
+        if (typeof lineIndexOrId === 'string' && lineIndexOrId.includes('_')) {
+            numericIndex = parseInt(lineIndexOrId.split('_')[1], 10) -1; // "payline_1" -> 0
+            if (isNaN(numericIndex)) numericIndex = 0;
+        } else if (typeof lineIndexOrId === 'number') {
+            numericIndex = lineIndexOrId;
+        }
+
         const colors = [
-            0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, // Red, Green, Blue, Yellow, Magenta
-            0x00ffff, 0xffa500, 0x800080, 0x008000, 0xff1493, // Cyan, Orange, Purple, DarkGreen, DeepPink
-            // Add more colors if more than 10 paylines
+            0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff,
+            0x00ffff, 0xffa500, 0x800080, 0x008000, 0xff1493,
             0xff4500, 0x1e90ff, 0xadff2f, 0xda70d6, 0x8a2be2
         ];
-        return colors[lineIndex % colors.length];
+        return colors[numericIndex % colors.length];
     }
 
   formatSpinResult(spinResult) {
-    // Ensure result is in [rows][cols] format
-    const { rows, cols } = this.gridConfig;
-    if (!Array.isArray(spinResult) || spinResult.length !== rows || !Array.isArray(spinResult[0]) || spinResult[0].length !== cols) {
-        console.warn("Received spin result in unexpected format, attempting to reshape.", spinResult);
-        // Add reshaping logic if backend might send flattened array, otherwise return as is or error
-        // Example for flattened:
-        // const reshaped = [];
-        // for (let r = 0; r < rows; r++) {
-        //    reshaped.push(spinResult.slice(r * cols, (r + 1) * cols));
-        // }
-        // return reshaped;
-        return spinResult; // Assuming format is already correct
+    // For standard games, API sends "result" as [rows][cols]
+    // For multiway, API sends "result.symbols_grid" as [cols][rows_variable]
+    // This function is primarily for standard games to ensure [rows][cols]
+    if (this.isMultiwayGame) {
+        console.warn("formatSpinResult called for multiway game, this should not happen if backend structure is {spin_result: {symbols_grid: ...}}");
+        return spinResult; // Should be already in [cols][var_rows] or handled by handleSpinResult
     }
-    return spinResult;
+
+    const { rows, cols } = this.gridConfig;
+    // Check if it's already in the correct [rows][cols] format
+    if (Array.isArray(spinResult) && spinResult.length === rows &&
+        Array.isArray(spinResult[0]) && spinResult[0].length === cols) {
+        return spinResult;
+    }
+    // If it's a flat array, attempt to reshape. This is less likely with current backend.
+    if (Array.isArray(spinResult) && spinResult.length === rows * cols && !Array.isArray(spinResult[0])) {
+        console.warn("Received spin result as a flat array, reshaping to [rows][cols].");
+        const reshaped = [];
+        for (let r = 0; r < rows; r++) {
+           reshaped.push(spinResult.slice(r * cols, (r + 1) * cols));
+        }
+        return reshaped;
+    }
+    console.error("Received spin result in unexpected format for standard game:", spinResult);
+    // Fallback: return as is or an empty grid of correct dimensions
+    return Array(rows).fill(null).map(() => Array(cols).fill(1)); // Default to symbol '1'
   }
 
   transposeMatrix(matrix) {
