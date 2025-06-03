@@ -143,6 +143,8 @@ class Slot(db.Model):
     asset_directory = db.Column(db.String(100), nullable=False, default='') # Path relative to static/public folder
     rtp = db.Column(db.Float, nullable=True) # Return to Player percentage
     volatility = db.Column(db.String(20), nullable=True) # e.g., 'low', 'medium', 'high'
+    is_multiway = db.Column(db.Boolean, default=False, nullable=False)
+    reel_configurations = db.Column(db.JSON, nullable=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True) # Can disable slots
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 

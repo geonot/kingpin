@@ -79,7 +79,8 @@ export default class UIScene extends Phaser.Scene {
     // Listen for line win updates from GameScene
     EventBus.$on('lineWinUpdate', (data) => {
         if (data.winAmount !== undefined) {
-            this.updateWin(data.winAmount, data.isScatter);
+            // Updated to pass data.ways
+            this.updateWin(data.winAmount, data.isScatter, data.ways);
         }
     });
 
@@ -293,26 +294,25 @@ export default class UIScene extends Phaser.Scene {
     }
   }
 
-  updateWin(winAmountSats, isScatter = false) {
+  updateWin(winAmountSats, isScatter = false, ways = undefined) {
      try {
        if (this.winText && this.winText.active && this.scene.isActive()) {
-          const formattedWin = formatSatsToBtc(winAmountSats, true);
-          
-          // Add prefix for scatter wins if needed
-          const winPrefix = isScatter ? 'SCATTER: ' : '';
-          this.winText.setText(`${winPrefix}${formattedWin}`);
-          
-          // Only show win text if there's an actual win
+          const formattedWin = formatSatsToBtc(winAmountSats, true); // Assuming true adds BTC suffix
+          let displayText = '';
+
           if (winAmountSats > 0) {
-              this.winText.setVisible(true);
-              
-              // Reset any existing tweens
-              if (this.tweens) {
-                  this.tweens.killTweensOf(this.winText);
+              if (isScatter) {
+                  displayText = `SCATTER: ${formattedWin}`;
+              } else if (ways !== undefined && ways > 0) {
+                  displayText = `${formattedWin} (${ways} WAYS)`;
+              } else { // Standard payline win or simple total win if no line/way detail
+                  displayText = formattedWin;
               }
-              
-              // Simple scale animation on win text
+              this.winText.setText(displayText);
+              this.winText.setVisible(true);
+
               if (this.tweens && typeof this.tweens.add === 'function') {
+                  this.tweens.killTweensOf(this.winText); 
                   this.tweens.add({
                       targets: this.winText,
                       scale: { from: 1.2, to: 1 },
@@ -321,17 +321,17 @@ export default class UIScene extends Phaser.Scene {
                   });
               }
           } else {
-              // Hide win text when there's no win
               this.winText.setVisible(false);
+              this.winText.setText(''); 
           }
        }
      } catch (error) {
        console.error('Error updating win text:', error);
-       // Don't throw the error, just log it to prevent game crashes
      }
   }
 
   updateBetSize(newBetSats) {
+
      if (this.betSizeText) {
         this.betSizeText.setText(formatSatsToBtc(newBetSats));
         this.currentBetSats = newBetSats;
