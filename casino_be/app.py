@@ -7,32 +7,40 @@ from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token, jwt_required,
     get_jwt_identity, get_jti, current_user
 )
-from datetime import datetime, timedelta, timezone # Use timezone-aware datetimes
-import logging # Add logging
+from datetime import datetime, timedelta, timezone
+import logging
+from marshmallow import ValidationError
 
-# Ensure UserBonus is imported from models
-from .models import db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, SpacecrashGame, SpacecrashBet
+# Ensure UserBonus is imported from models - combining both Spacecrash and Poker models
+from .models import (
+    db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, 
+    BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
+    SpacecrashGame, SpacecrashBet,  # Spacecrash models
+    PokerTable, PokerHand, PokerPlayerState  # Poker models
+)
 from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
     BalanceTransferSchema, BlackjackTableSchema, BlackjackHandSchema, JoinBlackjackSchema, BlackjackActionRequestSchema,
-    AdminCreditDepositSchema, UserBonusSchema, SpacecrashBetSchema, SpacecrashGameSchema, SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema
+    AdminCreditDepositSchema, UserBonusSchema,
+    SpacecrashBetSchema, SpacecrashGameSchema, SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema,  # Spacecrash schemas
+    PokerTableSchema, PokerPlayerStateSchema, PokerHandSchema, JoinPokerTableSchema, PokerActionSchema  # Poker schemas
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
-from .utils.multiway_helper import handle_multiway_spin # Added import
+from .utils.multiway_helper import handle_multiway_spin
 from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
-from .utils import spacecrash_handler # Import the new handler module
+from .utils import spacecrash_handler
+from .utils import poker_helper
 from .config import Config
-from .services.bonus_service import apply_bonus_to_deposit # Import the new service
+from .services.bonus_service import apply_bonus_to_deposit
 
 # --- App Initialization ---
 app = Flask(__name__)
 app.config.from_object(Config)
 
 # --- Rate Limiter Setup ---
-# It's important to configure RATELIMIT_STORAGE_URI before initializing Limiter if not using default memory
 app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
 limiter = Limiter(
     app=app,
@@ -48,11 +56,7 @@ migrate = Migrate(app, db, directory='casino_be/migrations')
 jwt = JWTManager(app)
 
 # --- Logging Setup ---
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] [%(name)s:%(funcName)s:%(lineno)d] - %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S%z"
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- JWT Helper Functions ---
@@ -98,10 +102,8 @@ def is_admin():
 # --- API Routes ---
 
 # === Authentication ===
-# ... (other auth routes remain unchanged) ...
 @app.route('/api/me', methods=['GET'])
 @jwt_required()
-# No specific rate limit for /me, will use default if any global limits apply or if default_limits is hit by IP.
 def get_current_user():
     try:
         user_data = UserSchema().dump(current_user)
@@ -148,15 +150,24 @@ def register():
         return jsonify({'status': False, 'status_message': 'Registration failed.'}), 500
 
 @app.route('/api/login', methods=['POST'])
-@limiter.limit("20 per hour")
+@limiter.limit("10 per minute")
 def login():
     data = request.get_json()
-    errors = LoginSchema().validate(data)
-    if errors:
-        return jsonify({'status': False, 'status_message': errors}), 400
-    user = User.query.filter_by(username=data['username']).first()
-    if not user or not User.verify_password(user.password, data['password']):
-        return jsonify({'status': False, 'status_message': 'Invalid username or password'}), 401
+    schema = LoginSchema()
+    try:
+        validated_data = schema.load(data)
+    except ValidationError as err:
+        return jsonify({'status': False, 'status_message': err.messages}), 400
+
+    user = User.query.filter_by(username=validated_data['username']).first()
+    if not user or not User.verify_password(user.password, validated_data['password']):
+        return jsonify({'status': False, 'status_message': 'Invalid credentials.'}), 401
+
+    # Update last login time
+    user.last_login_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    # Generate tokens
     access_token = create_access_token(identity=user)
     refresh_token = create_refresh_token(identity=user)
     user_data = UserSchema().dump(user)
@@ -214,7 +225,6 @@ def logout2():
         return jsonify({'status': False, 'status_message': 'Refresh token invalidation failed.'}), 500
 
 # === Game Play ===
-# ... (other game play routes like /api/end_session, /api/join, /api/spin remain unchanged from previous state) ...
 @app.route('/api/end_session', methods=['POST'])
 @jwt_required()
 def end_session():
@@ -282,7 +292,8 @@ def join_game():
 def spin():
     data = request.get_json()
     errors = SpinRequestSchema().validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
+    if errors: 
+        return jsonify({'status': False, 'status_message': errors}), 400
     user = current_user
     bet_amount_sats = data['bet_amount']
     if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
@@ -300,20 +311,10 @@ def spin():
     try:
         if slot.is_multiway:
             if not slot.reel_configurations:
-                # It's generally better to let the handler manage internal consistency checks
-                # if reel_configurations are loaded within it.
-                # However, if it's a direct ORM field access needed by the handler's signature,
-                # this check is useful here.
-                # For now, assume handle_multiway_spin expects slot.reel_configurations to be populated.
-                # db.session.rollback() # No DB changes made yet to rollback for this specific error.
                 logger.error(f"Spin attempt on multiway slot {slot.id} without reel_configurations by user {user.id}")
                 return jsonify({"status": False, "status_message": "Slot is configured as multiway but lacks essential reel configurations."}), 400
             
-            # Ensure slot.symbols is loaded if handle_multiway_spin relies on it directly
-            # This depends on how slot relationships are loaded (e.g. lazy='joined' or explicit loading)
-            # If slot.symbols is deferred, it might need explicit loading here or in the handler.
-            # For now, assume it's available as per Slot model definition (e.g. lazy='joined')
-            if not slot.symbols: # Basic check
+            if not slot.symbols:
                  logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}")
                  return jsonify({"status": False, "status_message": "Slot configuration incomplete (symbols missing)."}), 400
 
@@ -321,23 +322,19 @@ def spin():
         else:
             spin_result_data = handle_spin(user, slot, game_session, bet_amount_sats)
         
-        db.session.commit() # Commit all changes made by the spin handlers
+        db.session.commit()
 
-        # The structure of spin_result_data should be consistent from both handlers
-        # handle_multiway_spin needs to ensure its return dict matches this structure.
-        # 'result' key for spin_result_data['spin_result']
-        # 'win_amount' key for spin_result_data['win_amount_sats'] etc.
         return jsonify({
             'status': True, 
-            'result': spin_result_data['spin_result'], # Contains grid (and panes_per_reel for multiway)
+            'result': spin_result_data['spin_result'],
             'win_amount': spin_result_data['win_amount_sats'],
-            'winning_lines': spin_result_data['winning_lines'], # Paylines or Ways/Scatter data
+            'winning_lines': spin_result_data['winning_lines'],
             'bonus_triggered': spin_result_data['bonus_triggered'],
             'bonus_active': spin_result_data['bonus_active'], 
             'bonus_spins_remaining': spin_result_data['bonus_spins_remaining'],
             'bonus_multiplier': spin_result_data['bonus_multiplier'], 
-            'game_session': GameSessionSchema().dump(game_session), # Session might have been updated
-            'user': UserSchema().dump(user) # User balance might have changed
+            'game_session': GameSessionSchema().dump(game_session),
+            'user': UserSchema().dump(user)
         }), 200
     except ValueError as ve:
         db.session.rollback()
@@ -407,7 +404,8 @@ def withdraw():
 def update_settings():
     data = request.get_json()
     errors = UpdateSettingsSchema().validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
+    if errors: 
+        return jsonify({'status': False, 'status_message': errors}), 400
     user = current_user
     try:
         if 'email' in data and data['email'] != user.email:
@@ -433,7 +431,7 @@ def deposit():
         return jsonify({'status': False, 'status_message': errors}), 400
 
     user = current_user
-    deposit_amount_sats = data['deposit_amount_sats'] # Now required by schema
+    deposit_amount_sats = data['deposit_amount_sats']
     bonus_code_str = data.get('bonus_code')
 
     final_bonus_applied_sats = 0
@@ -459,20 +457,14 @@ def deposit():
 
         # 3. Apply bonus if a bonus code is provided
         if bonus_code_str:
-            # The apply_bonus_to_deposit service expects the deposit amount to determine eligibility for certain bonuses
             bonus_result = apply_bonus_to_deposit(user, bonus_code_str, deposit_amount_sats)
 
             if bonus_result['success']:
                 final_bonus_applied_sats = bonus_result.get('bonus_value_sats', 0)
                 final_user_bonus_id = bonus_result.get('user_bonus_id')
-                bonus_message = bonus_result['message'] # This message usually indicates bonus success
-                # user.balance would have been further updated by apply_bonus_to_deposit if successful
+                bonus_message = bonus_result['message']
             else:
-                # Bonus application failed, but deposit was successful.
-                # We'll append the bonus failure message to the deposit success message.
                 bonus_message = f"Bonus application failed: {bonus_result['message']}"
-                # Potentially adjust status code if bonus failure is critical, though usually it's a partial success (deposit OK)
-                # status_code = bonus_result.get('status_code', 400) # Example, might not be desired.
 
         db.session.commit()
 
@@ -496,7 +488,6 @@ def deposit():
         return jsonify({'status': False, 'status_message': 'Deposit processing failed due to an internal error.'}), 500
 
 # === Public Info ===
-# ... (other public routes like /api/slots, /api/tables remain unchanged) ...
 @app.route('/api/slots', methods=['GET'])
 def get_slots():
     try:
@@ -518,7 +509,6 @@ def get_tables():
         return jsonify({'status': False, 'status_message': 'Could not retrieve table information.'}), 500
 
 # === Blackjack Endpoints ===
-# ... (blackjack routes remain unchanged) ...
 @app.route('/api/join_blackjack', methods=['POST'])
 @jwt_required()
 def join_blackjack():
@@ -550,7 +540,8 @@ def join_blackjack():
 def blackjack_action():
     data = request.get_json()
     errors = BlackjackActionRequestSchema().validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
+    if errors: 
+        return jsonify({'status': False, 'status_message': errors}), 400
     hand_id = data['hand_id']
     action_type = data['action_type']
     hand_index = data.get('hand_index', 0)
@@ -567,7 +558,6 @@ def blackjack_action():
         return jsonify({'status': False, 'status_message': 'Error in blackjack action.'}), 500
 
 # === Admin Routes ===
-# ... (other admin routes like /api/admin/dashboard, user management, etc. remain unchanged) ...
 @app.route('/api/admin/dashboard', methods=['GET'])
 @jwt_required()
 def admin_dashboard():
@@ -595,7 +585,8 @@ def admin_dashboard():
 @app.route('/api/admin/users', methods=['GET'])
 @jwt_required()
 def admin_get_users():
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -608,7 +599,8 @@ def admin_get_users():
 @app.route('/api/admin/users/<int:user_id>', methods=['GET'])
 @jwt_required()
 def admin_get_user(user_id):
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     try:
         user = User.query.get_or_404(user_id)
         return jsonify({'status': True, 'user': AdminUserSchema().dump(user)}), 200
@@ -619,12 +611,14 @@ def admin_get_user(user_id):
 @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
 @jwt_required()
 def admin_update_user(user_id):
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     user = User.query.get_or_404(user_id)
     data = request.get_json()
     schema = AdminUserSchema(partial=True, exclude=('password', 'deposit_wallet_private_key', 'deposit_wallet_address', 'balance'))
     errors = schema.validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
+    if errors: 
+        return jsonify({'status': False, 'status_message': errors}), 400
     try:
         if 'email' in data and data['email'] != user.email:
             if User.query.filter(User.email == data['email'], User.id != user_id).first():
@@ -643,7 +637,8 @@ def admin_update_user(user_id):
 @app.route('/api/admin/transactions', methods=['GET'])
 @jwt_required()
 def admin_get_transactions():
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
@@ -651,9 +646,12 @@ def admin_get_transactions():
         user_id_filter = request.args.get('user_id', type=int)
         type_filter = request.args.get('type')
         status_filter = request.args.get('status')
-        if user_id_filter: query = query.filter(Transaction.user_id == user_id_filter)
-        if type_filter: query = query.filter(Transaction.transaction_type == type_filter)
-        if status_filter: query = query.filter(Transaction.status == status_filter)
+        if user_id_filter: 
+            query = query.filter(Transaction.user_id == user_id_filter)
+        if type_filter: 
+            query = query.filter(Transaction.transaction_type == type_filter)
+        if status_filter: 
+            query = query.filter(Transaction.status == status_filter)
         transactions_paginated = query.paginate(page=page, per_page=per_page, error_out=False)
         return jsonify({'status': True, 'transactions': TransactionListSchema().dump(transactions_paginated)}), 200
     except Exception as e:
@@ -663,7 +661,8 @@ def admin_get_transactions():
 @app.route('/api/admin/transactions/<int:tx_id>', methods=['PUT'])
 @jwt_required()
 def admin_update_transaction(tx_id):
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     transaction = Transaction.query.get_or_404(tx_id)
     data = request.get_json()
     allowed_updates = ['status', 'details']
@@ -674,14 +673,16 @@ def admin_update_transaction(tx_id):
         new_status = update_data['status']
         if transaction.status == 'pending' and new_status == 'completed':
             transaction.status = 'completed'
-            if 'admin_notes' in data: transaction.details = {**transaction.details, 'admin_notes': data['admin_notes']}
+            if 'admin_notes' in data: 
+                transaction.details = {**transaction.details, 'admin_notes': data['admin_notes']}
             logger.info(f"Admin {current_user.id} approved withdrawal {tx_id}")
         elif transaction.status == 'pending' and new_status == 'rejected':
             user = User.query.get(transaction.user_id)
             if user:
                 user.balance += transaction.amount
                 transaction.status = 'rejected'
-                if 'admin_notes' in data: transaction.details = {**transaction.details, 'admin_notes': data['admin_notes']}
+                if 'admin_notes' in data: 
+                    transaction.details = {**transaction.details, 'admin_notes': data['admin_notes']}
                 logger.info(f"Admin {current_user.id} rejected withdrawal {tx_id}, refunded {transaction.amount} to user {user.id}")
             else:
                  return jsonify({'status': False, 'status_message': 'User not found for refund.'}), 500
@@ -709,7 +710,8 @@ def admin_credit_deposit():
     data = request.get_json()
     schema = AdminCreditDepositSchema()
     errors = schema.validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
+    if errors: 
+        return jsonify({'status': False, 'status_message': errors}), 400
     user_id = data['user_id']
     amount_sats = data['amount_sats']
     external_tx_id = data.get('external_tx_id')
@@ -720,8 +722,10 @@ def admin_credit_deposit():
     try:
         user.balance += amount_sats
         transaction_details = {'credited_by_admin_id': current_user.id, 'credited_by_admin_username': current_user.username}
-        if external_tx_id: transaction_details['external_tx_id'] = external_tx_id
-        if admin_notes: transaction_details['admin_notes'] = admin_notes
+        if external_tx_id: 
+            transaction_details['external_tx_id'] = external_tx_id
+        if admin_notes: 
+            transaction_details['admin_notes'] = admin_notes
         deposit_tx = Transaction(user_id=user.id, amount=amount_sats, transaction_type='deposit', status='completed', details=transaction_details)
         db.session.add(deposit_tx)
         db.session.commit()
@@ -735,7 +739,8 @@ def admin_credit_deposit():
 @app.route('/api/admin/bonus_codes', methods=['GET'])
 @jwt_required()
 def admin_get_bonus_codes():
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -748,11 +753,13 @@ def admin_get_bonus_codes():
 @app.route('/api/admin/bonus_codes', methods=['POST'])
 @jwt_required()
 def admin_create_bonus_code():
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     data = request.get_json()
     schema = BonusCodeSchema(context={'check_unique': True})
     errors = schema.validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
+    if errors: 
+        return jsonify({'status': False, 'status_message': errors}), 400
     try:
         new_code = schema.load(data, session=db.session)
         db.session.add(new_code)
@@ -767,12 +774,14 @@ def admin_create_bonus_code():
 @app.route('/api/admin/bonus_codes/<int:code_id>', methods=['PUT'])
 @jwt_required()
 def admin_update_bonus_code(code_id):
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     bonus_code = BonusCode.query.get_or_404(code_id)
     data = request.get_json()
     schema = BonusCodeSchema(partial=True, exclude=('code_id',))
     errors = schema.validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
+    if errors: 
+        return jsonify({'status': False, 'status_message': errors}), 400
     try:
         updated_code = schema.load(data, instance=bonus_code, session=db.session, partial=True)
         db.session.commit()
@@ -786,7 +795,8 @@ def admin_update_bonus_code(code_id):
 @app.route('/api/admin/bonus_codes/<int:code_id>', methods=['DELETE'])
 @jwt_required()
 def admin_delete_bonus_code(code_id):
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
+    if not is_admin(): 
+        return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     bonus_code = BonusCode.query.get_or_404(code_id)
     try:
         db.session.delete(bonus_code)
@@ -798,56 +808,13 @@ def admin_delete_bonus_code(code_id):
         logger.error(f"Admin delete bonus code {code_id} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to delete bonus code.'}), 500
 
-@app.route('/api/admin/balance_transfer', methods=['POST'])
-@jwt_required()
-def admin_balance_transfer():
-    if not is_admin(): return jsonify({'status': False, 'status_message': 'Access denied'}), 403
-    data = request.get_json()
-    errors = BalanceTransferSchema().validate(data)
-    if errors: return jsonify({'status': False, 'status_message': errors}), 400
-    from_user_id = data.get('from_user_id')
-    to_user_id = data['to_user_id']
-    amount_sats = data['amount_sats']
-    description = data.get('description', 'Admin balance transfer')
-    tx_type = data.get('transaction_type', 'transfer')
-    to_user = User.query.get(to_user_id)
-    if not to_user: return jsonify({'status': False, 'status_message': f'Dest user {to_user_id} not found.'}), 404
-    from_user = None
-    if from_user_id:
-        from_user = User.query.get(from_user_id)
-        if not from_user: return jsonify({'status': False, 'status_message': f'Src user {from_user_id} not found.'}), 404
-        if amount_sats > 0 and from_user.balance < amount_sats:
-             return jsonify({'status': False, 'status_message': 'Src user insufficient balance.'}), 400
-    try:
-        if from_user: from_user.balance -= amount_sats
-        to_user.balance += amount_sats
-        if from_user:
-            db.session.add(Transaction(user_id=from_user_id, amount=-amount_sats, transaction_type=tx_type, status='completed', details={'description': description, 'transfer_to': to_user_id, 'admin_id': current_user.id}))
-        db.session.add(Transaction(user_id=to_user_id, amount=amount_sats, transaction_type=tx_type, status='completed', details={'description': description, 'transfer_from': from_user_id, 'admin_id': current_user.id}))
-        db.session.commit()
-        logger.info(f"Admin {current_user.id} transferred {amount_sats} from {from_user_id or 'system'} to {to_user_id}")
-        return jsonify({'status': True, 'status_message': 'Transfer successful.', 'to_user_balance': to_user.balance, 'from_user_balance': from_user.balance if from_user else None}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Admin balance transfer failed: {str(e)}", exc_info=True)
-        return jsonify({'status': False, 'status_message': 'Transfer failed.'}), 500
-
-# --- Main Execution ---
-if __name__ == '__main__':
-    app.run(debug=app.config.get('DEBUG', False), host='0.0.0.0', port=5000)
-
-# --- CLI Commands (Registered with Flask App) ---
-@app.cli.command("db_cleanup_expired_tokens")
+# CLI command for cleanup
+@app.cli.command('cleanup-expired-tokens')
 def db_cleanup_expired_tokens_command():
     now = datetime.now(timezone.utc)
     try:
-        expired_tokens = TokenBlacklist.query.filter(TokenBlacklist.expires_at < now).all()
-        if not expired_tokens:
-            print("No expired tokens found to clean up.")
-            return
-        count = len(expired_tokens)
-        for token in expired_tokens:
-            db.session.delete(token)
+        count = db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).count()
+        db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).delete()
         db.session.commit()
         print(f"Successfully deleted {count} expired token(s).")
     except Exception as e:
@@ -858,7 +825,7 @@ def db_cleanup_expired_tokens_command():
 
 @app.route('/api/spacecrash/bet', methods=['POST'])
 @jwt_required()
-@limiter.limit("30 per minute") # Limit bet frequency
+@limiter.limit("30 per minute")
 def spacecrash_place_bet():
     data = request.get_json()
     schema = SpacecrashBetSchema()
@@ -869,20 +836,16 @@ def spacecrash_place_bet():
 
     user = current_user
     bet_amount = validated_data['bet_amount']
-    auto_eject_at = validated_data.get('auto_eject_at') # Optional
+    auto_eject_at = validated_data.get('auto_eject_at')
 
     if user.balance < bet_amount:
         return jsonify({'status': False, 'status_message': 'Insufficient balance.'}), 400
 
-    # Find the current game in 'betting' status
-    # This logic might need to be more sophisticated, e.g., using a specific active game or creating one if none.
-    # For now, assume one game is in 'betting' phase.
     current_game = SpacecrashGame.query.filter_by(status='betting').order_by(SpacecrashGame.created_at.desc()).first()
 
     if not current_game:
-        return jsonify({'status': False, 'status_message': 'No active game accepting bets at the moment.'}), 404 # Or 400
+        return jsonify({'status': False, 'status_message': 'No active game accepting bets at the moment.'}), 404
 
-    # Check if user already placed a bet in this game
     existing_bet = SpacecrashBet.query.filter_by(user_id=user.id, game_id=current_game.id).first()
     if existing_bet:
         return jsonify({'status': False, 'status_message': 'You have already placed a bet for this game.'}), 400
@@ -893,15 +856,14 @@ def spacecrash_place_bet():
             game_id=current_game.id,
             bet_amount=bet_amount,
             auto_eject_at=auto_eject_at,
-            status='placed' # Default, but explicit
+            status='placed'
         )
         user.balance -= bet_amount
         
         db.session.add(new_bet)
         db.session.commit()
         
-        # Use schema to return created bet details (excluding sensitive parts if any)
-        bet_dump_schema = SpacecrashPlayerBetSchema() # Or a more detailed one if needed
+        bet_dump_schema = SpacecrashPlayerBetSchema()
         logger.info(f"User {user.id} placed Spacecrash bet {new_bet.id} for {bet_amount} on game {current_game.id}")
         return jsonify({'status': True, 'status_message': 'Bet placed successfully.', 'bet': bet_dump_schema.dump(new_bet)}), 201
 
@@ -916,49 +878,32 @@ def spacecrash_place_bet():
 def spacecrash_eject_bet():
     user = current_user
 
-    # Find user's active bet in an 'in_progress' game
     active_bet = SpacecrashBet.query.join(SpacecrashGame).filter(
         SpacecrashBet.user_id == user.id,
-        SpacecrashGame.status == 'in_progress', # Game must be running
-        SpacecrashBet.status == 'placed' # Bet must be active (not already ejected or busted)
-    ).first() # Assuming one active bet per user in an in_progress game
+        SpacecrashGame.status == 'in_progress',
+        SpacecrashBet.status == 'placed'
+    ).first()
 
     if not active_bet:
         return jsonify({'status': False, 'status_message': 'No active bet to eject or game is not in progress.'}), 404
 
-    # --- Placeholder for current multiplier ---
-    # This needs to be obtained from the live game state, which is complex.
-    # For now, let's use a placeholder. In a real system, this would come from a game loop manager.
-    # If the game has already crashed below this, this eject would be a bust.
-    # This logic will be refined when the game loop is built.
-    # For now, assume eject is successful at a fixed or arbitrary multiplier if game is 'in_progress'
-    
-    # Placeholder: get current multiplier (e.g. from game object if it's updated in real-time by game loop)
-    # current_multiplier = calculate_current_multiplier(active_bet.game.game_start_time) 
-    # IMPORTANT: This is a placeholder and needs to be replaced with actual game logic.
-    # The game might have already crashed. This check should be atomic with game state.
-    if active_bet.game.status != 'in_progress': # Re-check game status
+    if active_bet.game.status != 'in_progress':
         return jsonify({'status': False, 'status_message': 'Game is no longer in progress.'}), 400
 
     current_multiplier = spacecrash_handler.get_current_multiplier(active_bet.game)
 
-    # Ensure crash_point is loaded for the game
     if active_bet.game.crash_point is None:
-        # This should ideally not happen if game is 'in_progress' as crash_point is set then.
-        # However, if it does, it's an issue. For safety, could prevent eject or use a default.
         logger.error(f"CRITICAL: Game {active_bet.game.id} is in_progress but crash_point is None during eject attempt by user {user.id}.")
         return jsonify({'status': False, 'status_message': 'Cannot process eject: game data inconsistent.'}), 500
 
     if current_multiplier >= active_bet.game.crash_point:
-        # User tried to eject at or after the crash point
         active_bet.status = 'busted'
-        active_bet.ejected_at = active_bet.game.crash_point # Record they busted at the crash point
+        active_bet.ejected_at = active_bet.game.crash_point
         active_bet.win_amount = 0
         message = 'Eject failed, game crashed before or at your eject point.'
-        status_code = 400 # Bad request or conflict
+        status_code = 400
         logger.info(f"User {user.id} busted Spacecrash bet {active_bet.id}. Attempted eject at {current_multiplier}x, crash was at {active_bet.game.crash_point}x.")
     else:
-        # Successful eject
         active_bet.ejected_at = current_multiplier
         active_bet.win_amount = int(active_bet.bet_amount * active_bet.ejected_at)
         active_bet.status = 'ejected'
@@ -986,38 +931,31 @@ def spacecrash_eject_bet():
 
 @app.route('/api/spacecrash/current_game', methods=['GET'])
 def spacecrash_current_game_state():
-    # Find the most relevant game: 'in_progress', then 'betting', then very recent 'completed'
     game = SpacecrashGame.query.filter(
         SpacecrashGame.status.in_(['in_progress', 'betting'])
     ).order_by(
-        # Prioritize in_progress, then betting
         db.case(
             (SpacecrashGame.status == 'in_progress', 0),
             (SpacecrashGame.status == 'betting', 1),
-            else_=2 # Should not happen with current filter
+            else_=2
         ),
-        SpacecrashGame.created_at.desc() # Get the latest if multiple in same state
+        SpacecrashGame.created_at.desc()
     ).first()
 
     if not game:
-        # If no active game, try to get the most recently completed one
         game = SpacecrashGame.query.filter_by(status='completed').order_by(SpacecrashGame.game_end_time.desc()).first()
         if not game:
             return jsonify({'status': False, 'status_message': 'No current or recent game found.'}), 404
 
     game_data = SpacecrashGameSchema().dump(game)
     
-    # Placeholder for current_multiplier if game is in_progress
     if game.status == 'in_progress' and game.game_start_time:
-        # elapsed_seconds = (datetime.now(timezone.utc) - game.game_start_time).total_seconds()
         game_data['current_multiplier'] = spacecrash_handler.get_current_multiplier(game)
     elif game.status == 'betting':
-        game_data['current_multiplier'] = 1.0 # Betting phase starts at 1x
+        game_data['current_multiplier'] = 1.0
     elif game.status == 'completed':
-        game_data['current_multiplier'] = game.crash_point # Show actual crash point
+        game_data['current_multiplier'] = game.crash_point
 
-    # Fetch bets for this game (using SpacecrashPlayerBetSchema for privacy)
-    # Consider pagination if many bets
     bets_query = SpacecrashBet.query.filter_by(game_id=game.id).all()
     game_data['player_bets'] = SpacecrashPlayerBetSchema(many=True).dump(bets_query)
 
@@ -1026,11 +964,10 @@ def spacecrash_current_game_state():
 
 @app.route('/api/spacecrash/history', methods=['GET'])
 def spacecrash_game_history():
-    # Fetch last 10-20 completed games
     recent_games = SpacecrashGame.query.filter_by(status='completed').order_by(SpacecrashGame.game_end_time.desc()).limit(20).all()
     
     if not recent_games:
-        return jsonify({'status': True, 'history': []}), 200 # Return empty list if no history
+        return jsonify({'status': True, 'history': []}), 200
 
     history_data = SpacecrashGameHistorySchema(many=True).dump(recent_games)
     return jsonify({'status': True, 'history': history_data}), 200
@@ -1038,28 +975,26 @@ def spacecrash_game_history():
 
 @app.route('/api/spacecrash/admin/next_phase', methods=['POST'])
 @jwt_required()
-@limiter.limit("10 per minute") # Limit how often phases can be changed
+@limiter.limit("10 per minute")
 def spacecrash_admin_next_phase():
     if not is_admin():
         return jsonify({'status': False, 'status_message': 'Access denied. Admin rights required.'}), 403
 
     data = request.get_json()
     game_id = data.get('game_id')
-    target_phase = data.get('target_phase') # 'betting', 'in_progress', 'completed'
-    client_seed_param = data.get('client_seed', 'default_client_seed_for_testing_123') # Allow providing client_seed for starting game
-    nonce_param = data.get('nonce', 1) # Allow providing nonce
+    target_phase = data.get('target_phase')
+    client_seed_param = data.get('client_seed', 'default_client_seed_for_testing_123')
+    nonce_param = data.get('nonce', 1)
 
     game = None
     if game_id:
         game = SpacecrashGame.query.get(game_id)
     else:
-        # Try to find a game to operate on based on current typical flow
-        if target_phase == 'betting': # If moving to betting, find a pending game or create new
+        if target_phase == 'betting':
             game = SpacecrashGame.query.filter_by(status='pending').order_by(SpacecrashGame.created_at.desc()).first()
-            if not game: # Or if we want to create one if none pending
+            if not game:
                 game = spacecrash_handler.create_new_game()
-                db.session.add(game) # Handler doesn't commit
-                # db.session.commit() # Commit after creation before starting betting
+                db.session.add(game)
         elif target_phase == 'in_progress':
             game = SpacecrashGame.query.filter_by(status='betting').order_by(SpacecrashGame.created_at.desc()).first()
         elif target_phase == 'completed':
@@ -1077,36 +1012,21 @@ def spacecrash_admin_next_phase():
             if game.status == 'pending':
                 success = spacecrash_handler.start_betting_phase(game)
                 message = f"Game {game.id} moved to betting phase." if success else f"Failed to move game {game.id} to betting."
-            elif game.status == 'completed' or game.status == 'cancelled': # Allow creating a new game and moving it to betting
+            elif game.status == 'completed' or game.status == 'cancelled':
                 new_game_instance = spacecrash_handler.create_new_game()
                 db.session.add(new_game_instance)
-                db.session.flush() # Get ID for the new game
+                db.session.flush()
                 success = spacecrash_handler.start_betting_phase(new_game_instance)
                 if success:
-                    game = new_game_instance # Update game to the new instance
+                    game = new_game_instance
                     message = f"New game {game.id} created and moved to betting phase."
                 else:
                     message = "Failed to create and move new game to betting phase."
 
-
         elif target_phase == 'in_progress':
             if game.status == 'betting':
-                # For starting the game, a client_seed and nonce are needed.
-                # These would typically come from a trusted source or be revealed later for fairness.
-                # For admin endpoint, we might allow them as params or use defaults.
-                if not game.client_seed: # If not already set (e.g. if game allows client seed setting during betting)
+                if not game.client_seed:
                     game.client_seed = client_seed_param 
-                # Nonce should be unique per server_seed + client_seed pair.
-                # If game object has a nonce field that's incremented, use that.
-                # For this handler, start_game_round expects nonce.
-                # Let's assume the game.nonce should be incremented or set for this round.
-                # If it's a global nonce for the seed pair, it might be okay.
-                # If it's per-round for the same seed pair, it must be unique for that game.
-                # The current handler sets it on the game object.
-                
-                # Determine next nonce for the game. Could be game.bets.count() or an incrementing field on game.
-                # For now, let's assume the provided nonce_param is okay or game.nonce is managed externally.
-                # The handler takes nonce_param.
                 
                 success = spacecrash_handler.start_game_round(game, game.client_seed or client_seed_param, nonce_param)
                 message = f"Game {game.id} started (in progress). Crash point: {game.crash_point}" if success else f"Failed to start game {game.id}."
@@ -1124,7 +1044,6 @@ def spacecrash_admin_next_phase():
             logger.info(f"Admin {current_user.id} transitioned Spacecrash game {game.id} from {original_status} to {target_phase}.")
             return jsonify({'status': True, 'status_message': message, 'game_state': SpacecrashGameSchema().dump(game)}), 200
         else:
-            # No commit needed if no success
             return jsonify({'status': False, 'status_message': message, 'current_status': original_status}), 400
 
     except Exception as e:

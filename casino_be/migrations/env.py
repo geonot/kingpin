@@ -1,20 +1,23 @@
 from __future__ import with_statement
 
-import sys # Import sys
-import os # Import os
-from os.path import abspath, dirname # Import abspath and dirname
+import sys
+import os
+from os.path import abspath, dirname
+import logging
+from logging.config import fileConfig
 
 # Add the parent directory of 'migrations' (i.e., 'casino_be') to sys.path
 # This allows 'from models import db' to work correctly.
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
 
-import logging
-from logging.config import fileConfig
+# Add project root to sys.path
+# This assumes env.py is in casino_be/migrations/
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from flask import current_app
-from sqlalchemy import engine_from_config, pool # Import necessary components
-from sqlalchemy import MetaData # Import MetaData
-
+from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 # this is the Alembic Config object, which provides
@@ -23,7 +26,7 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None: # Check if config file name is set
+if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 logger = logging.getLogger('alembic.env')
 
@@ -40,45 +43,9 @@ logger = logging.getLogger('alembic.env')
 
 # Option 3: Import all models and use a shared MetaData instance
 # Ensure all your models use the same MetaData object (SQLAlchemy() usually handles this)
-from models import db # If db = SQLAlchemy() is defined in models.py
+from casino_be.models import db # If db = SQLAlchemy() is defined in models.py
 target_metadata = db.metadata
 # --- End Metadata Setup ---
-
-
-# --- Configure Database URL ---
-# Use the database URL from Flask app config if possible, otherwise from alembic.ini
-flask_app_config_url = None
-try:
-    # This relies on Flask context being available, which might not always be the case
-    # especially during offline migrations or initial setup.
-    # Consider setting SQLALCHEMY_URL directly in alembic.ini as a fallback.
-    flask_app_config_url = current_app.config['SQLALCHEMY_DATABASE_URI']
-except RuntimeError: # No app context
-    logger.warning("Flask app context not available. Trying alembic.ini for database URL.")
-    flask_app_config_url = None
-
-# Get URL from alembic.ini section [alembic] key 'sqlalchemy.url'
-ini_url = config.get_main_option("sqlalchemy.url")
-
-if flask_app_config_url:
-    config.set_main_option('sqlalchemy.url', flask_app_config_url)
-    logger.info(f"Using database URL from Flask config: {flask_app_config_url}")
-elif ini_url:
-    # URL is already set from ini file, no need to set it again
-    logger.info(f"Using database URL from alembic.ini: {ini_url}")
-else:
-    logger.warning("Database URL not found in Flask config or alembic.ini. Defaulting to SQLite for migration generation.")
-    # Optionally, raise an error or exit
-    # raise ValueError("Missing database URL configuration for Alembic.")
-    config.set_main_option('sqlalchemy.url', 'sqlite:///./_alembic_dummy.db')
-
-
-# --- Rest of the env.py (mostly standard) ---
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
 
 
 def run_migrations_offline():
@@ -112,33 +79,53 @@ def run_migrations_online():
     and associate a connection with the context.
 
     """
-    # Use configuration from alembic.ini for the engine
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    def process_revision_directives(context, revision, directives):
+        if getattr(config.cmd_opts, 'autogenerate', False):
+            script = directives[0]
+            if script.upgrade_ops.is_empty():
+                directives[:] = []
+                logger.info('No changes in schema detected.')
+
+    connectable = current_app.extensions['migrate'].db.engine
 
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             process_revision_directives=process_revision_directives,
-             # compare_type=True # Enable type comparison if needed
+            **current_app.extensions['migrate'].configure_args
         )
 
         with context.begin_transaction():
             context.run_migrations()
 
-# this callback is used to prevent an auto-migration from being generated
-# when there are no changes to the schema
-# reference: http://alembic.zzzcomputing.com/en/latest/cookbook.html
-def process_revision_directives(context, revision, directives):
-    if config.cmd_opts.autogenerate: # Check attribute exists
-        script = directives[0]
-        if script.upgrade_ops.is_empty():
-            directives[:] = []
-            logger.info('No changes in schema detected.')
+
+# --- Configure Database URL ---
+# Use the database URL from Flask app config if possible, otherwise from alembic.ini
+flask_app_config_url = None
+try:
+    # This relies on Flask context being available, which might not always be the case
+    # especially during offline migrations or initial setup.
+    # Consider setting SQLALCHEMY_URL directly in alembic.ini as a fallback.
+    flask_app_config_url = current_app.config['SQLALCHEMY_DATABASE_URI']
+except RuntimeError: # No app context
+    logger.warning("Flask app context not available. Trying alembic.ini for database URL.")
+    flask_app_config_url = None
+
+# Get URL from alembic.ini section [alembic] key 'sqlalchemy.url'
+ini_url = config.get_main_option("sqlalchemy.url")
+
+if flask_app_config_url:
+    config.set_main_option('sqlalchemy.url', flask_app_config_url)
+    logger.info(f"Using database URL from Flask config: {flask_app_config_url}")
+elif ini_url:
+    # URL is already set from ini file, no need to set it again
+    logger.info(f"Using database URL from alembic.ini: {ini_url}")
+else:
+    logger.warning("Database URL not found in Flask config or alembic.ini. Defaulting to SQLite for migration generation.")
+    # Optionally, raise an error or exit
+    # raise ValueError("Missing database URL configuration for Alembic.")
+    config.set_main_option('sqlalchemy.url', 'sqlite:///./_alembic_dummy.db')
 
 
 if context.is_offline_mode():
