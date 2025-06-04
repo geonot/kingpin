@@ -12,14 +12,14 @@ import logging
 from marshmallow import ValidationError
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
-from .models import (
-    db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, 
+from models import (
+    db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist,
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
     PlinkoDropLog  # Plinko models
 )
-from .schemas import (
+from schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
@@ -29,16 +29,19 @@ from .schemas import (
     PokerTableSchema, PokerPlayerStateSchema, PokerHandSchema, JoinPokerTableSchema, PokerActionSchema,  # Poker schemas
     PlinkoPlayRequestSchema, PlinkoPlayResponseSchema  # Plinko schemas
 )
-from .utils.bitcoin import generate_bitcoin_wallet
-from .utils.spin_handler import handle_spin
-from .utils.multiway_helper import handle_multiway_spin
-from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
-from .utils import spacecrash_handler
-from .utils import poker_helper
-from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
-from .config import Config
-from .services.bonus_service import apply_bonus_to_deposit
+from utils.bitcoin import generate_bitcoin_wallet
+from utils.spin_handler import handle_spin
+from utils.multiway_helper import handle_multiway_spin
+from utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from utils import spacecrash_handler
+from utils import poker_helper
+from utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
+from config import Config
+from services.bonus_service import apply_bonus_to_deposit
 from http import HTTPStatus
+
+# Add the missing SATOSHIS_PER_UNIT constant that was referenced in Plinko code
+SATOSHIS_PER_UNIT = 100000000  # 1 BTC = 100,000,000 satoshis
 
 # --- App Initialization ---
 app = Flask(__name__)
@@ -397,7 +400,7 @@ def withdraw():
         return jsonify({
             'status': True, 'withdraw_id': transaction.id, 'user': UserSchema().dump(user),
             'status_message': 'Withdrawal request submitted.'
-        }), 201
+        ), 201
     except Exception as e:
         db.session.rollback()
         logger.error(f"Withdrawal failed: {str(e)}", exc_info=True)

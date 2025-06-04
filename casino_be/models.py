@@ -177,7 +177,7 @@ class BlackjackTable(db.Model):
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.String(500), nullable=True)
     min_bet = db.Column(BigInteger, nullable=False)
-    max_bet = db.Column(BigInteger, nullable=False)
+    max_bet = db.Column(db.BigInteger, nullable=False)
     deck_count = db.Column(db.Integer, nullable=False)
     rules = db.Column(JSON, nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
@@ -298,7 +298,7 @@ class PokerTable(db.Model):
     small_blind = db.Column(BigInteger, nullable=False)
     big_blind = db.Column(BigInteger, nullable=False)
     min_buy_in = db.Column(BigInteger, nullable=False)
-    max_buy_in = db.Column(BigInteger, nullable=False)
+    max_buy_in = db.Column(db.BigInteger, nullable=False)
     max_seats = db.Column(db.Integer, nullable=False, default=9)
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -353,22 +353,26 @@ class PokerPlayerState(db.Model):
 
 class PlinkoDropLog(db.Model):
     __tablename__ = 'plinko_drop_log'
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    stake_amount = db.Column(db.BigInteger, nullable=False)  # In satoshis
-    chosen_stake_label = db.Column(db.String(50), nullable=False)  # e.g., 'Low', 'Medium', 'High'
-    slot_landed_label = db.Column(db.String(50), nullable=False)  # e.g., '0.5x', '2x', '5x'
-    multiplier_applied = db.Column(db.Float, nullable=False) # The actual multiplier value, e.g., 0.5, 2.0
-    winnings_amount = db.Column(db.BigInteger, nullable=False) # Amount won from this drop, in satoshis
-    timestamp = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     
-    # Relationship to User
-    user = db.relationship('User', backref=db.backref('plinko_drops', lazy='dynamic'))
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    stake_amount = db.Column(db.BigInteger, nullable=False)  # In satoshis
+    chosen_stake_label = db.Column(db.String(50), nullable=False)
+    slot_landed_label = db.Column(db.String(50), nullable=False)
+    multiplier_applied = db.Column(db.Float, nullable=False)
+    winnings_amount = db.Column(db.BigInteger, nullable=False, default=0)  # In satoshis
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = db.relationship('User', backref='plinko_drops')
 
-    # Relationship to Transactions (optional, if needed for querying from PlinkoDropLog to Transaction)
-    # transactions = db.relationship('Transaction', backref='plinko_drop', lazy='dynamic') 
-    # This backref name 'plinko_drop' would need to be added to the Transaction model's FK if this side is defined.
-
+class TokenBlacklist(db.Model):
+    __tablename__ = 'token_blacklist'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(255), nullable=False, unique=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    
     def __repr__(self):
-        return f"<PlinkoDropLog {self.id} (User: {self.user_id}, Stake: {self.stake_amount}, Won: {self.winnings_amount})>"
+        return f'<TokenBlacklist {self.jti}>'
