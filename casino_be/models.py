@@ -301,6 +301,11 @@ class PokerTable(db.Model):
     max_buy_in = db.Column(db.BigInteger, nullable=False)
     max_seats = db.Column(db.Integer, nullable=False, default=9)
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    # Rake configuration
+    rake_percentage = db.Column(db.Numeric(5, 4), default=Decimal("0.00"), nullable=False) # e.g., 0.05 for 5%
+    max_rake_sats = db.Column(db.BigInteger, default=0, nullable=False) # Max rake in satoshis, 0 for no cap beyond percentage
+    current_dealer_seat_id = db.Column(db.Integer, nullable=True) # Seat ID of the current dealer
+
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     
@@ -320,7 +325,19 @@ class PokerHand(db.Model):
     rake_sats = db.Column(BigInteger, nullable=False, default=0)
     start_time = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     end_time = db.Column(db.DateTime(timezone=True), nullable=True)
-    winners = db.Column(JSON, nullable=True)
+    winners = db.Column(JSON, nullable=True) # JSON field to store winner(s) info
+
+    # Fields for tracking betting state within a hand
+    current_turn_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    current_bet_to_match = db.Column(db.BigInteger, default=0, nullable=False)
+    player_street_investments = db.Column(JSON, nullable=True, default=lambda: {}) # Tracks {user_id: amount} for current street
+    min_next_raise_amount = db.Column(db.BigInteger, nullable=True) # Minimum valid increment for the next raise
+    last_raiser_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # Tracks the last player who bet/raised
+
+    # Relationships for ForeignKey fields
+    current_turn_player = db.relationship('User', foreign_keys=[current_turn_user_id], backref=db.backref('poker_hands_current_turn', lazy='dynamic'))
+    last_raiser = db.relationship('User', foreign_keys=[last_raiser_user_id], backref=db.backref('poker_hands_last_raised', lazy='dynamic'))
+
 
     def __repr__(self):
         return f"<PokerHand {self.id} (Table: {self.table_id}, Pot: {self.pot_size_sats}, Start: {self.start_time})>"
@@ -337,6 +354,7 @@ class PokerPlayerState(db.Model):
     hole_cards = db.Column(JSON, nullable=True)
     last_action = db.Column(db.String(50), nullable=True)
     time_to_act_ends = db.Column(db.DateTime(timezone=True), nullable=True)
+    total_invested_this_hand = db.Column(db.BigInteger, default=0, nullable=False) # Total amount invested by player in current hand
     joined_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
