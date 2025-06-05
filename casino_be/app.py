@@ -12,14 +12,14 @@ import logging
 from marshmallow import ValidationError
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
-from models import (
+from .models import (
     db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist,
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
     PlinkoDropLog  # Plinko models
 )
-from schemas import (
+from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
@@ -29,16 +29,16 @@ from schemas import (
     PokerTableSchema, PokerPlayerStateSchema, PokerHandSchema, JoinPokerTableSchema, PokerActionSchema,  # Poker schemas
     PlinkoPlayRequestSchema, PlinkoPlayResponseSchema  # Plinko schemas
 )
-from utils.bitcoin import generate_bitcoin_wallet
-from utils.spin_handler import handle_spin
-from utils.multiway_helper import handle_multiway_spin
-from utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
-from utils import spacecrash_handler
-from utils import poker_helper
-from utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
-from config import Config
+from .utils.bitcoin import generate_bitcoin_wallet
+from .utils.spin_handler import handle_spin
+from .utils.multiway_helper import handle_multiway_spin
+from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from .utils import spacecrash_handler
+from .utils import poker_helper
+from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
+from .config import Config
 from sqlalchemy.orm import joinedload # Added for poker join logic
-from services.bonus_service import apply_bonus_to_deposit
+from .services.bonus_service import apply_bonus_to_deposit
 from http import HTTPStatus
 
 # Add the missing SATOSHIS_PER_UNIT constant that was referenced in Plinko code
@@ -401,7 +401,7 @@ def withdraw():
         return jsonify({
             'status': True, 'withdraw_id': transaction.id, 'user': UserSchema().dump(user),
             'status_message': 'Withdrawal request submitted.'
-        ), 201
+        }), 201
     except Exception as e:
         db.session.rollback()
         logger.error(f"Withdrawal failed: {str(e)}", exc_info=True)
@@ -678,6 +678,71 @@ def get_poker_table_state(table_id):
 
     return jsonify({'status': True, 'table_state': state_data}), 200
 
+@app.route('/api/poker/tables/<int:table_id>/start_hand', methods=['POST'])
+@jwt_required()
+def start_poker_hand_route(table_id):
+    user = current_user
+    logger.info(f"User {user.id} attempting to start a new hand at table {table_id}.")
+
+    table = PokerTable.query.get(table_id)
+    if not table:
+        logger.warning(f"Start hand attempt failed: Table {table_id} not found.")
+        return jsonify({'status': False, 'status_message': f'Poker table {table_id} not found.'}), HTTPStatus.NOT_FOUND
+
+    # 1. User Seated Check
+    player_state = PokerPlayerState.query.filter_by(user_id=user.id, table_id=table_id).first()
+    if not player_state or player_state.is_sitting_out:
+        logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: User not actively seated.")
+        return jsonify({'status': False, 'status_message': 'User not actively seated at this table.'}), HTTPStatus.FORBIDDEN
+
+    # 2. Active Hand Check
+    active_hand = PokerHand.query.filter(
+        PokerHand.table_id == table_id,
+        PokerHand.status.notin_(['completed', 'showdown']) # Consider all non-terminal states as 'active'
+    ).first()
+    if active_hand:
+        logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: Active hand {active_hand.id} already in progress (status: {active_hand.status}).")
+        return jsonify({'status': False, 'status_message': f'An active hand ({active_hand.status}) is already in progress.'}), HTTPStatus.CONFLICT
+
+    # 3. Sufficient Players Check (at least 2 active, non-sitting-out players with stacks)
+    # Re-query player states to ensure we have the latest, especially if considering recent sit-downs/stand-ups not yet reflected in table.player_states if not reloaded
+    active_player_count = PokerPlayerState.query.filter(
+        PokerPlayerState.table_id == table_id,
+        PokerPlayerState.is_sitting_out == False,
+        PokerPlayerState.stack_sats > 0
+    ).count()
+
+    # MIN_PLAYERS_TO_START = 2 # This could be a configuration
+    if active_player_count < 2:
+        logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: Insufficient active players ({active_player_count}).")
+        return jsonify({'status': False, 'status_message': f'Not enough active players ({active_player_count}) to start a new hand. Minimum 2 required.'}), HTTPStatus.CONFLICT
+
+    # 4. Call poker_helper.start_new_hand
+    try:
+        logger.info(f"All checks passed for table {table_id}. User {user.id} initiating start_new_hand.")
+        result = poker_helper.start_new_hand(table_id=table_id) # This function handles its own session commits/rollbacks
+
+        if "error" in result:
+            logger.error(f"Error starting new hand for table {table_id} by user {user.id}: {result['error']}")
+            # Determine appropriate status code based on error type if possible
+            error_msg_lower = result["error"].lower()
+            status_code = HTTPStatus.BAD_REQUEST # Default
+            if "not enough active players" in error_msg_lower:
+                status_code = HTTPStatus.CONFLICT
+            elif "table not found" in error_msg_lower:
+                status_code = HTTPStatus.NOT_FOUND
+            # Add more specific error code mappings if needed
+            return jsonify({'status': False, 'status_message': result['error']}), status_code
+
+        logger.info(f"New hand {result.get('hand_id')} started successfully at table {table_id} by user {user.id}.")
+        return jsonify({'status': True, 'message': 'New hand started.', 'hand_details': result}), HTTPStatus.CREATED
+
+    except Exception as e:
+        db.session.rollback() # Ensure rollback if an unexpected exception occurs here
+        logger.error(f"Unexpected exception when starting new hand for table {table_id} by user {user.id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': f'An unexpected server error occurred: {str(e)}'}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
 @app.route('/api/poker/tables/<int:table_id>/hands/<int:hand_id>/action', methods=['POST'])
 @jwt_required()
 def poker_hand_action(table_id, hand_id):
@@ -696,6 +761,28 @@ def poker_hand_action(table_id, hand_id):
     hand = PokerHand.query.filter_by(id=hand_id, table_id=table_id).first()
     if not hand:
         return jsonify({'status': False, 'status_message': f'Hand {hand_id} not found or not associated with table {table_id}.'}), 404
+
+    # --- Player Timeout Check ---
+    # Call before checking turn, as timeout might change whose turn it is or end the hand.
+    logger.debug(f"Hand {hand_id} on table {table_id}: Checking for player timeouts before action by user {user.id}.")
+    timeout_action_taken = poker_helper.check_and_handle_player_timeouts(table_id=table_id, session=db.session)
+    if timeout_action_taken:
+        logger.info(f"Hand {hand_id} on table {table_id}: Timeout action was processed. Re-fetching hand state.")
+        # Re-fetch the hand as its state (status, current_turn_user_id) might have changed.
+        # db.session.refresh(hand) might not be enough if the hand was completed and a new one started,
+        # though check_and_handle_player_timeouts currently only folds.
+        # A fresh query is safest if major state changes like hand completion are possible.
+        # However, for a simple fold, refresh should be fine. Let's try refresh first.
+        # If issues arise, a full re-query "hand = PokerHand.query.get(hand_id)" would be more robust.
+        db.session.refresh(hand)
+        # Also, if the hand was completed by timeout, we might want to return early.
+        if hand.status in ['completed', 'showdown']:
+            # The game_flow from the timeout (which called handle_fold) would have been committed.
+            # We might need to fetch that game_flow result if we want to return it here.
+            # For now, just inform the user that the hand state changed.
+            # Or, let the turn check below handle it if the user is no longer the current player.
+            logger.info(f"Hand {hand_id} is now '{hand.status}' after timeout processing. Action by {user.id} may no longer be valid or needed.")
+
 
     # Add a check to ensure it's the current user's turn - this is critical
     # This check should ideally be inside each handle_action function in poker_helper.py for atomicity,
