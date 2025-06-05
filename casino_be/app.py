@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, Blueprint
+from flask import Flask, request, jsonify, Blueprint, current_app, g
+import uuid
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
@@ -9,6 +10,7 @@ from flask_jwt_extended import (
 )
 from datetime import datetime, timedelta, timezone
 import logging
+from pythonjsonlogger import jsonlogger
 from marshmallow import ValidationError
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
@@ -51,6 +53,24 @@ from http import HTTPStatus
 app = Flask(__name__)
 app.config.from_object(Config)
 
+if not app.debug:
+    # Configure JSON logging for production
+    logger = app.logger
+    handler = logging.StreamHandler()
+    # Updated formatter to include request_id
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(levelname)s %(request_id)s %(module)s %(funcName)s %(lineno)d %(message)s'
+    )
+    handler.setFormatter(formatter)
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+# --- Request ID Generation ---
+@app.before_request
+def add_request_id():
+    g.request_id = str(uuid.uuid4())
+
 # --- Rate Limiter Setup ---
 app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
 limiter = Limiter(
@@ -70,10 +90,6 @@ migrate = Migrate(app, db, directory='casino_be/migrations')
 
 # --- JWT Setup ---
 jwt = JWTManager(app)
-
-# --- Logging Setup ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # --- JWT Helper Functions ---
 @jwt.user_identity_loader
@@ -95,7 +111,7 @@ def check_if_token_in_blacklist(jwt_header, jwt_payload):
 # --- Global Error Handler ---
 @app.errorhandler(Exception)
 def handle_unhandled_exception(e):
-    logger.error("Unhandled exception caught by global error handler:", exc_info=True)
+    current_app.logger.error(f"Request ID: {g.get('request_id', 'N/A')} - Unhandled exception caught by global error handler:", exc_info=True)
     return jsonify({
         'status': False,
         'status_message': 'An unexpected internal server error occurred. Please try again later.'
@@ -124,70 +140,6 @@ from .routes.spacecrash import spacecrash_bp
 from .routes.meta_game import meta_game_bp
 from .routes.baccarat import baccarat_bp # New Baccarat import
 
-# --- API Routes ---
-
-# === Game Play ===
-# spin() has been moved to slots_bp
-# @app.route('/api/spin', methods=['POST'])
-# @jwt_required()
-# def spin():
-    data = request.get_json()
-    errors = SpinRequestSchema().validate(data)
-    if errors: 
-        return jsonify({'status': False, 'status_message': errors}), 400
-    user = current_user
-    bet_amount_sats = data['bet_amount']
-    if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
-        return jsonify({'status': False, 'status_message': 'Invalid bet amount.'}), 400
-    game_session = GameSession.query.filter_by(user_id=user.id, session_end=None).order_by(GameSession.session_start.desc()).first()
-    if not game_session:
-        return jsonify({'status': False, 'status_message': 'No active game session.'}), 404
-    slot = Slot.query.get(game_session.slot_id)
-    if not slot:
-         return jsonify({'status': False, 'status_message': 'Slot not found for session.'}), 500
-    if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0):
-        return jsonify({'status': False, 'status_message': 'Insufficient balance'}), 400
-    
-    spin_result_data = None
-    try:
-        if slot.is_multiway:
-            if not slot.reel_configurations:
-                logger.error(f"Spin attempt on multiway slot {slot.id} without reel_configurations by user {user.id}")
-                return jsonify({"status": False, "status_message": "Slot is configured as multiway but lacks essential reel configurations."}), 400
-            
-            if not slot.symbols:
-                 logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}")
-                 return jsonify({"status": False, "status_message": "Slot configuration incomplete (symbols missing)."}), 400
-
-            spin_result_data = handle_multiway_spin(user, slot, game_session, bet_amount_sats)
-        else:
-            spin_result_data = handle_spin(user, slot, game_session, bet_amount_sats)
-        
-        db.session.commit()
-
-        return jsonify({
-            'status': True, 
-            'result': spin_result_data['spin_result'],
-            'win_amount': spin_result_data['win_amount_sats'],
-            'winning_lines': spin_result_data['winning_lines'],
-            'bonus_triggered': spin_result_data['bonus_triggered'],
-            'bonus_active': spin_result_data['bonus_active'], 
-            'bonus_spins_remaining': spin_result_data['bonus_spins_remaining'],
-            'bonus_multiplier': spin_result_data['bonus_multiplier'], 
-            'game_session': GameSessionSchema().dump(game_session),
-            'user': UserSchema().dump(user)
-        }), 200
-    except ValueError as ve:
-        db.session.rollback()
-        logger.warning(f"Spin ValueError for user {user.id} on slot {slot.id if slot else 'N/A'}: {str(ve)}")
-        return jsonify({'status': False, 'status_message': str(ve)}), 400
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Spin error: {str(e)}", exc_info=True)
-        return jsonify({'status': False, 'status_message': 'Spin processing error.'}), 500
-
-# === Public Info ===
-
 # CLI command for cleanup
 @app.cli.command('cleanup-expired-tokens')
 def db_cleanup_expired_tokens_command():
@@ -213,3 +165,4 @@ app.register_blueprint(roulette_bp)
 app.register_blueprint(spacecrash_bp)
 app.register_blueprint(meta_game_bp)
 app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
+

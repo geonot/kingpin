@@ -6,8 +6,7 @@
 # This implementation is for demonstration purposes ONLY.
 
 import logging
-
-logger = logging.getLogger(__name__)
+from flask import current_app
 
 DUMMY_WALLET_COUNT = 0
 
@@ -21,12 +20,12 @@ def generate_bitcoin_wallet():
     DUMMY_WALLET_COUNT += 1
     # Return a simple, non-random, but unique enough for testing, dummy address
     dummy_address = f"dummyBitcoinAddress{DUMMY_WALLET_COUNT}"
-    logger.info(f"Generated DUMMY Bitcoin address for testing: {dummy_address}")
+    current_app.logger.info(f"Generated DUMMY Bitcoin address for testing: {dummy_address}")
     return dummy_address
 
 # Example usage (for testing purposes):
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    # logging.basicConfig(level=logging.INFO) # This would require app context if using current_app.logger
     address1 = generate_bitcoin_wallet()
     address2 = generate_bitcoin_wallet()
     if address1 and address2:
