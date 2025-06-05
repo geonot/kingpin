@@ -24,9 +24,13 @@
 </div>
 
 <!-- Game Info / Controls (Optional outside Phaser) -->
-<div class="mt-4 p-4 bg-white dark:bg-dark-card rounded-lg shadow-md text-center md:text-left">
+<div class="mt-4 p-4 bg-white dark:bg-dark-card rounded-lg shadow-md text-center">
     <h2 class="text-xl font-bold dark:text-white">{{ slotInfo?.name || 'Loading Slot...' }}</h2>
-    <p class="text-sm text-gray-600 dark:text-gray-400">{{ slotInfo?.description }}</p>
+    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">{{ slotInfo?.description }}</p>
+    <div v-if="currentMultiplierDisplay > 1"
+         class="text-lg font-bold text-yellow-400 dark:text-yellow-300 animate-pulse">
+      Multiplier: x{{ currentMultiplierDisplay }}
+    </div>
     <!-- Display balance or other info if needed outside Phaser UI -->
     <!-- <p class="mt-2 dark:text-gray-300">Balance: {{ formatSatsToBtc(userBalance) 
 Btc </p> -->
@@ -59,6 +63,7 @@ const errorObject = ref(null); // For ErrorMessage.vue component
 const slotInfo = ref(null); // To store details about the current slot (from API)
 const slotGameJsonConfigContent = ref(null); // To store content of gameConfig.json
 const isSpinning = ref(false); // Prevent concurrent spins
+const currentMultiplierDisplay = ref(1); // For cascading win multiplier
 
 // Constants for localStorage keys
 const SESSION_STORAGE_KEY = 'slotGameSessionId';
@@ -97,8 +102,6 @@ const fetchSlotDetailsAndConfig = async (slotId) => {
       } catch (err) {
         console.error(`Failed to load gameConfig.json for ${slotInfo.value.short_name}:`, err);
         errorObject.value = { status_message: `Could not load detailed game configuration for ${slotInfo.value.name}. Some features might be unavailable or use defaults.` };
-        // Depending on how critical gameConfig.json is, you might stop here or allow Phaser to start with partial data.
-        // For now, we'll let it proceed and PreloadScene can handle missing parts.
       }
     } else {
       console.error('Slot short_name is missing, cannot load gameConfig.json.');
@@ -114,19 +117,15 @@ const fetchSlotDetailsAndConfig = async (slotId) => {
 const joinGameAndInitPhaser = async (slotId) => {
     isLoading.value = true;
     loadingMessage.value = 'Joining game session...';
-    clearErrorObject(); // Clear previous errors
+    clearErrorObject();
     
-    // Ensure slotInfo and potentially slotGameJsonConfigContent are loaded before joining
     if (!slotInfo.value || !slotInfo.value.short_name) {
-        await fetchSlotDetailsAndConfig(slotId); // This will also attempt to load gameConfig.json
-        if (!slotInfo.value || errorObject.value) { // If still not loaded or error occurred
+        await fetchSlotDetailsAndConfig(slotId);
+        if (!slotInfo.value || errorObject.value) {
             isLoading.value = false;
-            // errorObject is already set by fetchSlotDetailsAndConfig
-            return; // Stop if essential slot info is missing
+            return;
         }
     }
-    // If slotGameJsonConfigContent is strictly required before this point, add check here.
-    // For now, PreloadScene might have fallbacks.
 
     localStorage.setItem(SLOT_ID_STORAGE_KEY, slotId.toString());
     const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -134,7 +133,7 @@ const joinGameAndInitPhaser = async (slotId) => {
     if (existingSessionId && isAuthenticated.value) {
         gameSessionId.value = existingSessionId;
         console.log('Attempting to reuse existing game session:', gameSessionId.value);
-    } else if (isAuthenticated.value) { // Only try to join if authenticated
+    } else if (isAuthenticated.value) {
         try {
             const response = await store.dispatch('joinGame', { slot_id: slotId, game_type: 'slot' });
             if (response.status && response.session_id) {
@@ -147,25 +146,23 @@ const joinGameAndInitPhaser = async (slotId) => {
             console.error('Error joining game:', err);
             errorObject.value = { status_message: `Failed to join game: ${err.message}.` };
             isLoading.value = false;
-            return; // Stop if cannot join game
+            return;
         }
     } else {
-        // Not authenticated, and no existing session. Game can be played without session (demo mode).
         console.log('User not authenticated, proceeding without game session.');
-        gameSessionId.value = null; // Ensure no old session ID is used
-        localStorage.removeItem(SESSION_STORAGE_KEY); // Clear any stale session ID
+        gameSessionId.value = null;
+        localStorage.removeItem(SESSION_STORAGE_KEY);
     }
 
-    // Proceed to start Phaser
     startPhaserGame(slotId);
 };
 
-const startPhaserGame = (slotId) => { // slotId is passed for preBoot, though short_name is primary now
+const startPhaserGame = (slotId) => {
   if (game.value) {
     console.warn("Phaser game already exists. Destroying previous instance.");
     game.value.destroy(true); game.value = null;
   }
-  loadingMessage.value = 'Initializing game engine...'; // Changed from "Loading game assets" as PreloadScene handles that
+  loadingMessage.value = 'Initializing game engine...';
   const parentElement = document.getElementById('phaser-slot-machine');
   if (!parentElement) {
     console.error("Phaser parent element 'phaser-slot-machine' not found.");
@@ -174,27 +171,20 @@ const startPhaserGame = (slotId) => { // slotId is passed for preBoot, though sh
   }
 
   const mergedConfig = {
-    ...phaserConfig, // Base Phaser config (scenes, physics, etc.)
+    ...phaserConfig,
     parent: 'phaser-slot-machine',
     callbacks: {
       preBoot: (bootingGame) => {
-        // slotId might be useful for some initial setup if needed before full config is parsed
         bootingGame.registry.set('slotIdFromVue', slotId);
       },
       postBoot: (bootedGame) => {
         bootedGame.registry.set('userBalance', userBalance.value);
-        // API Data (from /api/slots/:id) - contains short_name, symbol list with img_link etc.
         bootedGame.registry.set('slotApiData', slotInfo.value);
-        // Game JSON Config (from public/slots/{short_name}/gameConfig.json) - contains layout, paylines, assets paths etc.
         bootedGame.registry.set('slotGameJsonConfig', slotGameJsonConfigContent.value);
-
         bootedGame.registry.set('soundEnabled', soundEnabled.value);
         bootedGame.registry.set('turboEnabled', turboEnabled.value);
         bootedGame.registry.set('eventBus', EventBus);
         console.log('Phaser game booted. Initial data (API, JSON config, settings) set in registry.');
-        // isLoading is now set by Phaser's PreloadScene on its 'complete' event,
-        // or by GameScene once it's fully ready if PreloadScene is quick.
-        // For now, we can set it to false here, assuming PreloadScene will show its own progress.
         isLoading.value = false;
       }
     }
@@ -212,7 +202,20 @@ const handlePhaserSpinResult = (result) => {
     if (result.user) {
         store.commit('updateUserBalance', result.user.balance);
     }
-    // Potentially update other UI elements based on win, lines etc.
+    // Update multiplier display based on backend response (passed from GameScene via EventBus)
+    if (result.current_multiplier_level && slotGameJsonConfigContent.value?.game?.win_multipliers) {
+        const level = result.current_multiplier_level;
+        const multipliers = slotGameJsonConfigContent.value.game.win_multipliers;
+        if (level > 0 && multipliers && multipliers.length > 0) {
+            // Assuming level is 1-based for display (e.g. level 1 is index 0 of multipliers array)
+            currentMultiplierDisplay.value = multipliers[Math.min(level - 1, multipliers.length - 1)];
+        } else {
+            currentMultiplierDisplay.value = 1; // Default to 1x if no level or no multipliers defined
+        }
+    } else if (Object.prototype.hasOwnProperty.call(result, 'current_multiplier_level')) {
+        // If current_multiplier_level is explicitly 0 or multipliers are missing, reset to 1.
+        currentMultiplierDisplay.value = 1;
+    }
 };
 const handlePhaserBalanceInsufficient = () => {
     console.log("Vue: PhaserBalanceInsufficient received");
@@ -225,20 +228,12 @@ const handlePhaserError = (message) => {
 const handlePhaserRequestBalanceUpdate = async () => {
     console.log("Vue: PhaserRequestBalanceUpdate received");
     try {
-        await store.dispatch('fetchUserProfile'); // Fetches and commits new balance
-        // Phaser UIScene should listen for 'vueBalanceUpdated' or directly read from registry if updated there.
+        await store.dispatch('fetchUserProfile');
         EventBus.emit('vueBalanceUpdated', { balance: store.getters.currentUser?.balance });
     } catch (err) {
         console.error("Vue: Error fetching user profile for balance update:", err);
     }
 };
-
-// Vue to Phaser Command Emitter (example, if Vue UI triggers spin)
-// const triggerPhaserSpin = (betAmount) => {
-//   if (game.value) {
-//     EventBus.emit('vueSpinCommand', { betAmount });
-//   }
-// };
 
 // --- Lifecycle Hooks ---
 onMounted(async () => {
@@ -257,79 +252,83 @@ onMounted(async () => {
   loadingMessage.value = 'Loading slot configuration...';
 
   try {
-    await store.dispatch('fetchUserProfile'); // Ensure user balance is fresh
-    await fetchSlotDetailsAndConfig(slotIdNum); // Fetches config and stores in slotInfo
+    await store.dispatch('fetchUserProfile');
+    await fetchSlotDetailsAndConfig(slotIdNum);
 
-    if (slotInfo.value && !errorObject.value) { // If config loaded successfully
-      await joinGameAndInitPhaser(slotIdNum); // Joins game, then starts Phaser
+    if (slotInfo.value && !errorObject.value) {
+      await joinGameAndInitPhaser(slotIdNum);
     } else {
-      isLoading.value = false; // Config loading failed
+      isLoading.value = false;
     }
   } catch (err) {
     console.error("Slot page initialization failed:", err);
-    if (!errorObject.value) { // Ensure some error is shown
+    if (!errorObject.value) {
         errorObject.value = { status_message: 'Failed to initialize slot game.' };
     }
     isLoading.value = false;
   }
 
-  // Register Event Bus Listeners (Phaser to Vue)
   EventBus.on('phaserSpinResult', handlePhaserSpinResult);
   EventBus.on('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
   EventBus.on('phaserError', handlePhaserError);
   EventBus.on('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
-  // Listener for spin command from Phaser UI
   EventBus.on('spinCommand', handlePhaserSpinCommand);
 });
 
-// This function is called when Phaser's UI requests a spin
 const handlePhaserSpinCommand = async (payload) => {
     if (isSpinning.value) {
         console.warn("Vue: Spin command ignored, already spinning.");
-        EventBus.emit('spinReject', { message: 'Already spinning.' }); // Inform Phaser
+        EventBus.emit('spinReject', { message: 'Already spinning.' });
         return;
     }
     if (!isAuthenticated.value) {
         errorObject.value = { status_message: "Please log in to play." };
-        EventBus.emit('spinError', { message: 'User not authenticated.' }); // Inform Phaser
+        EventBus.emit('spinError', { message: 'User not authenticated.' });
         return;
     }
 
-    const betAmount = payload.betAmount; // Assuming payload from Phaser is { betAmount: XXX }
+    const betAmount = payload.betAmount;
     if (userBalance.value < betAmount) {
         errorObject.value = { status_message: 'Insufficient balance.' };
-        EventBus.emit('phaserBalanceInsufficient'); // Inform Phaser specifically
+        EventBus.emit('phaserBalanceInsufficient');
         return;
     }
 
     isSpinning.value = true;
     clearErrorObject();
-    // Inform Phaser that spin is starting (e.g., for UI updates in Phaser)
     EventBus.emit('vueSpinInitiated', { betAmount });
 
     console.log(`Vue: Dispatching spin action with bet: ${betAmount}`);
     try {
-        // The Vuex 'spin' action makes the API call and updates user balance in store on success.
         const response = await store.dispatch('spin', { bet_amount: betAmount });
 
         if (response.status) {
-            // The Vuex action should have updated the user's balance.
-            // The API response (containing spin_result, win_amount etc.) is passed to Phaser.
-            // Phaser's GameScene should listen for an event like 'vueSpinResult' to start animations.
             EventBus.emit('vueSpinResult', response);
+
+            if (response.current_multiplier_level && slotGameJsonConfigContent.value?.game?.win_multipliers) {
+                const level = response.current_multiplier_level;
+                const multipliers = slotGameJsonConfigContent.value.game.win_multipliers;
+                if (level > 0 && multipliers && multipliers.length > 0) {
+                    currentMultiplierDisplay.value = multipliers[Math.min(level - 1, multipliers.length - 1)];
+                } else {
+                    currentMultiplierDisplay.value = 1;
+                }
+            } else {
+                currentMultiplierDisplay.value = 1;
+            }
         } else {
-            // Error from Vuex action (e.g., API error)
             errorObject.value = response;
-            EventBus.emit('spinError', { message: response.status_message || "Spin failed." }); // Inform Phaser
+            EventBus.emit('spinError', { message: response.status_message || "Spin failed." });
+            currentMultiplierDisplay.value = 1;
         }
     } catch (err) {
         console.error("Vue: Error during spin action dispatch:", err);
         const message = err.status_message || "An unexpected error occurred during spin.";
         errorObject.value = { status_message: message };
-        EventBus.emit('spinError', { message }); // Inform Phaser
+        EventBus.emit('spinError', { message });
+        currentMultiplierDisplay.value = 1;
     } finally {
         isSpinning.value = false;
-        // Inform Phaser spin has concluded (either success or fail)
         EventBus.emit('vueSpinConcluded');
     }
 };
@@ -344,7 +343,7 @@ const endGameSession = async () => {
       localStorage.removeItem(SESSION_STORAGE_KEY);
     } catch (err) {
       console.error("Failed to end game session:", err);
-      localStorage.removeItem(SESSION_STORAGE_KEY); // Still clear if API fails
+      localStorage.removeItem(SESSION_STORAGE_KEY);
     }
   }
 };
@@ -352,12 +351,13 @@ const endGameSession = async () => {
 onBeforeUnmount(async () => {
   console.log("Slot.vue: Cleaning up Phaser game instance and event listeners.");
 
-  // Remove Event Bus Listeners
   EventBus.off('phaserSpinResult', handlePhaserSpinResult);
   EventBus.off('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
   EventBus.off('phaserError', handlePhaserError);
   EventBus.off('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
   EventBus.off('spinCommand', handlePhaserSpinCommand);
+
+  currentMultiplierDisplay.value = 1; // Reset multiplier on unmount
 
   await endGameSession();
 
@@ -371,35 +371,29 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .slot-page {
-  /* Provides a background for the entire view */
 }
 
 .slot-container {
-  /* Styles for the container holding the Phaser canvas */
   width: 100%;
-  /* max-width: 820px; */ /* Let max-w-4xl handle width */
-  aspect-ratio: 4 / 3; /* Maintain aspect ratio, adjust as needed */
-  max-height: calc(100vh - 250px); /* Limit height on tall screens */
-  position: relative; /* Needed for absolute positioning of overlay */
+  aspect-ratio: 4 / 3;
+  max-height: calc(100vh - 250px);
+  position: relative;
 }
 
 #phaser-slot-machine {
-  /* Phaser canvas itself */
   width: 100%;
   height: 100%;
-  display: block; /* Remove extra space below canvas */
-  border-radius: inherit; /* Inherit parent's rounded corners */
+  display: block;
+  border-radius: inherit;
 }
 
-/* Loading Overlay Styles */
 .loading-overlay {
-  /* Styles already defined inline via Tailwind */
 }
 
 .loading-spinner {
   border-radius: 50%;
-  border: 4px solid rgba(255, 215, 0, 0.3); /* Gold transparent */
-  border-top-color: #FFD700; /* Gold */
+  border: 4px solid rgba(255, 215, 0, 0.3);
+  border-top-color: #FFD700;
   animation: spin 1s linear infinite;
 }
 
@@ -410,7 +404,5 @@ onBeforeUnmount(async () => {
 }
 
 .loading-message {
-  /* Styles defined inline */
 }
 </style>
-

@@ -51,6 +51,11 @@ export default class GameScene extends Phaser.Scene {
         maxRowsForSymbolMap: 3, // Max possible rows any reel can show + buffers
         currentActualMaxRows: 3 // Current max rows based on targetPanesPerReel or initial
     };
+
+    // Cascade feature properties
+    this.isCascadingSlot = false;
+    this.cascadeWinMultipliers = [];
+    this.currentCascadeMultiplierLevel = 0; // From backend response
   }
 
   // No preload here - assets are loaded in PreloadScene
@@ -66,9 +71,13 @@ export default class GameScene extends Phaser.Scene {
 
     if (!this.gameConfig || !this.slotId) {
         console.error("GameScene: Missing game configuration or Slot ID!");
-        EventBus.$emit('phaserError', 'Game initialization failed: Missing configuration.');
+        EventBus.emit('phaserError', 'Game initialization failed: Missing configuration.'); // Corrected EventBus call
         return;
     }
+
+    // Load cascade configurations from gameConfig
+    this.isCascadingSlot = this.gameConfig.game?.is_cascading || false;
+    this.cascadeWinMultipliers = this.gameConfig.game?.win_multipliers || [];
 
     // A.3: Game Type and Grid Configuration
     this.isMultiwayGame = (this.gameConfig.type === 'multiway');
@@ -130,6 +139,7 @@ export default class GameScene extends Phaser.Scene {
     // EventBus.$emit('phaserReady');
 
     EventBus.$on('bonusGameComplete', this.handleBonusComplete, this);
+    EventBus.on('vueSpinResult', this.handleSpinResult, this); // Listen for spin results from Vue
   }
 
   shutdown() {
@@ -137,6 +147,7 @@ export default class GameScene extends Phaser.Scene {
     EventBus.$off('turboSettingChanged');
     EventBus.$off('soundSettingChanged');
     EventBus.$off('bonusGameComplete', this.handleBonusComplete, this);
+    EventBus.off('vueSpinResult', this.handleSpinResult, this); // Unregister listener
 
     this.reels.forEach(reelSymbols => {
         reelSymbols.forEach(symbol => {
@@ -322,31 +333,44 @@ export default class GameScene extends Phaser.Scene {
 
  // --- Spin Logic ---
 
-  handleSpinResult(responseData) { // C
-      console.log('GameScene received spin result:', responseData);
-      this.lastSpinResponse = responseData;
+  handleSpinResult(responseData) {
+      console.log('GameScene received spin result from Vuex:', responseData);
+      this.lastSpinResponse = responseData; // Store the full response
+
+      // Extract data needed for animations and display
+      // Backend sends initial grid as 'spin_result'
+      const initialGrid = responseData.spin_result;
+      this.currentCascadeMultiplierLevel = responseData.current_multiplier_level || 0;
+
       let transposedTargetGrid;
 
-      if (this.isMultiwayGame) { // C.1
-          this.targetPanesPerReel = responseData.result.panes_per_reel; // result from API is spin_result_data.spin_result
-          this.gridConfig.currentActualMaxRows = Math.max(...this.targetPanesPerReel);
-          // Backend sends multiway as { "panes_per_reel": [...], "symbols_grid": [[col0_syms], [col1_syms],...] }
-          // symbols_grid is already effectively transposedTargetGrid
-          transposedTargetGrid = responseData.result.symbols_grid;
-      } else { // C.2
+      if (this.isMultiwayGame) {
+          // Assuming multiway structure within spin_result if applicable, or adjust as needed
+          // For now, let's assume 'initialGrid' is already correctly structured or needs similar processing
+          // This part might need specific adaptation if multiway slots also become cascading with varying panes
+          console.warn("Multiway cascading visuals might need specific handling for pane changes during cascades - not yet fully implemented.")
+          // Fallback to standard grid processing for now if structure is {spin_result: [[r,c]]}
+          this.targetPanesPerReel = Array(this.gridConfig.cols).fill(this.gridConfig.rows); // Default for now
+          const formattedGrid = this.formatSpinResult(initialGrid);
+          transposedTargetGrid = this.transposeMatrix(formattedGrid);
+      } else {
           this.targetPanesPerReel = Array(this.gridConfig.cols).fill(this.gridConfig.rows);
-          const formattedGrid = this.formatSpinResult(responseData.result); // Expects [rows][cols] from API's "result" field for standard
+          const formattedGrid = this.formatSpinResult(initialGrid);
           transposedTargetGrid = this.transposeMatrix(formattedGrid);
       }
 
-      this.startReelSpinAnimation(transposedTargetGrid); // C.3
+      // Reset multiplier display in UI at the start of a new spin animation sequence
+      EventBus.emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
+      this.startReelSpinAnimation(transposedTargetGrid);
   }
 
   startReelSpinAnimation(transposedTargetGrid) {
       if (this.isSpinning) return;
       this.isSpinning = true;
       this.clearWinAnimations();
-      EventBus.$emit('lineWinUpdate', { winAmount: 0, isScatter: false, ways: undefined });
+      EventBus.emit('lineWinUpdate', { winAmount: 0, isScatter: false, ways: undefined });
+      // Reset UI multiplier display via UIScene at the beginning of a new spin
+      EventBus.emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
       this.playSound(`${this.slotId}_spin_sound`); // Use slot-specific sound key
 
       const spinDuration = this.turboSpinEnabled ? REEL_SPIN_DURATION_TURBO : REEL_SPIN_DURATION_BASE;
@@ -487,37 +511,73 @@ export default class GameScene extends Phaser.Scene {
           }
       }
 
-      EventBus.$emit('spinAnimationComplete', this.lastSpinResponse); // Emit if bonus not triggered
+      EventBus.$emit('spinAnimationComplete', this.lastSpinResponse);
 
-      if (this.lastSpinResponse && this.lastSpinResponse.win_amount > 0 && this.lastSpinResponse.winning_lines) {
-          this.playSoundWin(this.lastSpinResponse.win_amount);
-          this.displayWinningLines(this.lastSpinResponse.winning_lines, this.lastSpinResponse.win_amount);
+      if (this.lastSpinResponse && this.lastSpinResponse.win_amount_sats > 0) { // Use win_amount_sats from response
+          this.playSoundWin(this.lastSpinResponse.win_amount_sats);
+          // Display initial winning lines. Winning_lines in response is from initial spin.
+          this.displayWinningLines(
+              this.lastSpinResponse.winning_lines || [],
+              this.lastSpinResponse.win_amount_sats,
+              this.currentCascadeMultiplierLevel, // Pass multiplier level
+              this.isCascadingSlot
+          );
       } else {
           // If no wins and no bonus, ensure UI is idle
-          EventBus.$emit('uiSetIdle');
+          EventBus.emit('uiSetIdle');
+          // Also ensure multiplier display is reset if it wasn't a win
+          EventBus.emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
       }
   }
 
-  displayWinningLines(winningLines, totalWinAmountSats) {
-      if (!winningLines || winningLines.length === 0) {
-           if (totalWinAmountSats > 0) {
+  displayWinningLines(winningLines, totalWinAmountSats, currentCascadeLevel, isCascading) {
+      // This function will now also handle updating the multiplier display after wins are shown.
+      const hasInitialWins = winningLines && winningLines.length > 0;
+
+      if (!hasInitialWins) {
+           if (totalWinAmountSats > 0) { // Win might come purely from cascades not reflected in initial winning_lines
                 this.showTotalWinAmount(totalWinAmountSats);
-                this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => this.clearWinAnimations());
+                // If it's a cascading slot and there was a total win, update multiplier display
+                if (isCascading) {
+                    EventBus.emit('uiUpdateMultiplier', { level: currentCascadeLevel, multipliersConfig: this.cascadeWinMultipliers });
+                }
+                this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
+                    this.clearWinAnimations();
+                    if (isCascading && totalWinAmountSats > 0) {
+                        // TODO: Here, ideally, we would show the final grid IF backend provided it.
+                        // For now, symbols that popped just remain empty or grid resets on next spin.
+                        // A quick "grid shimmer" or "cascade complete" effect could be added.
+                        this.playCascadeSettleEffect();
+                    }
+                });
+           } else {
+               EventBus.emit('uiSetIdle'); // No total win, ensure UI is idle
            }
           return;
       }
+
+      // Process initial winning lines
       let currentLineIndex = 0;
       const displayNextLine = () => {
-            this.clearWinAnimations(false);
-            if (currentLineIndex >= winningLines.length) {
+            this.clearWinAnimations(false); // Don't clear total win text yet
+            if (currentLineIndex >= winningLines.length) { // All initial lines shown
                  this.showTotalWinAmount(totalWinAmountSats);
+                 if (isCascading) { // If cascading, update multiplier display after initial lines
+                    EventBus.emit('uiUpdateMultiplier', { level: currentCascadeLevel, multipliersConfig: this.cascadeWinMultipliers });
+                 }
                  if (this.paylineTimer) this.paylineTimer.remove();
-                 this.paylineTimer = this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => this.clearWinAnimations());
+                 this.paylineTimer = this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
+                    this.clearWinAnimations(); // Clear everything including total win
+                     if (isCascading && totalWinAmountSats > 0) {
+                        // TODO: Animate final grid if available, or settle effect
+                        this.playCascadeSettleEffect();
+                    }
+                 });
                 return;
             }
-            const winData = winningLines[currentLineIndex]; // winData is the individual line/way/scatter object
-            this.highlightWin(winData);
-            this.showIndividualWinAmount(winData.win_amount_sats, winData); // Pass full winData
+            const winData = winningLines[currentLineIndex];
+            this.highlightWin(winData, true); // Pass true to pop symbols
+            this.showIndividualWinAmount(winData.win_amount_sats, winData);
             currentLineIndex++;
             if (this.paylineTimer) this.paylineTimer.remove();
             this.paylineTimer = this.time.delayedCall(PAYLINE_SHOW_DURATION, displayNextLine);
@@ -525,15 +585,15 @@ export default class GameScene extends Phaser.Scene {
         displayNextLine();
   }
 
-  highlightWin(winData) { // F
+  highlightWin(winData, shouldPopSymbols = false) {
     this.paylineGraphics.clear();
-    this.activeWinTweens.forEach(({symbol, tween}) => { // F.2 Reset existing
+    this.activeWinTweens.forEach(({symbol, tween}) => {
         if (tween && tween.isPlaying()) tween.stop();
-        if (symbol && symbol.active) symbol.setScale(1).setDepth(2);
+        if (symbol && symbol.active) symbol.setScale(1).setDepth(2).setVisible(true); // Ensure visible
     });
     this.activeWinTweens = [];
 
-    const animateSymbol = (col, row) => { // F.1 Helper
+    const animateSymbol = (col, row) => {
         const symbol = this.getSymbolAt(col, row);
         if (symbol && symbol.active) {
             symbol.setDepth(5);
@@ -546,7 +606,22 @@ export default class GameScene extends Phaser.Scene {
                 ease: 'Sine.easeInOut',
                 duration: SYMBOL_WIN_ANIM_DURATION,
                 yoyo: true,
-                repeat: -1,
+                repeat: shouldPopSymbols ? 1 : -1, // Repeat less if popping
+                onComplete: () => {
+                    if (shouldPopSymbols && symbol && symbol.active) {
+                        // Play pop / disappearance animation
+                        this.tweens.add({
+                            targets: symbol,
+                            alpha: 0,
+                            scale: 0.5,
+                            duration: 150,
+                            ease: 'Power2',
+                            onComplete: () => {
+                                if (symbol.active) symbol.setVisible(false); // Hide after pop
+                            }
+                        });
+                    }
+                }
             });
             this.activeWinTweens.push({ symbol, tween });
             const worldPos = this.getSymbolWorldPosition(col, row);
@@ -821,6 +896,13 @@ export default class GameScene extends Phaser.Scene {
     // Ensure isSpinning is false and UI controls are enabled
     this.isSpinning = false;
     // EventBus.$emit('enableSpinButton'); // Or let uiSetIdle handle this
+  }
+
+  playCascadeSettleEffect() {
+    // Placeholder for a visual effect when cascades are done and grid settles.
+    // Could be a brief shimmer, a sound, etc.
+    // For now, this does nothing, but hooks are in place.
+    console.log("GameScene: playCascadeSettleEffect (placeholder)");
   }
 
 }

@@ -89,6 +89,11 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         cfg_wild_symbol_id = game_config.get('game', {}).get('wild_symbol_id')
         cfg_scatter_symbol_id = game_config.get('game', {}).get('scatter_symbol_id')
         cfg_bonus_features = game_config.get('game', {}).get('bonus_features', {})
+        # New cascading configurations
+        cfg_is_cascading = game_config.get('game', {}).get('is_cascading', False)
+        cfg_cascade_type = game_config.get('game', {}).get('cascade_type', None) # e.g., "fall_from_top"
+        cfg_min_symbols_to_match = game_config.get('game', {}).get('min_symbols_to_match', None) # For cluster/match-N
+        cfg_win_multipliers = game_config.get('game', {}).get('win_multipliers', []) # For cascading wins e.g., [1,2,3,5]
 
         # --- Pre-Spin Validation ---
         if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
@@ -167,31 +172,109 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             bet_amount_sats, # This is the total bet for the spin
             cfg_wild_symbol_id,
             cfg_scatter_symbol_id,
-            cfg_bonus_features.get('free_spins', {}).get('multiplier', 1.0) if is_bonus_spin else 1.0
-            # Pass bet_amount_sats, num_paylines for per-line calculation
+            # Payouts from config, which might include cluster pays or specific scatter match rules
+            game_config.get('game', {}).get('payouts', []),
+            cfg_min_symbols_to_match # Pass this to calculate_win
+            # current_spin_multiplier is handled outside calculate_win now
         )
 
-        win_amount_sats = win_info['total_win_sats']
-        winning_lines = win_info['winning_lines']
+        # Initial win calculation results
+        initial_raw_win_sats = win_info['total_win_sats']
+        winning_lines = win_info['winning_lines'] # From initial spin
+        current_winning_coords = win_info['winning_symbol_coords'] # Coords from initial spin
 
-        # Apply current spin multiplier (e.g., from active free spins bonus)
-        # Note: win_info from calculate_win should be raw win, multiplier applied here or inside if it's complex
+        # Store initial grid for SlotSpin record
+        initial_spin_grid_for_record = [row[:] for row in spin_result_grid] # Deep copy
+
+        # Initialize total win & state for potential cascades
+        total_win_for_entire_spin_sequence_raw = initial_raw_win_sats # Accumulates RAW wins (base + cascades without cascade multipliers)
+                                                                # This will then be multiplied by bonus_spin_multiplier if applicable.
+                                                                # OR, this accumulates wins *with* cascade multipliers, then gets *bonus_spin_multiplier*.
+                                                                # Let's use: sum of (raw_win * cascade_level_multiplier)
+
+        # Let total_win_for_entire_spin_sequence represent the sum of:
+        # (initial_raw_win) + (cascade1_raw_win * mult1) + (cascade2_raw_win * mult2) ...
+        total_win_for_entire_spin_sequence = initial_raw_win_sats # Initial win has effective cascade multiplier of 1 or none.
+
+        current_grid_state = spin_result_grid # This grid will be modified in cascades
+        current_raw_win_for_cascade_loop = initial_raw_win_sats # Controls cascade loop continuation based on raw win of previous step
+
+        max_cascade_multiplier_level_achieved = 0 # For SlotSpin.current_multiplier_level (tracks highest cfg_win_multipliers index used +1)
+                                             # Or simply the highest multiplier value achieved. Let's use the level for now.
+
+        # --- Cascading Wins Logic ---
+        if cfg_is_cascading and initial_raw_win_sats > 0 and current_winning_coords:
+            cascade_level_counter = 0 # 0 means initial win, 1st cascade is level 1, etc.
+
+            while current_raw_win_for_cascade_loop > 0 and current_winning_coords:
+                # 1. Grid Update: Remove winning symbols, fill new ones
+                current_grid_state = handle_cascade_fill(
+                    current_grid_state,
+                    current_winning_coords, # Coords from the previous win calculation
+                    cfg_cascade_type,
+                    slot.symbols, # db_symbols
+                    cfg_symbols_map,
+                    cfg_wild_symbol_id,
+                    cfg_scatter_symbol_id
+                )
+
+                # 2. Recalculate Wins on the new grid
+                cascade_win_info = calculate_win(
+                    current_grid_state, # The newly formed grid
+                    cfg_paylines,
+                    cfg_symbols_map,
+                    bet_amount_sats, # Base bet amount for calculating wins
+                    cfg_wild_symbol_id,
+                    cfg_scatter_symbol_id,
+                    game_config.get('game', {}).get('payouts', []),
+                    cfg_min_symbols_to_match
+                )
+
+                new_raw_win_this_cascade = cascade_win_info['total_win_sats']
+                current_winning_coords = cascade_win_info['winning_symbol_coords'] # For the next iteration's fill
+
+                if new_raw_win_this_cascade > 0:
+                    cascade_level_counter += 1 # This is the 1st, 2nd, etc. cascade event
+
+                    current_cascade_multiplier = 1.0
+                    if cfg_win_multipliers: # Check if win_multipliers are defined and non-empty
+                        if cascade_level_counter -1 < len(cfg_win_multipliers): # cfg_win_multipliers is 0-indexed
+                            current_cascade_multiplier = cfg_win_multipliers[cascade_level_counter -1]
+                        elif cfg_win_multipliers: # Not empty, so use last available
+                            current_cascade_multiplier = cfg_win_multipliers[-1]
+
+                    if cascade_level_counter > max_cascade_multiplier_level_achieved: # Using counter as level proxy
+                        max_cascade_multiplier_level_achieved = cascade_level_counter
+
+                    # Add the (raw_win_from_this_cascade * its_cascade_multiplier) to the grand total
+                    total_win_for_entire_spin_sequence += int(new_raw_win_this_cascade * current_cascade_multiplier)
+
+                    current_raw_win_for_cascade_loop = new_raw_win_this_cascade # Keep loop going if there was a raw win
+
+                    # Accumulate winning_lines (optional, can make response large)
+                    # winning_lines.extend(cascade_win_info['winning_lines']) # Example if needed
+                else:
+                    current_raw_win_for_cascade_loop = 0 # No new raw win, so stop cascading
+                    current_winning_coords = [] # Clear coords
+            # End of cascade loop
+
+        # Now, total_win_for_entire_spin_sequence holds sum of (initial_raw + C1_raw*M1 + C2_raw*M2 ...)
+        # Apply overall bonus spin multiplier if applicable (e.g., from free spins feature)
+        final_win_amount_for_session_and_tx = total_win_for_entire_spin_sequence
         if is_bonus_spin and current_spin_multiplier > 1.0:
-            win_amount_sats = int(win_amount_sats * current_spin_multiplier)
-            # Update individual winning line amounts if necessary
-            for line in winning_lines:
-                if line.get('win_amount', 0) > 0 : # Check if 'win_amount' exists and is positive
-                    line['win_amount'] = int(line['win_amount'] * current_spin_multiplier)
-
+            final_win_amount_for_session_and_tx = int(total_win_for_entire_spin_sequence * current_spin_multiplier)
+            # Note: if winning_lines are accumulated, their individual win_amount_sats would also need scaling
+            # if a detailed breakdown of multiplied lines is required. Currently, `winning_lines` primarily reflects initial spin.
 
         # --- Check for Bonus Trigger (on non-bonus spins) ---
+        # Bonus trigger check should be based on the *initial* spin grid results.
         bonus_triggered_this_spin = False
         newly_awarded_spins = 0
         new_bonus_multiplier = 1.0
 
         if not is_bonus_spin: # Bonus can only be triggered on a normal spin
             bonus_trigger_info = check_bonus_trigger(
-                spin_result_grid,
+                initial_spin_grid_for_record, # Check on the initial grid
                 cfg_scatter_symbol_id,
                 cfg_bonus_features
             )
@@ -223,53 +306,76 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         # --- Update Session Aggregates ---
         game_session.num_spins += 1
         if not is_bonus_spin:
-            game_session.amount_wagered = (game_session.amount_wagered or 0) + actual_bet_this_spin # Ensure amount_wagered is not None
-        game_session.amount_won = (game_session.amount_won or 0) + win_amount_sats # Ensure amount_won is not None
+            game_session.amount_wagered = (game_session.amount_wagered or 0) + actual_bet_this_spin
+        # `game_session.amount_won` is updated with the final win amount from this spin.
+        # The previous logic added `win_amount_sats` (which was initial win pre-bonus mult).
+        # We need to correct this if it was already added, or ensure it's added correctly once.
+        # Assuming it was added: subtract old, add new.
+        # If it wasn't added yet by this point, just add new.
+        # The line `game_session.amount_won = (game_session.amount_won or 0) + win_amount_sats` was there.
+        # So, we subtract that `win_amount_sats` (which is `initial_raw_win_sats` potentially multiplied by bonus_multiplier)
+        # and add `final_win_amount_for_session_and_tx`.
+
+        # Correction: The `win_amount_sats` that was added to `game_session.amount_won`
+        # was the one *after* `if is_bonus_spin and current_spin_multiplier > 1.0:` block.
+        # This means it was `initial_raw_win_sats * current_spin_multiplier` if bonus, else `initial_raw_win_sats`.
+        # Let's denote this value as `previously_added_win_to_session`.
+        previously_added_win_to_session = initial_raw_win_sats
+        if is_bonus_spin and current_spin_multiplier > 1.0: # This replicates the original multiplication
+             previously_added_win_to_session = int(initial_raw_win_sats * current_spin_multiplier)
+
+        game_session.amount_won = (game_session.amount_won or 0) - previously_added_win_to_session + final_win_amount_for_session_and_tx
+
 
         # --- Update User Balance & Win Transaction ---
-        if win_amount_sats > 0:
-            user.balance += win_amount_sats
+        if final_win_amount_for_session_and_tx > 0:
+            user.balance += final_win_amount_for_session_and_tx # Add final total win to user balance
             win_tx = Transaction(
                 user_id=user.id,
-                amount=win_amount_sats,
-                transaction_type='win', # Ensure this matches model's transaction_type column name
-                details={'slot_name': slot.name, 'session_id': game_session.id}, # Using details field
-                # description=f'Slot win: {slot.name}', # Old description field
-                game_session_id=game_session.id # Retaining for now
+                amount=final_win_amount_for_session_and_tx,
+                transaction_type='win',
+                details={
+                    'slot_name': slot.name,
+                    'session_id': game_session.id,
+                    'is_cascade_win': cfg_is_cascading and max_cascade_multiplier_level_achieved > 0,
+                    'initial_win': initial_raw_win_sats,
+                    'total_cascade_win_multiplied': total_win_for_entire_spin_sequence - initial_raw_win_sats,
+                    'bonus_spin_multiplier_applied': current_spin_multiplier if is_bonus_spin else 1.0
+                },
+                game_session_id=game_session.id
             )
             db.session.add(win_tx)
-            # game_session.transactions.append(win_tx)
+            # game_session.transactions.append(win_tx) # If using relationship for this
 
         # --- Create Spin Record ---
-        # Ensure spin_result_grid is JSON serializable (list of lists of ints)
         new_spin = SlotSpin(
             game_session_id=game_session.id,
-            spin_result=spin_result_grid, # Should be [[int, ...], ...]
-            win_amount=win_amount_sats,
+            spin_result=initial_spin_grid_for_record, # Record the initial grid
+            win_amount=final_win_amount_for_session_and_tx, # Total win from initial + all cascades (with all multipliers)
             bet_amount=actual_bet_this_spin,
             is_bonus_spin=is_bonus_spin,
-            spin_time=datetime.now(timezone.utc)
-            # multiplier_used field doesn't exist on SlotSpin model in provided models.py
-            # multiplier_used=current_spin_multiplier if is_bonus_spin else 1.0
+            spin_time=datetime.now(timezone.utc),
+            current_multiplier_level=max_cascade_multiplier_level_achieved # Store max cascade level reached
         )
         db.session.add(new_spin)
         # Crucially, flush here to get new_spin.id before assigning to transactions
         db.session.flush()
 
         # Link transactions to this spin
-        if not is_bonus_spin and wager_tx: # wager_tx is defined in this scope
+        if not is_bonus_spin and 'wager_tx' in locals() and wager_tx: # Ensure wager_tx exists
             wager_tx.slot_spin_id = new_spin.id
-            wager_tx.details['slot_spin_id'] = new_spin.id # Also add to details for easier querying if needed
-        if win_amount_sats > 0 and win_tx: # win_tx is defined in this scope
+            wager_tx.details['slot_spin_id'] = new_spin.id
+        if final_win_amount_for_session_and_tx > 0 and 'win_tx' in locals() and win_tx: # Ensure win_tx exists
             win_tx.slot_spin_id = new_spin.id
-            win_tx.details['slot_spin_id'] = new_spin.id # Also add to details
+            win_tx.details['slot_spin_id'] = new_spin.id
 
         # --- Return Results ---
         # Ensure all satoshi amounts are integers
         return {
-            "spin_result": spin_result_grid,
-            "win_amount_sats": int(win_amount_sats),
-            "winning_lines": winning_lines, # Ensure this is serializable
+            "spin_result": initial_spin_grid_for_record, # Return the initial grid state
+            "win_amount_sats": int(final_win_amount_for_session_and_tx),
+            "winning_lines": winning_lines, # This currently holds results from the *initial* spin.
+                                            # For a full breakdown, this would need to be an accumulation if cascades add more lines.
             "bonus_triggered": bonus_triggered_this_spin,
             "bonus_active": game_session.bonus_active,
             "bonus_spins_remaining": game_session.bonus_spins_remaining if game_session.bonus_active else 0,
@@ -419,9 +525,12 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
     `total_bet_sats` is the total amount bet for the entire spin.
     `wild_symbol_id` is the internal ID from config.
     `scatter_symbol_id` is the internal ID from config.
+    `config_payouts` is the general "payouts" list from game_config, potentially for match-N logic.
+    `min_symbols_to_match` is for match-N or cluster logic.
     """
     total_win_sats = 0
     winning_lines_data = [] # Store detailed info about each win
+    all_winning_symbol_coords = set() # Using a set to store unique [r,c] tuples for removal
     num_rows = len(grid)
     num_cols = len(grid[0]) if num_rows > 0 else 0
 
@@ -532,8 +641,11 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
                     "positions": winning_symbol_positions, # List of [r,c] coordinates
                     "win_amount_sats": line_win_sats
                 })
+                for pos in winning_symbol_positions:
+                    all_winning_symbol_coords.add(tuple(pos))
 
     # --- Scatter Wins ---
+    # (This part remains largely the same but contributes to all_winning_symbol_coords)
     scatter_positions_on_grid = []
     scatter_count_on_grid = 0
     if scatter_symbol_id is not None: # Check if a scatter symbol is configured
@@ -560,11 +672,216 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
                 "positions": scatter_positions_on_grid,
                 "win_amount_sats": scatter_win_sats
             })
+            for pos in scatter_positions_on_grid: # Add scatter symbol positions for removal
+                all_winning_symbol_coords.add(tuple(pos))
+
+    # --- TODO: Implement "Match N" / Cluster Pays Logic ---
+    # If cfg_min_symbols_to_match is not None:
+    #   1. Count all symbol occurrences on the grid.
+    #   2. For symbols meeting cfg_min_symbols_to_match:
+    #      a. Find their positions.
+    #      b. Calculate win based on cfg_payouts (needs a specific structure for this type of win).
+    #      c. Add to total_win_sats, winning_lines_data, and all_winning_symbol_coords.
+    # This section will be complex and require careful handling of payout definitions.
+    # For now, this placeholder indicates where it would go.
+
+    # --- "Match N" / Cluster Pays Logic ---
+    if min_symbols_to_match is not None and min_symbols_to_match > 0:
+        symbol_counts = {}
+        symbol_positions_map = {} # Stores list of positions for each symbol_id
+
+        for r, row_data in enumerate(grid):
+            for c, symbol_id in enumerate(row_data):
+                if symbol_id is None: continue # Skip empty or already cleared spots
+
+                # Exclude scatter from general cluster matching if it has its own dedicated logic
+                # Or, allow scatter to also form clusters if desired by game design.
+                # For now, let's assume scatters are handled separately unless explicitly part of cluster rules.
+                # if symbol_id == scatter_symbol_id: continue
+
+                symbol_counts[symbol_id] = symbol_counts.get(symbol_id, 0) + 1
+                if symbol_id not in symbol_positions_map:
+                    symbol_positions_map[symbol_id] = []
+                symbol_positions_map[symbol_id].append([r, c])
+
+        for symbol_id, count in symbol_counts.items():
+            if count >= min_symbols_to_match:
+                # This symbol forms a "match N" win.
+                # Find its payout from `config_payouts`.
+                # `config_payouts` is a list of dicts. We need to find the relevant one.
+                # Example structure for a cluster payout entry in `config_payouts`:
+                # { "type": "cluster", "symbol_id": <ID>, "matches": <N>, "multiplier": <X_per_symbol_or_fixed> }
+                # Or payouts might be within the symbol definition in `config_symbols_map`
+                # e.g. config_symbols_map[symbol_id].get('cluster_payouts', {}).get(str(count))
+
+                payout_value_for_cluster = 0
+                # Attempt 1: Look in symbol's own config for cluster payouts
+                symbol_config_data = config_symbols_map.get(symbol_id, {})
+                cluster_payout_rules = symbol_config_data.get('cluster_payouts') # e.g. {"8": 100, "9": 150}
+                if cluster_payout_rules:
+                    payout_value_for_cluster = cluster_payout_rules.get(str(count), 0.0)
+                    # If payout_value_for_cluster is per-symbol, multiply by count. If fixed, use as is.
+                    # Assume for now it's a fixed multiplier for that count for simplicity.
+
+                # Attempt 2: Fallback or alternative - search generic `config_payouts` list
+                # This is less direct. The gameConfig structure needs to be clear.
+                # if not payout_value_for_cluster:
+                #     for payout_rule in config_payouts:
+                #         if payout_rule.get("type") == "cluster" and \
+                #            payout_rule.get("symbol_id") == symbol_id and \
+                #            payout_rule.get("matches") == count:
+                #             payout_value_for_cluster = payout_rule.get("multiplier", 0.0)
+                #             break
+
+                if payout_value_for_cluster > 0:
+                    # Cluster win amount calculation.
+                    # This could be bet_amount * multiplier, or bet_per_unit * count * multiplier etc.
+                    # Let's assume it's similar to scatter: total_bet_sats * cluster_multiplier
+                    # Or, if the game design implies a "bet per symbol" or "bet per block" concept,
+                    # the `total_bet_sats` might need to be divided or used differently.
+                    # For now, using `total_bet_sats * payout_value_for_cluster` for simplicity.
+                    # This part is highly dependent on game design for cluster pays.
+                    cluster_win_sats_this_group = int(total_bet_sats * payout_value_for_cluster)
+
+                    if cluster_win_sats_this_group > 0:
+                        total_win_sats += cluster_win_sats_this_group
+                        winning_coords_for_this_cluster = symbol_positions_map[symbol_id]
+
+                        winning_lines_data.append({
+                            "line_id": f"cluster_{symbol_id}_{count}", # Unique ID for this win type
+                            "symbol_id": symbol_id,
+                            "count": count,
+                            "positions": winning_coords_for_this_cluster,
+                            "win_amount_sats": cluster_win_sats_this_group,
+                            "type": "cluster"
+                        })
+                        for pos in winning_coords_for_this_cluster:
+                            all_winning_symbol_coords.add(tuple(pos))
 
     return {
         "total_win_sats": total_win_sats, # Raw total, multiplier applied in main handle_spin
-        "winning_lines": winning_lines_data
+        "winning_lines": winning_lines_data,
+        "winning_symbol_coords": [list(coords) for coords in all_winning_symbol_coords] # Convert tuples back to lists
     }
+
+# --- Cascade Logic Helper ---
+def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_symbols, config_symbols_map, wild_symbol_config_id, scatter_symbol_config_id):
+    """
+    Handles the filling of the grid after winning symbols are removed in a cascade.
+
+    Args:
+        current_grid (list[list[int]]): The current state of the slot grid.
+        winning_coords_to_clear (list[list[int]]): List of [row, col] of symbols to remove.
+        cascade_type (str): How new symbols are introduced (e.g., "fall_from_top", "replace_in_place").
+        db_symbols (list): List of SlotSymbol ORM objects for the slot (used by generate_spin_grid).
+        config_symbols_map (dict): Map of symbol configurations from gameConfig.json.
+        wild_symbol_config_id (int): ID of the wild symbol.
+        scatter_symbol_config_id (int): ID of the scatter symbol.
+
+    Returns:
+        list[list[int]]: The new grid after clearing winning symbols and filling empty spaces.
+    """
+    if not current_grid:
+        return []
+
+    rows = len(current_grid)
+    cols = len(current_grid[0])
+    new_grid = [row[:] for row in current_grid] # Create a mutable copy
+
+    # Mark winning symbols for removal (e.g., replace with a temporary marker like None)
+    for r, c in winning_coords_to_clear:
+        if 0 <= r < rows and 0 <= c < cols:
+            new_grid[r][c] = None # Mark as empty
+
+    if cascade_type == "fall_from_top":
+        for c in range(cols):
+            empty_slots_in_col = 0
+            # Move non-empty symbols down
+            for r in range(rows - 1, -1, -1): # Iterate from bottom to top of column
+                if new_grid[r][c] is None:
+                    empty_slots_in_col += 1
+                elif empty_slots_in_col > 0:
+                    # Shift symbol down
+                    new_grid[r + empty_slots_in_col][c] = new_grid[r][c]
+                    new_grid[r][c] = None # Mark original position as empty
+
+            # Fill empty slots at the top with new random symbols
+            if empty_slots_in_col > 0:
+                # Generate a small grid (column strip) of new symbols
+                # For simplicity, generate one by one, though generate_spin_grid could be adapted
+                # to generate a partial grid or a column if needed.
+                # Here, we generate individual symbols for the top of the column.
+
+                # Get weighted symbols for generation (similar to generate_spin_grid)
+                spinable_symbol_ids = [s_id for s_id in config_symbols_map.keys() if s_id in [s.symbol_internal_id for s in db_symbols]]
+                if not spinable_symbol_ids: # Should not happen if initial grid generation worked
+                    raise ValueError("No spinable symbols for cascade fill.")
+
+                weights = []
+                symbols_for_choice = []
+                for s_id in spinable_symbol_ids:
+                    symbol_config = config_symbols_map.get(s_id)
+                    if symbol_config:
+                        is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
+                        is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
+                        if is_wild: weights.append(symbol_config.get('weight', 0.5))
+                        elif is_scatter: weights.append(symbol_config.get('weight', 0.4)) # Scatters might appear less often in cascades
+                        else: weights.append(symbol_config.get('weight', 1.0))
+                        symbols_for_choice.append(s_id)
+
+                total_weight = sum(weights)
+                if total_weight == 0 or not symbols_for_choice:
+                    if not symbols_for_choice: symbols_for_choice = spinable_symbol_ids
+                    weights = [1.0 / len(symbols_for_choice) if symbols_for_choice else 1.0] * len(symbols_for_choice)
+                else:
+                    weights = [w / total_weight for w in weights]
+
+                secure_random = secrets.SystemRandom()
+                for r_fill in range(empty_slots_in_col):
+                    if symbols_for_choice: # Ensure there are symbols to choose from
+                        new_grid[r_fill][c] = secure_random.choices(symbols_for_choice, weights=weights, k=1)[0]
+                    else: # Fallback if no symbols somehow (should be caught earlier)
+                        new_grid[r_fill][c] = spinable_symbol_ids[0] if spinable_symbol_ids else 0 # Default to 0 or first available
+
+    elif cascade_type == "replace_in_place":
+        # Similar symbol generation logic as above, but directly into winning_coords_to_clear
+        spinable_symbol_ids = [s_id for s_id in config_symbols_map.keys() if s_id in [s.symbol_internal_id for s in db_symbols]]
+        if not spinable_symbol_ids:
+            raise ValueError("No spinable symbols for cascade fill (replace_in_place).")
+
+        weights = []
+        symbols_for_choice = []
+        for s_id in spinable_symbol_ids:
+            symbol_config = config_symbols_map.get(s_id)
+            if symbol_config:
+                is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
+                is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
+                if is_wild: weights.append(symbol_config.get('weight', 0.5))
+                elif is_scatter: weights.append(symbol_config.get('weight', 0.4))
+                else: weights.append(symbol_config.get('weight', 1.0))
+                symbols_for_choice.append(s_id)
+
+        total_weight = sum(weights)
+        if total_weight == 0 or not symbols_for_choice:
+            if not symbols_for_choice: symbols_for_choice = spinable_symbol_ids
+            weights = [1.0 / len(symbols_for_choice) if symbols_for_choice else 1.0] * len(symbols_for_choice)
+        else:
+            weights = [w / total_weight for w in weights]
+
+        secure_random = secrets.SystemRandom()
+        for r, c in winning_coords_to_clear: # Iterate through the specific empty slots
+            if symbols_for_choice:
+                new_grid[r][c] = secure_random.choices(symbols_for_choice, weights=weights, k=1)[0]
+            else:
+                new_grid[r][c] = spinable_symbol_ids[0] if spinable_symbol_ids else 0
+    else:
+        # If cascade_type is unknown or None, or not implemented, just return grid with empty spaces
+        # Or, could raise an error if an unsupported cascade_type is specified.
+        # For now, returning grid with None values where symbols were cleared.
+        # The game logic would then stop cascading if it encounters these.
+        print(f"Warning: Unknown or unimplemented cascade_type: {cascade_type}. Returning grid with removed symbols only.")
+
+    return new_grid
 
 
 def check_bonus_trigger(grid, scatter_symbol_id, config_bonus_features):
