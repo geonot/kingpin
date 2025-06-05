@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone
 from passlib.hash import pbkdf2_sha256 as sha256
+from decimal import Decimal
 from sqlalchemy import BigInteger, Index, JSON, UniqueConstraint
 
 db = SQLAlchemy()
@@ -19,9 +20,13 @@ class User(db.Model):
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     # Relationships
-    game_sessions = db.relationship('GameSession', backref='user', lazy=True)
+    game_sessions = db.relationship('GameSession', back_populates='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
-    blackjack_hands = db.relationship('BlackjackHand', backref='user', lazy=True)
+    blackjack_hands = db.relationship('BlackjackHand', back_populates='user', lazy=True)
+    user_bonuses = db.relationship('UserBonus', back_populates='user', lazy=True)
+    spacecrash_bets = db.relationship('SpacecrashBet', back_populates='user', lazy='dynamic')
+    poker_states = db.relationship('PokerPlayerState', back_populates='user', lazy='dynamic')
+    plinko_drops = db.relationship('PlinkoDropLog', back_populates='user', lazy=True)
 
     def check_password(self, password):
         return sha256.verify(password, self.password)
@@ -54,7 +59,7 @@ class GameSession(db.Model):
     session_start = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     session_end = db.Column(db.DateTime(timezone=True), nullable=True)
 
-    user = db.relationship('User', backref='game_sessions')
+    user = db.relationship('User', back_populates='game_sessions')
     slot = db.relationship('Slot', backref='game_sessions')
     blackjack_table = db.relationship('BlackjackTable', backref='game_sessions')
     poker_table = db.relationship('PokerTable', backref='game_sessions')
@@ -94,6 +99,8 @@ class Transaction(db.Model):
     slot_spin = db.relationship('SlotSpin', backref=db.backref('transactions', lazy='dynamic'))
     blackjack_hand = db.relationship('BlackjackHand', backref=db.backref('transactions', lazy='dynamic'))
     plinko_drop_log = db.relationship('PlinkoDropLog', backref=db.backref('transactions', lazy='dynamic'))
+    poker_hand_id = db.Column(db.Integer, db.ForeignKey('poker_hand.id'), nullable=True, index=True)
+    poker_hand = db.relationship('PokerHand', backref=db.backref('transactions', lazy='dynamic'))
 
     def __repr__(self):
         return f"<Transaction {self.id} (User: {self.user_id}, Type: {self.transaction_type}, Amount: {self.amount})>"
@@ -213,7 +220,7 @@ class BlackjackHand(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
-    user = db.relationship('User', backref='blackjack_hands')
+    user = db.relationship('User', back_populates='blackjack_hands')
     session = db.relationship('GameSession', backref='blackjack_hands')
     actions = db.relationship('BlackjackAction', backref='hand', lazy='dynamic')
 
@@ -249,7 +256,7 @@ class UserBonus(db.Model):
     cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     bonus_code = db.relationship('BonusCode', backref='user_bonuses')
-    user = db.relationship('User', backref='user_bonuses')
+    user = db.relationship('User', back_populates='user_bonuses') # Assuming User.user_bonuses will be defined or this is the primary def
 
     __table_args__ = (Index('ix_user_bonus_user_id_active', 'user_id', 'is_active'),)
 
@@ -287,7 +294,7 @@ class SpacecrashBet(db.Model):
     status = db.Column(db.String(50), nullable=False, default='placed', index=True)
     placed_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
-    user = db.relationship('User', backref=db.backref('spacecrash_bets', lazy='dynamic'))
+    user = db.relationship('User', back_populates='spacecrash_bets') # Assuming User.spacecrash_bets will be defined
 
     def __repr__(self):
         return f"<SpacecrashBet {self.id} (User: {self.user_id}, Game: {self.game_id}, Bet: {self.bet_amount}, Status: {self.status})>"
@@ -331,6 +338,8 @@ class PokerHand(db.Model):
     start_time = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     end_time = db.Column(db.DateTime(timezone=True), nullable=True)
     winners = db.Column(JSON, nullable=True) # JSON field to store winner(s) info
+    status = db.Column(db.String(50), nullable=False, default='pending_start', index=True)
+    deck_state = db.Column(db.JSON, nullable=True)
 
     # Fields for tracking betting state within a hand
     current_turn_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -363,7 +372,7 @@ class PokerPlayerState(db.Model):
     joined_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
-    user = db.relationship('User', backref='poker_states')
+    user = db.relationship('User', back_populates='poker_states') # Assuming User.poker_states will be defined
 
     __table_args__ = (
         UniqueConstraint('user_id', 'table_id', name='uq_user_table'),
@@ -387,7 +396,7 @@ class PlinkoDropLog(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', backref='plinko_drops')
+    user = db.relationship('User', back_populates='plinko_drops') # Assuming User.plinko_drops will be defined
 
 class TokenBlacklist(db.Model):
     __tablename__ = 'token_blacklist'

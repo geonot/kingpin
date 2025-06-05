@@ -1,6 +1,6 @@
 import random
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal # For precise monetary calculations
 
 # treys library for hand evaluation
@@ -17,6 +17,8 @@ from casino_be.models import db, User, PokerTable, PokerHand, PokerPlayerState, 
 # Card Constants
 SUITS = ['H', 'D', 'C', 'S']  # Hearts, Diamonds, Clubs, Spades
 RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
+
+POKER_ACTION_TIMEOUT_SECONDS = 60
 
 # --- Game Setup Functions ---
 
@@ -288,6 +290,8 @@ def start_new_hand(table_id: int):
     initial_deck = _create_deck()
     _shuffle_deck(initial_deck)
     new_hand.deck_state = initial_deck # Store the shuffled deck with the hand
+    new_hand.status = 'preflop' # <<< SETTING HAND STATUS
+    session.add(new_hand) # Ensure status is staged
 
     # 6. Deal Hole Cards (to all players marked active_in_hand, which are eligible_players_for_hand)
     # deal_hole_cards will now use and update new_hand.deck_state
@@ -317,12 +321,9 @@ def start_new_hand(table_id: int):
     })
 
     # Set turn_starts_at for the first player to act
-    # Conceptual: Assumes PokerPlayerState has a 'turn_starts_at' field (db.Column(db.DateTime, nullable=True))
-    if first_to_act_player and hasattr(first_to_act_player, 'turn_starts_at'):
-        first_to_act_player.turn_starts_at = datetime.now(timezone.utc)
+    if first_to_act_player:
+        first_to_act_player.time_to_act_ends = datetime.now(timezone.utc) + timedelta(seconds=POKER_ACTION_TIMEOUT_SECONDS)
         session.add(first_to_act_player)
-    elif first_to_act_player: # Defensive check if attribute exists
-        print(f"Warning: PlayerState for user {first_to_act_player.user_id} does not have 'turn_starts_at' attribute.")
     
     # Final commit for PokerTable, PokerPlayerStates (stacks, actions), new PokerHand, Transactions
     try:
@@ -522,6 +523,10 @@ def handle_fold(user_id: int, table_id: int, hand_id: int):
 
     if not player_state:
         return {"error": f"Player {user_id} not found at table {table_id}."}
+
+    player_state.time_to_act_ends = None # Clear timer as player is acting
+    session.add(player_state)
+
     if not poker_hand:
         return {"error": f"Hand {hand_id} not found."}
     
@@ -572,6 +577,9 @@ def handle_check(user_id: int, table_id: int, hand_id: int):
 
     if not player_state:
         return {"error": f"Player {user_id} not found at table {table_id}."}
+
+    player_state.time_to_act_ends = None # Clear timer as player is acting
+    session.add(player_state)
     if not poker_hand:
         return {"error": f"Hand {hand_id} not found."}
 
@@ -649,6 +657,9 @@ def handle_call(user_id: int, table_id: int, hand_id: int):
     if not user: # Should not happen if player_state exists
         return {"error": f"User {user_id} not found."}
 
+    player_state.time_to_act_ends = None # Clear timer as player is acting
+    session.add(player_state)
+
     # TODO: Add check if it's actually the player's turn. (Handled by caller or game flow manager)
 
     if not player_state.is_active_in_hand:
@@ -700,8 +711,8 @@ def handle_call(user_id: int, table_id: int, hand_id: int):
             "amount": actual_call_amount,
             "current_bet_to_match": current_bet_to_match,
             "player_invested_this_street_before_call": player_invested_this_street
-        }
-        # poker_hand_id=hand_id # If Transaction model has this foreign key
+        },
+        poker_hand_id=hand_id
     )
 
     # --- Hand History ---
@@ -756,6 +767,9 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
         return {"error": f"User {user_id} not found."}
     if not poker_table:
         return {"error": f"Table {table_id} not found."}
+
+    player_state.time_to_act_ends = None # Clear timer as player is acting
+    session.add(player_state)
 
     # TODO: Add check if it's actually the player's turn.
 
@@ -839,8 +853,8 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
             "table_id": table_id,
             "action": action_string,
             "amount": actual_bet_amount_put_in_pot
-        }
-        # poker_hand_id=hand_id # If Transaction model has this foreign key
+        },
+        poker_hand_id=hand_id
     )
 
     # --- Hand History ---
@@ -894,6 +908,9 @@ def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
         return {"error": f"User {user_id} not found."}
     if not poker_table:
         return {"error": f"Table {table_id} not found."}
+
+    player_state.time_to_act_ends = None # Clear timer as player is acting
+    session.add(player_state)
 
     # TODO: Add check if it's actually the player's turn.
 
@@ -982,7 +999,8 @@ def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
             "action": action_string,
             "raised_to_amount": final_player_investment_this_street, # Total investment this street
             "amount_added_to_pot": actual_amount_added_to_pot
-        }
+        },
+        poker_hand_id=hand_id
     )
 
     # --- Hand History ---
@@ -1543,7 +1561,8 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
                         "num_winners_for_this_pot": num_winners_this_pot,
                         "winning_hand": winner_detail.get("winning_hand", "Unknown"),
                         "board_cards": poker_hand.board_cards
-                    }
+                    },
+                    poker_hand_id=poker_hand.id
                 )
                 session.add(transaction)
 
@@ -1710,17 +1729,17 @@ def _advance_to_next_street(hand_id: int, session: Session) -> dict:
     if num_board_cards == 0: # Pre-flop -> Flop
         next_street_name = "flop"
         cards_to_deal_count = 3
-        poker_hand.status = "flop"
+        poker_hand.status = "flop" # <<< SETTING HAND STATUS
     elif num_board_cards == 3: # Flop -> Turn
         next_street_name = "turn"
         cards_to_deal_count = 1
-        poker_hand.status = "turn"
+        poker_hand.status = "turn" # <<< SETTING HAND STATUS
     elif num_board_cards == 4: # Turn -> River
         next_street_name = "river"
         cards_to_deal_count = 1
-        poker_hand.status = "river"
+        poker_hand.status = "river" # <<< SETTING HAND STATUS
     elif num_board_cards == 5: # River -> Showdown
-        poker_hand.status = "showdown"
+        poker_hand.status = "showdown" # <<< SETTING HAND STATUS
         poker_hand.current_turn_user_id = None # No more betting turns
         poker_hand.hand_history.append({
             "action": "proceed_to_showdown",
@@ -1769,7 +1788,7 @@ def _advance_to_next_street(hand_id: int, session: Session) -> dict:
         # This implies everyone else is all-in or folded. The hand might go to showdown directly.
         # This should be caught by logic that calls _advance_to_next_street.
         # If it reaches here, it's likely an early showdown or hand completion.
-        poker_hand.status = "showdown" # Or "completed" if only one player remains effectively
+        poker_hand.status = "showdown" # <<< SETTING HAND STATUS (all-in or one left)
         poker_hand.current_turn_user_id = None
         poker_hand.hand_history.append({
             "action": "all_remaining_players_all_in_or_one_left_post_street_deal",
@@ -1809,12 +1828,8 @@ def _advance_to_next_street(hand_id: int, session: Session) -> dict:
     if first_to_act_postflop:
         poker_hand.current_turn_user_id = first_to_act_postflop.user_id
         # Set turn_starts_at for the first player of the new street
-        # Conceptual: Assumes PokerPlayerState has 'turn_starts_at'
-        if hasattr(first_to_act_postflop, 'turn_starts_at'):
-            first_to_act_postflop.turn_starts_at = datetime.now(timezone.utc)
-            session.add(first_to_act_postflop)
-        else:
-            print(f"Warning: PlayerState for user {first_to_act_postflop.user_id} does not have 'turn_starts_at' attribute in _advance_to_next_street.")
+        first_to_act_postflop.time_to_act_ends = datetime.now(timezone.utc) + timedelta(seconds=POKER_ACTION_TIMEOUT_SECONDS)
+        session.add(first_to_act_postflop)
 
         poker_hand.hand_history.append({
             "action": "set_next_to_act",
@@ -1874,10 +1889,9 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
     active_players_still_in_hand = [ps for ps in all_player_states_in_hand if ps.is_active_in_hand]
 
     # Clear timer for the player who just acted (last_actor_user_id)
-    # Conceptual: Assumes PokerPlayerState has 'turn_starts_at'
     last_actor_ps = session.query(PokerPlayerState).filter_by(user_id=last_actor_user_id, table_id=poker_hand.table_id).first()
-    if last_actor_ps and hasattr(last_actor_ps, 'turn_starts_at'):
-        last_actor_ps.turn_starts_at = None
+    if last_actor_ps:
+        last_actor_ps.time_to_act_ends = None
         session.add(last_actor_ps)
 
     # 1. Check for Hand End by Folds
@@ -1885,21 +1899,51 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
         winner_user_id = active_players_still_in_hand[0].user_id if active_players_still_in_hand else None
 
         # Ensure any other potentially active timer is cleared
-        if poker_hand.current_turn_user_id and poker_hand.current_turn_user_id != last_actor_user_id:
-            # This case should be rare if current_turn_user_id was last_actor_user_id
+        if poker_hand.current_turn_user_id and poker_hand.current_turn_user_id != last_actor_user_id: # If current turn was not the one who folded to end hand
             other_ps_to_clear = session.query(PokerPlayerState).filter_by(user_id=poker_hand.current_turn_user_id, table_id=poker_hand.table_id).first()
-            if other_ps_to_clear and hasattr(other_ps_to_clear, 'turn_starts_at'):
-                other_ps_to_clear.turn_starts_at = None
+            if other_ps_to_clear:
+                other_ps_to_clear.time_to_act_ends = None
                 session.add(other_ps_to_clear)
 
-        poker_hand.status = 'completed'
-        poker_hand.current_turn_user_id = None
+        poker_hand.current_turn_user_id = None # Hand is over, no one's turn
+        # poker_hand.status = 'completed' is set below within the if winner_user_id block or if no winner (already done)
         # _distribute_pot needs a list of PokerPlayerState objects for showdown.
         # If one player wins by folds, they are the only one.
         # Ensure total_invested_this_hand is set on these player_state objects for _distribute_pot.
         # This part might need adjustment based on how _distribute_pot expects its input for fold scenarios.
         if winner_user_id:
-             _distribute_pot(poker_hand, active_players_still_in_hand) # Assuming _distribute_pot can handle this
+             # Pot is awarded to the winner without showdown
+             winner_player_state = active_players_still_in_hand[0]
+             winner_user = session.query(User).get(winner_user_id)
+
+             # Create transaction for the pot won
+             win_transaction = Transaction(
+                 user_id=winner_user_id,
+                 amount=poker_hand.pot_size_sats, # Winner gets the whole pot
+                 transaction_type='poker_win',
+                 status='completed',
+                 poker_hand_id=poker_hand.id,
+                 details={
+                     "hand_id": poker_hand.id,
+                     "table_id": poker_hand.table_id,
+                     "reason": "Opponents folded",
+                     "pot_won": poker_hand.pot_size_sats
+                 }
+             )
+             session.add(win_transaction)
+
+             # Update winner's stack in PokerPlayerState
+             winner_player_state.stack_sats += poker_hand.pot_size_sats
+             session.add(winner_player_state)
+
+             poker_hand.winners = [{ # Record winner info
+                 "user_id": winner_user_id,
+                 "username": winner_user.username if winner_user else "Unknown",
+                 "amount_won": poker_hand.pot_size_sats,
+                 "reason": "Opponents folded"
+             }]
+             poker_hand.status = 'completed' # <<< SETTING HAND STATUS
+             poker_hand.end_time = datetime.now(timezone.utc)
              poker_hand.hand_history.append({
                 "action": "hand_completed_by_folds",
                 "winner_user_id": winner_user_id,
@@ -1956,12 +2000,12 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
             # After all streets, it should be showdown
             if poker_hand.status != 'showdown': poker_hand.status = 'showdown' # Force if not set by advance
 
-            # Clear timer for the current_turn_user_id if it was set (now effectively null as it's all-in)
+            # Clear timer for the current_turn_user_id if it was set (now effectively null as it's all-in showdown)
             if poker_hand.current_turn_user_id:
-                 prev_turn_ps_all_in = session.query(PokerPlayerState).filter_by(user_id=poker_hand.current_turn_user_id, table_id=poker_hand.table_id).first()
-                 if prev_turn_ps_all_in and hasattr(prev_turn_ps_all_in, 'turn_starts_at'):
-                     prev_turn_ps_all_in.turn_starts_at = None
-                     session.add(prev_turn_ps_all_in)
+                 current_turn_player_state = session.query(PokerPlayerState).filter_by(user_id=poker_hand.current_turn_user_id, table_id=poker_hand.table_id).first()
+                 if current_turn_player_state:
+                     current_turn_player_state.time_to_act_ends = None
+                     session.add(current_turn_player_state)
 
             poker_hand.current_turn_user_id = None # No more turns
             poker_hand.hand_history.append({"action": "all_in_proceed_to_showdown", "timestamp": datetime.now(timezone.utc).isoformat()})
@@ -2035,12 +2079,8 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
         })
 
         # Set turn_starts_at for the next player
-        # Conceptual: Assumes PokerPlayerState has 'turn_starts_at'
-        if hasattr(next_player_to_act, 'turn_starts_at'):
-            next_player_to_act.turn_starts_at = datetime.now(timezone.utc)
-            session.add(next_player_to_act)
-        else:
-            print(f"Warning: PlayerState for user {next_player_to_act.user_id} does not have 'turn_starts_at' attribute.")
+        next_player_to_act.time_to_act_ends = datetime.now(timezone.utc) + timedelta(seconds=POKER_ACTION_TIMEOUT_SECONDS)
+        session.add(next_player_to_act)
 
         session.add(poker_hand)
         return {"status": "betting_continues", "next_to_act_user_id": poker_hand.current_turn_user_id, "hand_id": hand_id}
@@ -2052,45 +2092,71 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
         print(f"Warning: Betting round logic fell through for hand {hand_id}. No specific next actor determined, but round not flagged as complete earlier. Current turn on hand: {poker_hand.current_turn_user_id}")
         # This might indicate an issue in round_complete logic or player state.
         # For safety, assume round is over and try to advance.
-        adv_result = _advance_to_next_street(hand_id, session)
+        # If advancing to showdown, status will be set there.
+        # If advancing to another street, status will be set there.
+        adv_result = _advance_to_next_street(hand_id, session) # This will set status like 'flop', 'turn', 'river', or 'showdown'
+        session.add(poker_hand) # Ensure poker_hand status change from _advance_to_next_street is staged
         return {"status": "round_completed_advancing_street_fallback",
-                "next_street_status": poker_hand.status,
+                "next_street_status": poker_hand.status, # Reflects status set by _advance_to_next_street
                 "next_to_act_user_id": poker_hand.current_turn_user_id, # Could be None
                 "hand_id": hand_id}
 
 
-# Conceptual placeholder for timeout logic
-# Assumes PokerPlayerState has a 'turn_starts_at' field (db.Column(db.DateTime, nullable=True)).
-# And a POKER_ACTION_TIMEOUT_SECONDS constant is defined in config or globally.
-# def check_and_handle_player_timeouts(poker_hand_id: int, session: Session, POKER_ACTION_TIMEOUT_SECONDS: int = 60):
-#     """
-#     Checks the current player for timeout and auto-folds them.
-#     This would ideally be triggered by a separate scheduler or before processing any player action request.
-#     Returns True if a timeout action was taken, False otherwise.
-#     The actual auto-fold action should call the handle_fold function to ensure game state consistency.
-#     """
-#     poker_hand = session.query(PokerHand).get(poker_hand_id)
-#     if not poker_hand or poker_hand.current_turn_user_id is None or poker_hand.status in ['completed', 'showdown']:
-#         return False # No active turn or hand is over
-#
-#     player_to_act_state = session.query(PokerPlayerState).filter_by(
-#         user_id=poker_hand.current_turn_user_id,
-#         table_id=poker_hand.table_id # Ensure we get player at the correct table
-#     ).first()
-#
-#     if player_to_act_state and hasattr(player_to_act_state, 'turn_starts_at') and player_to_act_state.turn_starts_at:
-#         time_elapsed = (datetime.now(timezone.utc) - player_to_act_state.turn_starts_at).total_seconds()
-#         if time_elapsed > POKER_ACTION_TIMEOUT_SECONDS:
-#             print(f"Player {player_to_act_state.user_id} at seat {player_to_act_state.seat_id} timed out after {time_elapsed:.2f}s. Auto-folding.")
-#
-#             original_turn_user_id = player_to_act_state.user_id
-#             # It's crucial that handle_fold is called, which then calls _check_betting_round_completion
-#             # to correctly update game state including turn timers and player status.
-#             # The handle_fold function should also ensure player_to_act_state.turn_starts_at is cleared after folding.
-#             fold_result = handle_fold(original_turn_user_id, poker_hand.table_id, poker_hand.id) # handle_fold will manage session commit
-#             print(f"Auto-fold result for user {original_turn_user_id}: {fold_result}")
-#             return True # Timeout action was taken
-#     return False
+def check_and_handle_player_timeouts(table_id: int, session: Session) -> bool:
+    """
+    Checks the current player for timeout and auto-folds them.
+    This would ideally be triggered by a separate scheduler or before processing any player action request.
+    Returns True if a timeout action was taken, False otherwise.
+    The actual auto-fold action should call the handle_fold function to ensure game state consistency.
+    """
+    # Find the current active hand for this table
+    poker_hand = session.query(PokerHand).filter(
+        PokerHand.table_id == table_id,
+        PokerHand.status.notin_(['completed', 'showdown'])
+    ).order_by(PokerHand.start_time.desc()).first()
+
+    if not poker_hand or poker_hand.current_turn_user_id is None:
+        return False # No active hand or no one's turn
+
+    player_to_act_state = session.query(PokerPlayerState).filter_by(
+        user_id=poker_hand.current_turn_user_id,
+        table_id=poker_hand.table_id
+    ).first()
+
+    if not player_to_act_state:
+        print(f"Error: Player state not found for current turn user {poker_hand.current_turn_user_id} in hand {poker_hand.id}")
+        return False # Should not happen
+
+    if player_to_act_state.time_to_act_ends and datetime.now(timezone.utc) > player_to_act_state.time_to_act_ends:
+        original_turn_user_id = player_to_act_state.user_id
+        seat_id = player_to_act_state.seat_id # For logging
+
+        print(f"Player {original_turn_user_id} at seat {seat_id} on table {table_id} timed out for hand {poker_hand.id}. Auto-folding.")
+
+        # Clear the timer immediately to prevent re-entry if handle_fold has delays or issues
+        player_to_act_state.time_to_act_ends = None
+        session.add(player_to_act_state)
+        try:
+            session.commit() # Commit the timer clear before calling handle_fold
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing timeout clear for user {original_turn_user_id}: {e}")
+            # Proceed with fold attempt anyway, but this is problematic
+
+        # Call handle_fold. This function is expected to manage its own session commits/rollbacks.
+        fold_result = handle_fold(original_turn_user_id, poker_hand.table_id, poker_hand.id)
+
+        if "error" in fold_result:
+            print(f"Error during auto-fold for user {original_turn_user_id} due to timeout: {fold_result['error']}")
+            # Potentially mark player as sitting out or other error handling
+        else:
+            print(f"Auto-fold successful for user {original_turn_user_id} due to timeout.")
+            # The game_flow result from handle_fold will indicate next player and their timer will be set
+            # by _check_betting_round_completion.
+
+        return True # Timeout action was taken (attempted)
+
+    return False
 
 
 def get_table_state(table_id: int, hand_id: int | None, user_id: int):
