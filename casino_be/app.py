@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, Blueprint
+from flask import Flask, request, jsonify, Blueprint, current_app, g
+import uuid
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
@@ -9,6 +10,7 @@ from flask_jwt_extended import (
 )
 from datetime import datetime, timedelta, timezone
 import logging
+from pythonjsonlogger import jsonlogger
 from marshmallow import ValidationError
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
@@ -54,6 +56,24 @@ SATOSHIS_PER_UNIT = 100000000  # 1 BTC = 100,000,000 satoshis
 app = Flask(__name__)
 app.config.from_object(Config)
 
+if not app.debug:
+    # Configure JSON logging for production
+    logger = app.logger
+    handler = logging.StreamHandler()
+    # Updated formatter to include request_id
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(levelname)s %(request_id)s %(module)s %(funcName)s %(lineno)d %(message)s'
+    )
+    handler.setFormatter(formatter)
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+# --- Request ID Generation ---
+@app.before_request
+def add_request_id():
+    g.request_id = str(uuid.uuid4())
+
 # --- Rate Limiter Setup ---
 app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
 limiter = Limiter(
@@ -68,10 +88,6 @@ migrate = Migrate(app, db, directory='casino_be/migrations')
 
 # --- JWT Setup ---
 jwt = JWTManager(app)
-
-# --- Logging Setup ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # --- JWT Helper Functions ---
 @jwt.user_identity_loader
@@ -93,7 +109,7 @@ def check_if_token_in_blacklist(jwt_header, jwt_payload):
 # --- Global Error Handler ---
 @app.errorhandler(Exception)
 def handle_unhandled_exception(e):
-    logger.error("Unhandled exception caught by global error handler:", exc_info=True)
+    current_app.logger.error(f"Request ID: {g.get('request_id', 'N/A')} - Unhandled exception caught by global error handler:", exc_info=True)
     return jsonify({
         'status': False,
         'status_message': 'An unexpected internal server error occurred. Please try again later.'
@@ -121,10 +137,10 @@ def is_admin():
 def get_current_user():
     try:
         user_data = UserSchema().dump(current_user)
-        logger.info(f"User profile fetched: {current_user.username} (ID: {current_user.id})")
+        current_app.logger.info(f"Request ID: {g.get('request_id', 'N/A')} - User profile fetched: {current_user.username} (ID: {current_user.id})")
         return jsonify({'status': True, 'user': user_data}), 200
     except Exception as e:
-        logger.error(f"Error fetching user profile: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Request ID: {g.get('request_id', 'N/A')} - Error fetching user profile: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to fetch user profile.'}), 500
 
 @app.route('/api/register', methods=['POST'])
@@ -153,14 +169,14 @@ def register():
         access_token = create_access_token(identity=new_user)
         refresh_token = create_refresh_token(identity=new_user)
         user_data = UserSchema().dump(new_user)
-        logger.info(f"User registered: {new_user.username} (ID: {new_user.id})")
+        current_app.logger.info(f"User registered: {new_user.username} (ID: {new_user.id})")
         return jsonify({
             'status': True, 'user': user_data,
             'access_token': access_token, 'refresh_token': refresh_token
         }), 201
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Registration failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Registration failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Registration failed.'}), 500
 
 @app.route('/api/login', methods=['POST'])
@@ -185,7 +201,7 @@ def login():
     access_token = create_access_token(identity=user)
     refresh_token = create_refresh_token(identity=user)
     user_data = UserSchema().dump(user)
-    logger.info(f"User logged in: {user.username} (ID: {user.id})")
+    current_app.logger.info(f"User logged in: {user.username} (ID: {user.id})")
     return jsonify({
         'status': True, 'user': user_data,
         'access_token': access_token, 'refresh_token': refresh_token
@@ -195,7 +211,7 @@ def login():
 @jwt_required(refresh=True)
 def refresh():
     new_access_token = create_access_token(identity=current_user)
-    logger.info(f"Token refreshed for user: {current_user.username} (ID: {current_user.id})")
+    current_app.logger.info(f"Token refreshed for user: {current_user.username} (ID: {current_user.id})")
     return jsonify({'status': True, 'access_token': new_access_token}), 200
 
 @app.route('/api/logout', methods=['POST'])
@@ -211,11 +227,11 @@ def logout():
         expires = timedelta(hours=1)
         db.session.add(TokenBlacklist(jti=jti, created_at=now, expires_at=now + expires))
         db.session.commit()
-        logger.info(f"User logged out: {current_user.username} (ID: {current_user.id})")
+        current_app.logger.info(f"User logged out: {current_user.username} (ID: {current_user.id})")
         return jsonify({"status": True, "status_message": "Successfully logged out"}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Logout failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Logout failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Logout failed.'}), 500
 
 @app.route('/api/logout2', methods=['POST'])
@@ -231,11 +247,11 @@ def logout2():
         expires = timedelta(days=7)
         db.session.add(TokenBlacklist(jti=jti, created_at=now, expires_at=now + expires))
         db.session.commit()
-        logger.info(f"User refresh token invalidated: {current_user.username} (ID: {current_user.id})")
+        current_app.logger.info(f"User refresh token invalidated: {current_user.username} (ID: {current_user.id})")
         return jsonify({"status": True, "status_message": "Refresh token invalidated"}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Refresh token invalidation failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Refresh token invalidation failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Refresh token invalidation failed.'}), 500
 
 # === Game Play ===
@@ -251,11 +267,11 @@ def end_session():
         for session in active_sessions:
             session.session_end = now
         db.session.commit()
-        logger.info(f"Ended active sessions for user {user_id}")
+        current_app.logger.info(f"Ended active sessions for user {user_id}")
         return jsonify({'status': True, 'status_message': 'Session ended successfully'}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Failed to end session: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Failed to end session: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to end session.'}), 500
 
 @app.route('/api/join', methods=['POST'])
@@ -294,11 +310,11 @@ def join_game():
         new_session = GameSession(user_id=user_id, slot_id=slot_id, table_id=table_id, game_type=game_type, session_start=now)
         db.session.add(new_session)
         db.session.commit()
-        logger.info(f"User {user_id} joined {game_type} game, session {new_session.id} created.")
+        current_app.logger.info(f"User {user_id} joined {game_type} game, session {new_session.id} created.")
         return jsonify({'status': True, 'game_session': GameSessionSchema().dump(new_session), 'session_id': new_session.id}), 201
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Join game failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Join game failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to join game.'}), 500
 
 @app.route('/api/spin', methods=['POST'])
@@ -325,11 +341,11 @@ def spin():
     try:
         if slot.is_multiway:
             if not slot.reel_configurations:
-                logger.error(f"Spin attempt on multiway slot {slot.id} without reel_configurations by user {user.id}")
+                current_app.logger.error(f"Spin attempt on multiway slot {slot.id} without reel_configurations by user {user.id}")
                 return jsonify({"status": False, "status_message": "Slot is configured as multiway but lacks essential reel configurations."}), 400
             
             if not slot.symbols:
-                 logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}")
+                 current_app.logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}")
                  return jsonify({"status": False, "status_message": "Slot configuration incomplete (symbols missing)."}), 400
 
             spin_result_data = handle_multiway_spin(user, slot, game_session, bet_amount_sats)
@@ -352,11 +368,11 @@ def spin():
         }), 200
     except ValueError as ve:
         db.session.rollback()
-        logger.warning(f"Spin ValueError for user {user.id} on slot {slot.id if slot else 'N/A'}: {str(ve)}")
+        current_app.logger.warning(f"Spin ValueError for user {user.id} on slot {slot.id if slot else 'N/A'}: {str(ve)}")
         return jsonify({'status': False, 'status_message': str(ve)}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Spin error: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Spin error: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Spin processing error.'}), 500
 
 # === User Account ===
@@ -384,7 +400,7 @@ def withdraw():
     if active_bonus_with_wagering:
         if active_bonus_with_wagering.wagering_progress_sats < active_bonus_with_wagering.wagering_requirement_sats:
             remaining_wagering_sats = active_bonus_with_wagering.wagering_requirement_sats - active_bonus_with_wagering.wagering_progress_sats
-            logger.warning(f"User {user.id} withdrawal blocked due to unmet wagering for UserBonus {active_bonus_with_wagering.id}.")
+            current_app.logger.warning(f"User {user.id} withdrawal blocked due to unmet wagering for UserBonus {active_bonus_with_wagering.id}.")
             return jsonify({
                 'status': False,
                 'status_message': f"Withdrawal blocked. You have an active bonus with unmet wagering requirements. "
@@ -403,14 +419,14 @@ def withdraw():
         )
         db.session.add(transaction)
         db.session.commit()
-        logger.info(f"Withdrawal request for user {user.id}: {amount_sats} sats to {withdraw_address}. Tx ID: {transaction.id}")
+        current_app.logger.info(f"Withdrawal request for user {user.id}: {amount_sats} sats to {withdraw_address}. Tx ID: {transaction.id}")
         return jsonify({
             'status': True, 'withdraw_id': transaction.id, 'user': UserSchema().dump(user),
             'status_message': 'Withdrawal request submitted.'
         }), 201
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Withdrawal failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Withdrawal failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Withdrawal failed.'}), 500
 
 @app.route('/api/settings', methods=['POST'])
@@ -429,11 +445,11 @@ def update_settings():
         if 'password' in data and data['password']:
             user.password = User.hash_password(data['password'])
         db.session.commit()
-        logger.info(f"Settings updated for user {user.id}")
+        current_app.logger.info(f"Settings updated for user {user.id}")
         return jsonify({'status': True, 'user': UserSchema().dump(user)}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Settings update failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Settings update failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Settings update failed.'}), 500
 
 @app.route('/api/deposit', methods=['POST'])
@@ -467,7 +483,7 @@ def deposit():
             details={'description': f'User deposit of {deposit_amount_sats} sats via /api/deposit endpoint'}
         )
         db.session.add(deposit_transaction)
-        logger.info(f"User {user.id} deposited {deposit_amount_sats} sats. Transaction ID: {deposit_transaction.id}")
+        current_app.logger.info(f"User {user.id} deposited {deposit_amount_sats} sats. Transaction ID: {deposit_transaction.id}")
 
         # 3. Apply bonus if a bonus code is provided
         if bonus_code_str:
@@ -498,7 +514,7 @@ def deposit():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Deposit processing for user {user.id} failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Deposit processing for user {user.id} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Deposit processing failed due to an internal error.'}), 500
 
 # === Public Info ===
@@ -509,7 +525,7 @@ def get_slots():
         result = SlotSchema(many=True).dump(slots)
         return jsonify({'status': True, 'slots': result}), 200
     except Exception as e:
-        logger.error(f"Failed to retrieve slots list: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Failed to retrieve slots list: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Could not retrieve slot information.'}), 500
 
 @app.route('/api/tables', methods=['GET'])
@@ -519,7 +535,7 @@ def get_tables():
         result = BlackjackTableSchema(many=True).dump(tables)
         return jsonify({'status': True, 'tables': result}), 200
     except Exception as e:
-        logger.error(f"Failed to retrieve tables list: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Failed to retrieve tables list: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Could not retrieve table information.'}), 500
 
 # === Blackjack Endpoints ===
@@ -540,13 +556,13 @@ def join_blackjack():
     try:
         result = handle_join_blackjack(current_user, table, bet_amount)
         user_data = UserSchema().dump(current_user)
-        logger.info(f"User {current_user.id} joined blackjack table {table_id} with bet {bet_amount}")
+        current_app.logger.info(f"User {current_user.id} joined blackjack table {table_id} with bet {bet_amount}")
         return jsonify({'status': True, 'hand': result, 'user': user_data }), 201
     except ValueError as ve:
         return jsonify({'status': False, 'status_message': str(ve)}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error joining blackjack: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Error joining blackjack: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Error joining blackjack game.'}), 500
 
 @app.route('/api/blackjack_action', methods=['POST'])
@@ -562,13 +578,13 @@ def blackjack_action():
     try:
         result = handle_blackjack_action(current_user, hand_id, action_type, hand_index)
         user_data = UserSchema().dump(current_user)
-        logger.info(f"User {current_user.id} action {action_type} on hand {hand_id}")
+        current_app.logger.info(f"User {current_user.id} action {action_type} on hand {hand_id}")
         return jsonify({'status': True, 'action_result': result, 'user': user_data }), 200
     except ValueError as ve:
         return jsonify({'status': False, 'status_message': str(ve)}), 400
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error in blackjack action: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Error in blackjack action: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Error in blackjack action.'}), 500
 
 # === Poker Endpoints ===
@@ -580,7 +596,7 @@ def list_poker_tables():
         result = PokerTableSchema(many=True).dump(tables)
         return jsonify({'status': True, 'tables': result}), 200
     except Exception as e:
-        logger.error(f"Failed to retrieve poker tables list: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Failed to retrieve poker tables list: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Could not retrieve poker table information.'}), 500
 
 @app.route('/api/poker/tables/<int:table_id>/join', methods=['POST'])
@@ -617,7 +633,7 @@ def join_poker_table(table_id):
         if available_seat is None:
             return jsonify({'status': False, 'status_message': f'No available seats at poker table {table_id}.'}), 400
         seat_id = available_seat
-        logger.info(f"User {user.id} joining poker table {table_id}, automatically assigned to seat {seat_id}.")
+        current_app.logger.info(f"User {user.id} joining poker table {table_id}, automatically assigned to seat {seat_id}.")
 
     # Call the helper function from poker_helper to handle the logic of sitting down
     # poker_helper.py should already be imported as `from utils import poker_helper`
@@ -635,7 +651,7 @@ def join_poker_table(table_id):
     # If handle_sit_down is successful, it should return user and player_state details
     updated_user_data = UserSchema().dump(user) # Refresh user data, esp. balance
 
-    logger.info(f"User {user.id} successfully joined poker table {table_id} at seat {seat_id} with buy-in {buy_in_amount}.")
+    current_app.logger.info(f"User {user.id} successfully joined poker table {table_id} at seat {seat_id} with buy-in {buy_in_amount}.")
     return jsonify({
         'status': True,
         'message': result.get("message", "Successfully joined table."),
@@ -656,7 +672,7 @@ def leave_poker_table(table_id):
         return jsonify({'status': False, 'status_message': result['error']}), status_code
 
     updated_user_data = UserSchema().dump(user) # Refresh user data
-    logger.info(f"User {user.id} successfully left poker table {table_id}.")
+    current_app.logger.info(f"User {user.id} successfully left poker table {table_id}.")
     return jsonify({
         'status': True,
         'message': result.get("message", "Successfully left table."),
@@ -688,17 +704,17 @@ def get_poker_table_state(table_id):
 @jwt_required()
 def start_poker_hand_route(table_id):
     user = current_user
-    logger.info(f"User {user.id} attempting to start a new hand at table {table_id}.")
+    current_app.logger.info(f"User {user.id} attempting to start a new hand at table {table_id}.")
 
     table = PokerTable.query.get(table_id)
     if not table:
-        logger.warning(f"Start hand attempt failed: Table {table_id} not found.")
+        current_app.logger.warning(f"Start hand attempt failed: Table {table_id} not found.")
         return jsonify({'status': False, 'status_message': f'Poker table {table_id} not found.'}), HTTPStatus.NOT_FOUND
 
     # 1. User Seated Check
     player_state = PokerPlayerState.query.filter_by(user_id=user.id, table_id=table_id).first()
     if not player_state or player_state.is_sitting_out:
-        logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: User not actively seated.")
+        current_app.logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: User not actively seated.")
         return jsonify({'status': False, 'status_message': 'User not actively seated at this table.'}), HTTPStatus.FORBIDDEN
 
     # 2. Active Hand Check
@@ -707,7 +723,7 @@ def start_poker_hand_route(table_id):
         PokerHand.status.notin_(['completed', 'showdown']) # Consider all non-terminal states as 'active'
     ).first()
     if active_hand:
-        logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: Active hand {active_hand.id} already in progress (status: {active_hand.status}).")
+        current_app.logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: Active hand {active_hand.id} already in progress (status: {active_hand.status}).")
         return jsonify({'status': False, 'status_message': f'An active hand ({active_hand.status}) is already in progress.'}), HTTPStatus.CONFLICT
 
     # 3. Sufficient Players Check (at least 2 active, non-sitting-out players with stacks)
@@ -720,16 +736,16 @@ def start_poker_hand_route(table_id):
 
     # MIN_PLAYERS_TO_START = 2 # This could be a configuration
     if active_player_count < 2:
-        logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: Insufficient active players ({active_player_count}).")
+        current_app.logger.warning(f"User {user.id} attempt to start hand at table {table_id} failed: Insufficient active players ({active_player_count}).")
         return jsonify({'status': False, 'status_message': f'Not enough active players ({active_player_count}) to start a new hand. Minimum 2 required.'}), HTTPStatus.CONFLICT
 
     # 4. Call poker_helper.start_new_hand
     try:
-        logger.info(f"All checks passed for table {table_id}. User {user.id} initiating start_new_hand.")
+        current_app.logger.info(f"All checks passed for table {table_id}. User {user.id} initiating start_new_hand.")
         result = poker_helper.start_new_hand(table_id=table_id) # This function handles its own session commits/rollbacks
 
         if "error" in result:
-            logger.error(f"Error starting new hand for table {table_id} by user {user.id}: {result['error']}")
+            current_app.logger.error(f"Error starting new hand for table {table_id} by user {user.id}: {result['error']}")
             # Determine appropriate status code based on error type if possible
             error_msg_lower = result["error"].lower()
             status_code = HTTPStatus.BAD_REQUEST # Default
@@ -740,12 +756,12 @@ def start_poker_hand_route(table_id):
             # Add more specific error code mappings if needed
             return jsonify({'status': False, 'status_message': result['error']}), status_code
 
-        logger.info(f"New hand {result.get('hand_id')} started successfully at table {table_id} by user {user.id}.")
+        current_app.logger.info(f"New hand {result.get('hand_id')} started successfully at table {table_id} by user {user.id}.")
         return jsonify({'status': True, 'message': 'New hand started.', 'hand_details': result}), HTTPStatus.CREATED
 
     except Exception as e:
         db.session.rollback() # Ensure rollback if an unexpected exception occurs here
-        logger.error(f"Unexpected exception when starting new hand for table {table_id} by user {user.id}: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Unexpected exception when starting new hand for table {table_id} by user {user.id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': f'An unexpected server error occurred: {str(e)}'}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 
@@ -770,10 +786,10 @@ def poker_hand_action(table_id, hand_id):
 
     # --- Player Timeout Check ---
     # Call before checking turn, as timeout might change whose turn it is or end the hand.
-    logger.debug(f"Hand {hand_id} on table {table_id}: Checking for player timeouts before action by user {user.id}.")
+    current_app.logger.debug(f"Hand {hand_id} on table {table_id}: Checking for player timeouts before action by user {user.id}.")
     timeout_action_taken = poker_helper.check_and_handle_player_timeouts(table_id=table_id, session=db.session)
     if timeout_action_taken:
-        logger.info(f"Hand {hand_id} on table {table_id}: Timeout action was processed. Re-fetching hand state.")
+        current_app.logger.info(f"Hand {hand_id} on table {table_id}: Timeout action was processed. Re-fetching hand state.")
         # Re-fetch the hand as its state (status, current_turn_user_id) might have changed.
         # db.session.refresh(hand) might not be enough if the hand was completed and a new one started,
         # though check_and_handle_player_timeouts currently only folds.
@@ -787,7 +803,7 @@ def poker_hand_action(table_id, hand_id):
             # We might need to fetch that game_flow result if we want to return it here.
             # For now, just inform the user that the hand state changed.
             # Or, let the turn check below handle it if the user is no longer the current player.
-            logger.info(f"Hand {hand_id} is now '{hand.status}' after timeout processing. Action by {user.id} may no longer be valid or needed.")
+            current_app.logger.info(f"Hand {hand_id} is now '{hand.status}' after timeout processing. Action by {user.id} may no longer be valid or needed.")
 
 
     # Add a check to ensure it's the current user's turn - this is critical
@@ -837,7 +853,7 @@ def poker_hand_action(table_id, hand_id):
     # The game_flow result from helper functions should indicate next steps / new state
     game_flow_data = result.get("game_flow", {}) if result else {}
 
-    logger.info(f"User {user.id} performed action '{action_type}' (amount: {amount if amount is not None else 'N/A'}) on hand {hand_id} at table {table_id}.")
+    current_app.logger.info(f"User {user.id} performed action '{action_type}' (amount: {amount if amount is not None else 'N/A'}) on hand {hand_id} at table {table_id}.")
     return jsonify({
         'status': True,
         'message': result.get("message", f"Action '{action_type}' processed successfully."),
@@ -854,7 +870,7 @@ def plinko_play():
     user = User.query.get(current_user_id)
 
     if not user:
-        logger.error(f"Plinko play attempt by non-existent user ID: {current_user_id}")
+        current_app.logger.error(f"Plinko play attempt by non-existent user ID: {current_user_id}")
         return jsonify({'error': 'User not found after authentication.'}), HTTPStatus.INTERNAL_SERVER_ERROR
 
     try:
@@ -865,7 +881,7 @@ def plinko_play():
         schema = PlinkoPlayRequestSchema()
         loaded_data = schema.load(json_data)
     except Exception as e:
-        logger.warning(f"Plinko play validation error for user {current_user_id}: {str(e)}")
+        current_app.logger.warning(f"Plinko play validation error for user {current_user_id}: {str(e)}")
         error_messages = e.messages if hasattr(e, 'messages') else str(e)
         return jsonify({'error': 'Validation failed', 'messages': error_messages}), HTTPStatus.BAD_REQUEST
 
@@ -875,7 +891,7 @@ def plinko_play():
 
     validation_result = validate_plinko_params(stake_amount_float, chosen_stake_label, slot_landed_label)
     if not validation_result['success']:
-        logger.warning(f"Plinko parameter validation failed for user {user.id}: {validation_result['error']}")
+        current_app.logger.warning(f"Plinko parameter validation failed for user {user.id}: {validation_result['error']}")
         return jsonify(PlinkoPlayResponseSchema().dump({
             'success': False,
             'error': validation_result['error']
@@ -885,7 +901,7 @@ def plinko_play():
     
     # Ensure user.balance is treated as satoshis (BigInteger)
     if user.balance < stake_amount_sats:
-        logger.warning(f"User {user.id} insufficient funds for Plinko: Balance {user.balance} sats, Stake {stake_amount_sats} sats")
+        current_app.logger.warning(f"User {user.id} insufficient funds for Plinko: Balance {user.balance} sats, Stake {stake_amount_sats} sats")
         return jsonify(PlinkoPlayResponseSchema().dump({
             'success': False,
             'error': 'Insufficient funds',
@@ -895,7 +911,7 @@ def plinko_play():
     try:
         multiplier = PAYOUT_MULTIPLIERS.get(slot_landed_label)
         if multiplier is None:
-            logger.error(f"Invalid slot_landed_label '{slot_landed_label}' made it past validation for user {user.id}.")
+            current_app.logger.error(f"Invalid slot_landed_label '{slot_landed_label}' made it past validation for user {user.id}.")
             return jsonify(PlinkoPlayResponseSchema().dump({
                 'success': False, 'error': 'Internal error: Invalid slot outcome.'
             })), HTTPStatus.INTERNAL_SERVER_ERROR
@@ -949,7 +965,7 @@ def plinko_play():
         winnings_float = float(winnings_sats) / SATOSHIS_PER_UNIT
         new_balance_float = float(user.balance) / SATOSHIS_PER_UNIT
 
-        logger.info(f"Plinko play successful for user {user.id}: Bet {stake_amount_float}, Won {winnings_float}. New balance: {new_balance_float}")
+        current_app.logger.info(f"Plinko play successful for user {user.id}: Bet {stake_amount_float}, Won {winnings_float}. New balance: {new_balance_float}")
         
         response_data = {
             'success': True,
@@ -961,7 +977,7 @@ def plinko_play():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Plinko play processing error for user {user.id}: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Plinko play processing error for user {user.id}: {str(e)}", exc_info=True)
         return jsonify(PlinkoPlayResponseSchema().dump({
             'success': False,
             'error': 'An internal error occurred during game processing.'
@@ -990,7 +1006,7 @@ def admin_dashboard():
         }
         return jsonify({'status': True, 'dashboard_data': dashboard_data}), 200
     except Exception as e:
-        logger.error(f"Admin dashboard error: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin dashboard error: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to retrieve admin dashboard data.'}), 500
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -1004,7 +1020,7 @@ def admin_get_users():
         users_paginated = User.query.order_by(User.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
         return jsonify({'status': True, 'users': UserListSchema().dump(users_paginated)}), 200
     except Exception as e:
-        logger.error(f"Admin get users failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin get users failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to retrieve users.'}), 500
 
 @app.route('/api/admin/users/<int:user_id>', methods=['GET'])
@@ -1016,7 +1032,7 @@ def admin_get_user(user_id):
         user = User.query.get_or_404(user_id)
         return jsonify({'status': True, 'user': AdminUserSchema().dump(user)}), 200
     except Exception as e:
-        logger.error(f"Admin get user {user_id} failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin get user {user_id} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to retrieve user details.'}), 500
 
 @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
@@ -1038,11 +1054,11 @@ def admin_update_user(user_id):
             if hasattr(user, key) and key not in ['password', 'balance', 'deposit_wallet_address', 'deposit_wallet_private_key']:
                 setattr(user, key, value)
         db.session.commit()
-        logger.info(f"Admin {current_user.id} updated user {user_id}")
+        current_app.logger.info(f"Admin {current_user.id} updated user {user_id}")
         return jsonify({'status': True, 'user': AdminUserSchema().dump(user)}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Admin update user {user_id} failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin update user {user_id} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to update user.'}), 500
 
 @app.route('/api/admin/transactions', methods=['GET'])
@@ -1066,7 +1082,7 @@ def admin_get_transactions():
         transactions_paginated = query.paginate(page=page, per_page=per_page, error_out=False)
         return jsonify({'status': True, 'transactions': TransactionListSchema().dump(transactions_paginated)}), 200
     except Exception as e:
-        logger.error(f"Admin get transactions failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin get transactions failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to retrieve transactions.'}), 500
 
 @app.route('/api/admin/transactions/<int:tx_id>', methods=['PUT'])
@@ -1086,7 +1102,7 @@ def admin_update_transaction(tx_id):
             transaction.status = 'completed'
             if 'admin_notes' in data: 
                 transaction.details = {**transaction.details, 'admin_notes': data['admin_notes']}
-            logger.info(f"Admin {current_user.id} approved withdrawal {tx_id}")
+            current_app.logger.info(f"Admin {current_user.id} approved withdrawal {tx_id}")
         elif transaction.status == 'pending' and new_status == 'rejected':
             user = User.query.get(transaction.user_id)
             if user:
@@ -1094,7 +1110,7 @@ def admin_update_transaction(tx_id):
                 transaction.status = 'rejected'
                 if 'admin_notes' in data: 
                     transaction.details = {**transaction.details, 'admin_notes': data['admin_notes']}
-                logger.info(f"Admin {current_user.id} rejected withdrawal {tx_id}, refunded {transaction.amount} to user {user.id}")
+                current_app.logger.info(f"Admin {current_user.id} rejected withdrawal {tx_id}, refunded {transaction.amount} to user {user.id}")
             else:
                  return jsonify({'status': False, 'status_message': 'User not found for refund.'}), 500
         elif transaction.status != 'pending':
@@ -1110,7 +1126,7 @@ def admin_update_transaction(tx_id):
         return jsonify({'status': True, 'transaction': TransactionSchema().dump(transaction)}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Admin update transaction {tx_id} failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin update transaction {tx_id} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to update transaction.'}), 500
 
 @app.route('/api/admin/credit_deposit', methods=['POST'])
@@ -1140,11 +1156,11 @@ def admin_credit_deposit():
         deposit_tx = Transaction(user_id=user.id, amount=amount_sats, transaction_type='deposit', status='completed', details=transaction_details)
         db.session.add(deposit_tx)
         db.session.commit()
-        logger.info(f"Admin {current_user.username} credited {amount_sats} to user {user.username} (ID: {user.id})")
+        current_app.logger.info(f"Admin {current_user.username} credited {amount_sats} to user {user.username} (ID: {user.id})")
         return jsonify({'status': True, 'status_message': 'Deposit credited.', 'user_id': user.id, 'new_balance_sats': user.balance, 'transaction_id': deposit_tx.id}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Admin credit deposit failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin credit deposit failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to credit deposit.'}), 500
 
 @app.route('/api/admin/bonus_codes', methods=['GET'])
@@ -1158,7 +1174,7 @@ def admin_get_bonus_codes():
         codes_paginated = BonusCode.query.order_by(BonusCode.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
         return jsonify({'status': True, 'bonus_codes': BonusCodeListSchema().dump(codes_paginated)}), 200
     except Exception as e:
-        logger.error(f"Admin get bonus codes failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin get bonus codes failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to retrieve bonus codes.'}), 500
 
 @app.route('/api/admin/bonus_codes', methods=['POST'])
@@ -1175,11 +1191,11 @@ def admin_create_bonus_code():
         new_code = schema.load(data, session=db.session)
         db.session.add(new_code)
         db.session.commit()
-        logger.info(f"Admin {current_user.id} created bonus code {new_code.code_id}")
+        current_app.logger.info(f"Admin {current_user.id} created bonus code {new_code.code_id}")
         return jsonify({'status': True, 'bonus_code': BonusCodeSchema().dump(new_code)}), 201
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Admin create bonus code failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin create bonus code failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to create bonus code.'}), 500
 
 @app.route('/api/admin/bonus_codes/<int:code_id>', methods=['PUT'])
@@ -1196,11 +1212,11 @@ def admin_update_bonus_code(code_id):
     try:
         updated_code = schema.load(data, instance=bonus_code, session=db.session, partial=True)
         db.session.commit()
-        logger.info(f"Admin {current_user.id} updated bonus code {updated_code.code_id}")
+        current_app.logger.info(f"Admin {current_user.id} updated bonus code {updated_code.code_id}")
         return jsonify({'status': True, 'bonus_code': BonusCodeSchema().dump(updated_code)}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Admin update bonus code {code_id} failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin update bonus code {code_id} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to update bonus code.'}), 500
 
 @app.route('/api/admin/bonus_codes/<int:code_id>', methods=['DELETE'])
@@ -1212,11 +1228,11 @@ def admin_delete_bonus_code(code_id):
     try:
         db.session.delete(bonus_code)
         db.session.commit()
-        logger.info(f"Admin {current_user.id} deleted bonus code {code_id}")
+        current_app.logger.info(f"Admin {current_user.id} deleted bonus code {code_id}")
         return jsonify({'status': True, 'status_message': 'Bonus code deleted.'}), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Admin delete bonus code {code_id} failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Admin delete bonus code {code_id} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to delete bonus code.'}), 500
 
 # CLI command for cleanup
@@ -1275,12 +1291,12 @@ def spacecrash_place_bet():
         db.session.commit()
         
         bet_dump_schema = SpacecrashPlayerBetSchema()
-        logger.info(f"User {user.id} placed Spacecrash bet {new_bet.id} for {bet_amount} on game {current_game.id}")
+        current_app.logger.info(f"User {user.id} placed Spacecrash bet {new_bet.id} for {bet_amount} on game {current_game.id}")
         return jsonify({'status': True, 'status_message': 'Bet placed successfully.', 'bet': bet_dump_schema.dump(new_bet)}), 201
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error placing Spacecrash bet for user {user.id}: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Error placing Spacecrash bet for user {user.id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to place bet due to an internal error.'}), 500
 
 
@@ -1304,7 +1320,7 @@ def spacecrash_eject_bet():
     current_multiplier = spacecrash_handler.get_current_multiplier(active_bet.game)
 
     if active_bet.game.crash_point is None:
-        logger.error(f"CRITICAL: Game {active_bet.game.id} is in_progress but crash_point is None during eject attempt by user {user.id}.")
+        current_app.logger.error(f"CRITICAL: Game {active_bet.game.id} is in_progress but crash_point is None during eject attempt by user {user.id}.")
         return jsonify({'status': False, 'status_message': 'Cannot process eject: game data inconsistent.'}), 500
 
     if current_multiplier >= active_bet.game.crash_point:
@@ -1313,7 +1329,7 @@ def spacecrash_eject_bet():
         active_bet.win_amount = 0
         message = 'Eject failed, game crashed before or at your eject point.'
         status_code = 400
-        logger.info(f"User {user.id} busted Spacecrash bet {active_bet.id}. Attempted eject at {current_multiplier}x, crash was at {active_bet.game.crash_point}x.")
+        current_app.logger.info(f"User {user.id} busted Spacecrash bet {active_bet.id}. Attempted eject at {current_multiplier}x, crash was at {active_bet.game.crash_point}x.")
     else:
         active_bet.ejected_at = current_multiplier
         active_bet.win_amount = int(active_bet.bet_amount * active_bet.ejected_at)
@@ -1321,7 +1337,7 @@ def spacecrash_eject_bet():
         user.balance += active_bet.win_amount
         message = 'Successfully ejected.'
         status_code = 200
-        logger.info(f"User {user.id} ejected Spacecrash bet {active_bet.id} at {active_bet.ejected_at}x, won {active_bet.win_amount}")
+        current_app.logger.info(f"User {user.id} ejected Spacecrash bet {active_bet.id} at {active_bet.ejected_at}x, won {active_bet.win_amount}")
 
     try:
         db.session.commit()
@@ -1337,7 +1353,7 @@ def spacecrash_eject_bet():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error ejecting Spacecrash bet for user {user.id}: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Error ejecting Spacecrash bet for user {user.id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to eject bet due to an internal error.'}), 500
 
 @app.route('/api/spacecrash/current_game', methods=['GET'])
@@ -1452,14 +1468,14 @@ def spacecrash_admin_next_phase():
 
         if success:
             db.session.commit()
-            logger.info(f"Admin {current_user.id} transitioned Spacecrash game {game.id} from {original_status} to {target_phase}.")
+            current_app.logger.info(f"Admin {current_user.id} transitioned Spacecrash game {game.id} from {original_status} to {target_phase}.")
             return jsonify({'status': True, 'status_message': message, 'game_state': SpacecrashGameSchema().dump(game)}), 200
         else:
             return jsonify({'status': False, 'status_message': message, 'current_status': original_status}), 400
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error transitioning Spacecrash game {game.id} to {target_phase} by admin {current_user.id}: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Error transitioning Spacecrash game {game.id} to {target_phase} by admin {current_user.id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to transition game phase due to an internal error.'}), 500
 
 @app.route('/api/roulette/bet', methods=['POST'])
@@ -1526,7 +1542,7 @@ def roulette_bet():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Roulette bet by user {user.id} failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Roulette bet by user {user.id} failed: {str(e)}", exc_info=True)
         return jsonify({"error": "Failed to process bet due to a server error."}), 500
 
     return jsonify({
@@ -1565,7 +1581,7 @@ def get_baccarat_tables():
         result = BaccaratTableSchema(many=True).dump(tables)
         return jsonify({'status': True, 'tables': result}), HTTPStatus.OK
     except Exception as e:
-        logger.error(f"Failed to retrieve Baccarat tables list: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Failed to retrieve Baccarat tables list: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Could not retrieve Baccarat table information.'}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @baccarat_bp.route('/tables/<int:table_id>/join', methods=['POST'])
@@ -1594,9 +1610,9 @@ def join_baccarat_table(table_id):
     #     existing_session = GameSession(user_id=user.id, baccarat_table_id=table_id, game_type='baccarat', session_start=now)
     #     db.session.add(existing_session)
     #     db.session.commit()
-    #     logger.info(f"User {user.id} joined Baccarat table {table.id}, session {existing_session.id}.")
+    #     current_app.logger.info(f"User {user.id} joined Baccarat table {table.id}, session {existing_session.id}.")
     # else:
-    #     logger.info(f"User {user.id} re-joined Baccarat table {table.id}, existing session {existing_session.id}.")
+    #     current_app.logger.info(f"User {user.id} re-joined Baccarat table {table.id}, existing session {existing_session.id}.")
 
 
     return jsonify({'status': True, 'table': BaccaratTableSchema().dump(table)}), HTTPStatus.OK
@@ -1712,7 +1728,7 @@ def play_baccarat_hand_route():
         )
 
         if "error" in helper_result: # Should not happen if inputs are valid
-            logger.error(f"Baccarat helper error for user {user.id} on table {table_id}: {helper_result['error']}")
+            current_app.logger.error(f"Baccarat helper error for user {user.id} on table {table_id}: {helper_result['error']}")
             db.session.rollback() # Rollback the wager
             return jsonify({'status': False, 'status_message': f"Game logic error: {helper_result['error']}"}), HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -1746,7 +1762,7 @@ def play_baccarat_hand_route():
         game_session.amount_won = (game_session.amount_won or 0) + baccarat_hand.win_amount # net profit
 
         db.session.commit()
-        logger.info(f"Baccarat hand {baccarat_hand.id} completed for user {user.id} on table {table_id}. Outcome: {baccarat_hand.outcome}, Net Win: {baccarat_hand.win_amount}")
+        current_app.logger.info(f"Baccarat hand {baccarat_hand.id} completed for user {user.id} on table {table_id}. Outcome: {baccarat_hand.outcome}, Net Win: {baccarat_hand.win_amount}")
 
         # Include user balance in the response for the hand schema
         # The schema BaccaratHandSchema now has a nested UserSchema for this.
@@ -1754,7 +1770,7 @@ def play_baccarat_hand_route():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Baccarat play hand error for user {user.id} on table {table_id}: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Baccarat play hand error for user {user.id} on table {table_id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to play Baccarat hand due to an internal error.'}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 
