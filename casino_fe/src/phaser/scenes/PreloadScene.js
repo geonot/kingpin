@@ -95,11 +95,11 @@ export default class PreloadScene extends Phaser.Scene {
     // Symbols - from slotGameJsonConfig.game.symbols
     if (slotGameJsonConfig.game && slotGameJsonConfig.game.symbols && Array.isArray(slotGameJsonConfig.game.symbols)) {
       slotGameJsonConfig.game.symbols.forEach(symbol => {
-        if (symbol.id !== undefined && symbol.image) {
-          // Key used here: `symbol-${symbol.id}` must match GameScene.js
-          this.load.image(`symbol-${symbol.id}`, `${basePath}${symbol.image}`);
+        if (symbol.id !== undefined && symbol.icon) { // Changed from symbol.image to symbol.icon
+          // Key used here: `symbol-${symbol.id}` must match GameScene.js (and potentially BonusHoldAndWinScene)
+          this.load.image(`symbol-${symbol.id}`, `${basePath}${symbol.icon.startsWith('/') ? symbol.icon.substring(1) : symbol.icon}`);
         } else {
-          console.warn('Slots PreloadScene: Symbol missing id or image path in slotGameJsonConfig.game.symbols.', symbol);
+          console.warn('Slots PreloadScene: Symbol missing id or icon path in slotGameJsonConfig.game.symbols.', symbol);
         }
       });
     } else {
@@ -119,19 +119,29 @@ export default class PreloadScene extends Phaser.Scene {
         }
     }
 
+    // Load HoldAndWin Bonus Specific Background Asset
+    if (slotGameJsonConfig.holdAndWinBonus && slotGameJsonConfig.holdAndWinBonus.bonusBackgroundAsset) {
+        const bonusBgPath = slotGameJsonConfig.holdAndWinBonus.bonusBackgroundAsset;
+        // Ensure path is relative to the slot's asset directory
+        const fullPath = `${basePath}${bonusBgPath.startsWith('/') ? bonusBgPath.substring(1) : bonusBgPath}`;
+        this.load.image('bonus_background_specific', fullPath);
+        console.log(`Preloading HoldAndWin specific background: bonus_background_specific from ${fullPath}`);
+    }
+
+
     // Load Slot-Specific Audio Assets from slotGameJsonConfig.assets.sounds
     if (slotGameJsonConfig.assets && slotGameJsonConfig.assets.sounds) {
       for (const key in slotGameJsonConfig.assets.sounds) {
         if (Object.prototype.hasOwnProperty.call(slotGameJsonConfig.assets.sounds, key)) {
           const soundPathOrPaths = slotGameJsonConfig.assets.sounds[key];
-          // Create a unique key for slot-specific sounds to avoid clashes with common sounds
           const soundKey = `snd-${slotApiData.short_name}-${key}`;
-
           let assetPathArray;
+          const processPath = p => `${basePath}${p.startsWith('/') ? p.substring(1) : p}`;
+
           if (typeof soundPathOrPaths === 'string') {
-            assetPathArray = [`${basePath}${soundPathOrPaths}`];
+            assetPathArray = [processPath(soundPathOrPaths)];
           } else if (Array.isArray(soundPathOrPaths)) {
-            assetPathArray = soundPathOrPaths.map(p => `${basePath}${p}`);
+            assetPathArray = soundPathOrPaths.map(processPath);
           } else {
             console.warn(`Slots PreloadScene: Invalid sound path format for ${key} in ${slotApiData.short_name}`);
             continue;
@@ -139,6 +149,16 @@ export default class PreloadScene extends Phaser.Scene {
           this.load.audio(soundKey, assetPathArray);
         }
       }
+    }
+
+    // Load HoldAndWin Bonus Specific Music
+    if (slotGameJsonConfig.holdAndWinBonus && slotGameJsonConfig.holdAndWinBonus.bonusMusic) {
+        const bonusMusicPath = slotGameJsonConfig.holdAndWinBonus.bonusMusic;
+        const musicKey = `snd-${slotApiData.short_name}-holdAndWinMusic`;
+        // Ensure path is relative to the slot's asset directory
+        const fullMusicPath = `${basePath}${bonusMusicPath.startsWith('/') ? bonusMusicPath.substring(1) : bonusMusicPath}`;
+        this.load.audio(musicKey, [fullMusicPath]); // Phaser expects an array of paths for audio
+        console.log(`Preloading HoldAndWin specific music: ${musicKey} from ${fullMusicPath}`);
     }
 
     // --- Load Common Audio Assets ---
@@ -161,10 +181,17 @@ export default class PreloadScene extends Phaser.Scene {
     console.log('Slots PreloadScene: create() - transitioning to scenes.');
 
     // Check if critical configs were loaded before proceeding
-    if (criticalConfigError) { // This var was set at the beginning of preload()
-        console.error("Slots PreloadScene: Halting creation due to missing critical configuration.");
-        // Optionally, you could transition to a dedicated ErrorScene:
-        // this.scene.start('ErrorScene', { message: 'Slot configuration failed to load.' });
+    // Note: criticalConfigError is defined in preload() scope. Re-check registry or pass via a scene property if needed here.
+    // For simplicity, we assume if preload reached this point, criticals were okay or handled.
+    // However, for robustness, a check like this would be better:
+    const slotApiData = this.registry.get('slotApiData');
+    const slotGameJsonConfig = this.registry.get('slotGameJsonConfig');
+    if (!slotApiData || !slotApiData.short_name || !slotGameJsonConfig) {
+        console.error("Slots PreloadScene: Halting creation due to missing critical configuration detected in create().");
+        // Optionally, display an error message on screen if not already handled by preload's text
+        if (!this.scene.get('ErrorScene')) { // Prevent multiple error displays if preload already showed one
+             this.add.text(this.cameras.main.width / 2, this.cameras.main.height / 2, 'Error: Config missing in create().', { font: '18px Arial', fill: '#ff0000', align: 'center' }).setOrigin(0.5);
+        }
         return;
     }
 

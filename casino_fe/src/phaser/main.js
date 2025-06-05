@@ -4,6 +4,7 @@ import GameScene from './scenes/GameScene';
 import UIScene from './scenes/UIScene';
 import SettingsModalScene from './scenes/SettingsModalScene';
 import PreloadScene from './scenes/PreloadScene'; // Add PreloadScene
+import BonusHoldAndWinScene from './scenes/BonusHoldAndWinScene';
 
 const config = {
   type: Phaser.AUTO, // Auto-detect renderer (WebGL or Canvas)
@@ -33,7 +34,7 @@ const config = {
     },
   },
   // Define game scenes, order matters (first scene is started first)
-  scene: [BootScene, PreloadScene, GameScene, UIScene, SettingsModalScene],
+  scene: [BootScene, PreloadScene, GameScene, UIScene, SettingsModalScene, BonusHoldAndWinScene],
 
   // Prevent blur on resized textures (important for pixel art if pixelArt: true)
   // Mipmapping can cause blurriness when downscaling

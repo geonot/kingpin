@@ -69,7 +69,9 @@ export default class UIScene extends Phaser.Scene {
             this.updateBalance(data.balance);
         }
         if (data.winAmount !== undefined) {
-            this.updateWin(data.winAmount, data.isScatter);
+            // Pass isBonusWin or isTotalWin if present in data
+            const isTotalOrBonus = data.isBonusWin || data.isTotalWin || false;
+            this.updateWin(data.winAmount, data.isScatter, data.ways, isTotalOrBonus);
         }
         if (data.balanceInsufficient !== undefined) {
             this.handleInsufficientBalance(data.balanceInsufficient);
@@ -294,19 +296,27 @@ export default class UIScene extends Phaser.Scene {
     }
   }
 
-  updateWin(winAmountSats, isScatter = false, ways = undefined) {
+  updateWin(winAmountSats, isScatter = false, ways = undefined, isTotalOrBonusWin = false) {
      try {
        if (this.winText && this.winText.active && this.scene.isActive()) {
           const formattedWin = formatSatsToBtc(winAmountSats, true); // Assuming true adds BTC suffix
           let displayText = '';
 
           if (winAmountSats > 0) {
-              if (isScatter) {
+              if (isTotalOrBonusWin) {
+                  // GameScene might send isBonusWin specifically, or just a total that implies it.
+                  // For now, a generic "Total Win" or "Bonus Win" if we refine data from GameScene.
+                  // If data specifically says data.isBonusWin, we can use "Bonus Win: "
+                  // Otherwise, for a general total win (which could be from bonus), "Total Win: " is safe.
+                  displayText = `Total Win: ${formattedWin}`;
+                  // If GameScene sends `isBonusWin: true` specifically for the final bonus payout,
+                  // we could have: displayText = data.isBonusWin ? `Bonus Win: ${formattedWin}` : `Total Win: ${formattedWin}`;
+              } else if (isScatter) {
                   displayText = `SCATTER: ${formattedWin}`;
               } else if (ways !== undefined && ways > 0) {
                   displayText = `${formattedWin} (${ways} WAYS)`;
-              } else { // Standard payline win or simple total win if no line/way detail
-                  displayText = formattedWin;
+              } else { // Standard payline win
+                  displayText = formattedWin; // Individual line wins might not need "Line Win:" prefix here if GameScene manages that cycle
               }
               this.winText.setText(displayText);
               this.winText.setVisible(true);
