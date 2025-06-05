@@ -10,7 +10,8 @@ from .models import (
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
-    PlinkoDropLog  # Plinko models
+    PlinkoDropLog,  # Plinko models
+    BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
 )
 from casino_be.utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Plinko specific imports
 
@@ -473,3 +474,102 @@ class PlinkoPlayResponseSchema(Schema):
         else:
             if data.get('error') is None:
                 raise ValidationError("error is required when success is false.", "error")
+
+# --- Baccarat Schemas ---
+
+class BaccaratTableSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = BaccaratTable
+        load_instance = True
+        sqla_session = db.session
+        # Fields to expose for a table listing or detail view
+        fields = ("id", "name", "description", "min_bet", "max_bet", "max_tie_bet", "commission_rate", "is_active", "created_at", "updated_at")
+
+    id = auto_field(dump_only=True)
+    name = auto_field()
+    description = auto_field(allow_none=True)
+    min_bet = auto_field()
+    max_bet = auto_field()
+    max_tie_bet = auto_field()
+    commission_rate = auto_field() # Numeric type, Marshmallow handles Decimal
+    is_active = auto_field(dump_only=True)
+    created_at = auto_field(dump_only=True)
+    updated_at = auto_field(dump_only=True)
+
+class BaccaratActionSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = BaccaratAction
+        load_instance = True
+        sqla_session = db.session
+        fields = ("id", "user_id", "action_type", "bet_on_player", "bet_on_banker", "bet_on_tie", "action_details", "created_at")
+
+    id = auto_field(dump_only=True)
+    user_id = auto_field(dump_only=True)
+    action_type = auto_field()
+    bet_on_player = auto_field(allow_none=True)
+    bet_on_banker = auto_field(allow_none=True)
+    bet_on_tie = auto_field(allow_none=True)
+    action_details = auto_field(allow_none=True) # JSON field
+    created_at = auto_field(dump_only=True)
+
+
+class BaccaratHandSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = BaccaratHand
+        load_instance = True
+        sqla_session = db.session
+        # Define fields to include to control what's exposed
+        fields = (
+            "id", "user_id", "table_id", "game_session_id",
+            "initial_bet_player", "initial_bet_banker", "initial_bet_tie", "total_bet_amount",
+            "win_amount", "player_cards", "banker_cards", "player_score", "banker_score",
+            "outcome", "commission_paid", "status", "details",
+            "created_at", "updated_at", "completed_at",
+            "user", "table", "actions" # Nested fields
+        )
+
+    id = auto_field(dump_only=True)
+    user_id = auto_field(dump_only=True)
+    table_id = auto_field(dump_only=True)
+    game_session_id = auto_field(dump_only=True)
+    initial_bet_player = auto_field()
+    initial_bet_banker = auto_field()
+    initial_bet_tie = auto_field()
+    total_bet_amount = auto_field()
+    win_amount = auto_field() # Net profit
+    player_cards = auto_field() # JSON
+    banker_cards = auto_field() # JSON
+    player_score = auto_field(allow_none=True)
+    banker_score = auto_field(allow_none=True)
+    outcome = auto_field(allow_none=True)
+    commission_paid = auto_field()
+    status = auto_field()
+    details = auto_field(allow_none=True) # JSON field from baccarat_helper
+    created_at = auto_field(dump_only=True)
+    updated_at = auto_field(dump_only=True)
+    completed_at = auto_field(allow_none=True, dump_only=True)
+
+    user = fields.Nested(UserSchema, only=("id", "username", "balance"))
+    table = fields.Nested(BaccaratTableSchema, only=("id", "name"))
+    actions = fields.List(fields.Nested(BaccaratActionSchema, exclude=("baccarat_hand_id",)), dump_only=True)
+
+
+class PlaceBaccaratBetSchema(Schema):
+    table_id = fields.Int(required=True, validate=Range(min=1))
+    bet_on_player = fields.Int(required=False, missing=0, validate=Range(min=0))
+    bet_on_banker = fields.Int(required=False, missing=0, validate=Range(min=0))
+    bet_on_tie = fields.Int(required=False, missing=0, validate=Range(min=0))
+
+    @validates_schema
+    def validate_bets(self, data, **kwargs):
+        player_bet = data.get("bet_on_player", 0)
+        banker_bet = data.get("bet_on_banker", 0)
+        tie_bet = data.get("bet_on_tie", 0)
+
+        if player_bet < 0 or banker_bet < 0 or tie_bet < 0:
+            raise ValidationError("Bet amounts cannot be negative.")
+
+        total_bet = player_bet + banker_bet + tie_bet
+        if total_bet <= 0:
+            raise ValidationError("At least one bet amount must be positive, and the total bet must be greater than zero.")
+        return data
