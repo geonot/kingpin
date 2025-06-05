@@ -18,6 +18,11 @@ const Spacecrash = () => import('@/views/Spacecrash.vue'); // Import Spacecrash 
 const Plinko = () => import('@views/Plinko.vue'); // Added Plinko
 const Roulette = () => import('@/views/Roulette.vue'); // Added Roulette
 
+// New Page Imports
+const BonusesPage = () => import('@/views/BonusesPage.vue');
+const PromotionsPage = () => import('@/views/PromotionsPage.vue');
+const TransactionsPage = () => import('@/views/TransactionsPage.vue');
+
 // Placeholder components for routes added
 const Terms = () => import('@/views/static/TermsPage.vue');
 const Privacy = () => import('@/views/static/PrivacyPage.vue');
@@ -88,6 +93,24 @@ const routes = [
     name: 'Settings',
     component: Settings,
     meta: { title: 'Settings', requiresAuth: true }
+  },
+  {
+    path: '/bonuses',
+    name: 'Bonuses',
+    component: BonusesPage,
+    meta: { title: 'Bonuses', requiresAuth: true }
+  },
+  {
+    path: '/promotions',
+    name: 'Promotions',
+    component: PromotionsPage,
+    meta: { title: 'Promotions', requiresAuth: true }
+  },
+  {
+    path: '/transactions',
+    name: 'Transactions',
+    component: TransactionsPage,
+    meta: { title: 'Transaction History', requiresAuth: true }
   },
   {
     path: '/spacecrash',

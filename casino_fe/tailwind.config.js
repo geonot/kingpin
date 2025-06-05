@@ -8,24 +8,30 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'royal-purple': '#4B0082', // Indigo-900 is close
-        'gold': '#FFD700',          // Amber-400 is close
-        'silver': '#C0C0C0',        // Gray-400 is close
-        'royal-blue': '#4169E1',    // Blue-600 is close
-        'dark-gold': '#B8860B',     // Amber-600 is close
-        'dark-blue': '#1F3A93',     // Indigo-800 is close
-        'light-purple': '#9370DB', // Violet-400 is close
-        'success-green': '#27AE60', // Green-600
-        'warning-red': '#E74C3C',   // Red-600
-        'neutral-gray': '#95A5A6', // CoolGray-400 / Slate-400
-        'dark-bg': '#1a1a2e',      // Example dark background
-        'dark-card': '#16213e',    // Example dark card background
-        'dark-text': '#e0e0e0',     // Example dark text color
+        // Primary Palette (semantic names from CSS variables)
+        'text-primary': 'var(--color-text-primary)', // Use CSS vars directly
+        'text-secondary': 'var(--color-text-secondary)',
+        'bg-primary': 'var(--color-bg-primary)',
+        'bg-secondary': 'var(--color-bg-secondary)',
+        'accent': 'var(--color-accent)',
+        'accent-hover': 'var(--color-accent-hover)',
+        'highlight': 'var(--color-highlight)',
+        'border': 'var(--color-border)', // Simplified name
+
+        // Utility/Brand Colors (direct hex for Tailwind, CSS vars manage dark/light)
+        'brand-royal-purple': '#4B0082', // Same as light --color-accent
+        'brand-gold': '#FFD700',         // Same as --color-highlight
+        'brand-silver': '#C0C0C0',
+        'brand-royal-blue': '#4169E1',
+        'brand-dark-gold': '#B8860B',
+        'brand-dark-blue': '#1F3A93',
+        'brand-light-purple': '#9370DB', // Same as dark --color-accent
+        'brand-success': '#27AE60',
+        'brand-warning': '#E74C3C',
       },
       fontFamily: {
-        // Add Poppins and Roboto if needed, ensure they are imported via CSS or linked
-        sans: ['Poppins', 'ui-sans-serif', 'system-ui'],
-        body: ['Roboto', 'ui-sans-serif', 'system-ui'],
+        sans: ['Poppins', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'],
+        roboto: ['Roboto', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'],
       },
       backgroundImage: {
         // Add custom background images if needed

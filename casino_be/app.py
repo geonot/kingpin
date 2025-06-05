@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Blueprint
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
@@ -17,7 +17,8 @@ from .models import (
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
-    PlinkoDropLog, RouletteGame  # Plinko models, added RouletteGame
+    PlinkoDropLog, RouletteGame,  # Plinko models, added RouletteGame
+    BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
 )
 from .schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
@@ -27,7 +28,9 @@ from .schemas import (
     AdminCreditDepositSchema, UserBonusSchema,
     SpacecrashBetSchema, SpacecrashGameSchema, SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema,  # Spacecrash schemas
     PokerTableSchema, PokerPlayerStateSchema, PokerHandSchema, JoinPokerTableSchema, PokerActionSchema,  # Poker schemas
-    PlinkoPlayRequestSchema, PlinkoPlayResponseSchema  # Plinko schemas
+    PlinkoPlayRequestSchema, PlinkoPlayResponseSchema,  # Plinko schemas
+    # Baccarat schemas will be defined below for now, or imported if moved to a separate file
+    BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema, BaccaratActionSchema # Actual Baccarat Schemas
 )
 from .utils.bitcoin import generate_bitcoin_wallet
 from .utils.spin_handler import handle_spin
@@ -37,8 +40,10 @@ from .utils import spacecrash_handler
 from .utils import poker_helper
 from .utils import roulette_helper # Import the new helper
 from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
+from .utils import baccarat_helper
 from .config import Config
 from sqlalchemy.orm import joinedload # Added for poker join logic
+from decimal import Decimal
 from .services.bonus_service import apply_bonus_to_deposit
 from http import HTTPStatus
 
@@ -1457,8 +1462,6 @@ def spacecrash_admin_next_phase():
         logger.error(f"Error transitioning Spacecrash game {game.id} to {target_phase} by admin {current_user.id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to transition game phase due to an internal error.'}), 500
 
-# === Roulette Game Endpoints ===
-
 @app.route('/api/roulette/bet', methods=['POST'])
 @jwt_required()
 def roulette_bet():
@@ -1551,3 +1554,222 @@ def roulette_history():
     } for game in games]
 
     return jsonify(history_data), 200
+
+baccarat_bp = Blueprint('baccarat_bp', __name__, url_prefix='/api/baccarat')
+
+@baccarat_bp.route('/tables', methods=['GET'])
+@jwt_required()
+def get_baccarat_tables():
+    try:
+        tables = BaccaratTable.query.filter_by(is_active=True).order_by(BaccaratTable.id).all()
+        result = BaccaratTableSchema(many=True).dump(tables)
+        return jsonify({'status': True, 'tables': result}), HTTPStatus.OK
+    except Exception as e:
+        logger.error(f"Failed to retrieve Baccarat tables list: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Could not retrieve Baccarat table information.'}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+@baccarat_bp.route('/tables/<int:table_id>/join', methods=['POST'])
+@jwt_required()
+def join_baccarat_table(table_id):
+    user = current_user
+    table = BaccaratTable.query.get(table_id)
+
+    if not table:
+        return jsonify({'status': False, 'status_message': f'Baccarat table {table_id} not found.'}), HTTPStatus.NOT_FOUND
+    if not table.is_active:
+        return jsonify({'status': False, 'status_message': f'Baccarat table {table_id} is not active.'}), HTTPStatus.BAD_REQUEST
+
+    # Optional: GameSession management similar to other games
+    # For now, just return table details.
+    # A GameSession could be created/updated here if Baccarat play is session-based.
+    # Example:
+    # now = datetime.now(timezone.utc)
+    # active_sessions = GameSession.query.filter_by(user_id=user.id, session_end=None).all()
+    # for session in active_sessions:
+    #     if session.baccarat_table_id != table_id or session.game_type != 'baccarat':
+    #         session.session_end = now
+    #
+    # existing_session = GameSession.query.filter_by(user_id=user.id, baccarat_table_id=table_id, game_type='baccarat', session_end=None).first()
+    # if not existing_session:
+    #     existing_session = GameSession(user_id=user.id, baccarat_table_id=table_id, game_type='baccarat', session_start=now)
+    #     db.session.add(existing_session)
+    #     db.session.commit()
+    #     logger.info(f"User {user.id} joined Baccarat table {table.id}, session {existing_session.id}.")
+    # else:
+    #     logger.info(f"User {user.id} re-joined Baccarat table {table.id}, existing session {existing_session.id}.")
+
+
+    return jsonify({'status': True, 'table': BaccaratTableSchema().dump(table)}), HTTPStatus.OK
+
+
+@baccarat_bp.route('/hands', methods=['POST'])
+@jwt_required()
+def play_baccarat_hand_route():
+    user = current_user
+    data = request.get_json()
+    # Use the imported PlaceBaccaratBetSchema from schemas.py
+    schema = PlaceBaccaratBetSchema()
+    try:
+        validated_data = schema.load(data)
+    except ValidationError as err:
+        return jsonify({'status': False, 'status_message': err.messages}), HTTPStatus.BAD_REQUEST
+
+    table_id = validated_data['table_id']
+    # validated_data now contains integers for bets from PlaceBaccaratBetSchema in schemas.py
+    bet_player_sats = validated_data['bet_on_player']
+    bet_banker_sats = validated_data['bet_on_banker']
+    bet_tie_sats = validated_data['bet_on_tie']
+
+    total_bet_sats = bet_player_sats + bet_banker_sats + bet_tie_sats
+
+    if total_bet_sats <= 0:
+        return jsonify({'status': False, 'status_message': 'Total bet amount must be positive.'}), HTTPStatus.BAD_REQUEST
+
+    table = BaccaratTable.query.get(table_id)
+    if not table:
+        return jsonify({'status': False, 'status_message': f'Baccarat table {table_id} not found.'}), HTTPStatus.NOT_FOUND
+    if not table.is_active:
+        return jsonify({'status': False, 'status_message': f'Baccarat table {table_id} is not active.'}), HTTPStatus.BAD_REQUEST
+
+    # Validate bets against table limits
+    if not (table.min_bet <= (bet_player_sats + bet_banker_sats) <= table.max_bet if (bet_player_sats + bet_banker_sats) > 0 else True):
+         return jsonify({'status': False, 'status_message': f'Player/Banker bet amount out of table limits ({table.min_bet}-{table.max_bet}).'}), HTTPStatus.BAD_REQUEST
+    if not (bet_tie_sats == 0 or (table.min_bet <= bet_tie_sats <= table.max_tie_bet)): # Assuming tie bet can be 0, or within its own limits
+         return jsonify({'status': False, 'status_message': f'Tie bet amount out of table limits ({table.min_bet}-{table.max_tie_bet}).'}), HTTPStatus.BAD_REQUEST
+    # More granular checks:
+    if bet_player_sats > 0 and not (table.min_bet <= bet_player_sats <= table.max_bet):
+        return jsonify({'status': False, 'status_message': f'Player bet {bet_player_sats} out of limits ({table.min_bet}-{table.max_bet}).'}), HTTPStatus.BAD_REQUEST
+    if bet_banker_sats > 0 and not (table.min_bet <= bet_banker_sats <= table.max_bet):
+        return jsonify({'status': False, 'status_message': f'Banker bet {bet_banker_sats} out of limits ({table.min_bet}-{table.max_bet}).'}), HTTPStatus.BAD_REQUEST
+    if bet_tie_sats > 0 and not (table.min_bet <= bet_tie_sats <= table.max_tie_bet): # Assuming min_bet also applies to tie if >0
+        return jsonify({'status': False, 'status_message': f'Tie bet {bet_tie_sats} out of limits ({table.min_bet}-{table.max_tie_bet}).'}), HTTPStatus.BAD_REQUEST
+
+
+    if user.balance < total_bet_sats:
+        return jsonify({'status': False, 'status_message': 'Insufficient balance.'}), HTTPStatus.BAD_REQUEST
+
+    now = datetime.now(timezone.utc)
+    game_session = None
+    try:
+        # GameSession Management
+        active_sessions = GameSession.query.filter_by(user_id=user.id, session_end=None).all()
+        for session in active_sessions:
+            if session.game_type != 'baccarat' or session.baccarat_table_id != table_id:
+                session.session_end = now
+
+        game_session = GameSession.query.filter_by(user_id=user.id, game_type='baccarat', baccarat_table_id=table_id, session_end=None).first()
+        if not game_session:
+            game_session = GameSession(user_id=user.id, game_type='baccarat', baccarat_table_id=table_id, session_start=now)
+            db.session.add(game_session)
+            db.session.flush() # To get game_session.id
+
+        # Create initial BaccaratHand
+        baccarat_hand = BaccaratHand(
+            user_id=user.id,
+            table_id=table_id,
+            game_session_id=game_session.id,
+            initial_bet_player=bet_player_sats,
+            initial_bet_banker=bet_banker_sats,
+            initial_bet_tie=bet_tie_sats,
+            total_bet_amount=total_bet_sats,
+            status='pending_play', # Will be updated after baccarat_helper call
+            created_at=now,
+            updated_at=now
+        )
+        db.session.add(baccarat_hand)
+
+        # Deduct balance & create wager transaction
+        user.balance -= total_bet_sats
+        game_session.amount_wagered = (game_session.amount_wagered or 0) + total_bet_sats
+
+        db.session.flush() # To get baccarat_hand.id for transaction
+
+        wager_tx = Transaction(
+            user_id=user.id,
+            amount=-total_bet_sats, # Negative for wager
+            transaction_type='baccarat_wager',
+            status='completed',
+            baccarat_hand_id=baccarat_hand.id,
+            details={
+                'table_id': table_id,
+                'player_bet': bet_player_sats,
+                'banker_bet': bet_banker_sats,
+                'tie_bet': bet_tie_sats
+            }
+        )
+        db.session.add(wager_tx)
+
+        # Call baccarat_helper (ensure amounts are passed as Decimal or int as helper expects)
+        # The helper was written to expect numeric types for bets, Decimal for commission_rate.
+        # Tie payout rate is int.
+        helper_result = baccarat_helper.play_baccarat_hand(
+            player_bet_amount=Decimal(str(bet_player_sats)), # Helper uses Decimal
+            banker_bet_amount=Decimal(str(bet_banker_sats)),
+            tie_bet_amount=Decimal(str(bet_tie_sats)),
+            num_decks=6, # Could be from table.rules if stored
+            commission_rate=table.commission_rate, # This is already Decimal from model
+            tie_payout_rate=8 # Could be from table.rules, e.g. table.tie_payout_rate or parsed from JSON rules
+        )
+
+        if "error" in helper_result: # Should not happen if inputs are valid
+            logger.error(f"Baccarat helper error for user {user.id} on table {table_id}: {helper_result['error']}")
+            db.session.rollback() # Rollback the wager
+            return jsonify({'status': False, 'status_message': f"Game logic error: {helper_result['error']}"}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+        # Update BaccaratHand with results
+        baccarat_hand.player_cards = helper_result['player_cards']
+        baccarat_hand.banker_cards = helper_result['banker_cards']
+        baccarat_hand.player_score = helper_result['player_score']
+        baccarat_hand.banker_score = helper_result['banker_score']
+        baccarat_hand.outcome = helper_result['outcome']
+        baccarat_hand.win_amount = int(helper_result['net_profit']) # net_profit is Decimal in helper
+        baccarat_hand.commission_paid = int(helper_result['commission_paid']) # commission_paid is Decimal
+        baccarat_hand.status = 'completed'
+        baccarat_hand.completed_at = datetime.now(timezone.utc)
+        baccarat_hand.updated_at = baccarat_hand.completed_at
+        baccarat_hand.details = helper_result.get('details', {}) # Store extra details from helper
+
+        total_winnings_sats = int(helper_result['total_winnings']) # total_winnings is gross payout (Decimal)
+
+        if total_winnings_sats > 0:
+            user.balance += total_winnings_sats
+            win_tx = Transaction(
+                user_id=user.id,
+                amount=total_winnings_sats,
+                transaction_type='baccarat_win',
+                status='completed',
+                baccarat_hand_id=baccarat_hand.id,
+                details={'outcome': baccarat_hand.outcome, 'gross_win': total_winnings_sats, 'net_profit': baccarat_hand.win_amount}
+            )
+            db.session.add(win_tx)
+
+        game_session.amount_won = (game_session.amount_won or 0) + baccarat_hand.win_amount # net profit
+
+        db.session.commit()
+        logger.info(f"Baccarat hand {baccarat_hand.id} completed for user {user.id} on table {table_id}. Outcome: {baccarat_hand.outcome}, Net Win: {baccarat_hand.win_amount}")
+
+        # Include user balance in the response for the hand schema
+        # The schema BaccaratHandSchema now has a nested UserSchema for this.
+        return jsonify({'status': True, 'hand': BaccaratHandSchema().dump(baccarat_hand)}), HTTPStatus.OK
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Baccarat play hand error for user {user.id} on table {table_id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Failed to play Baccarat hand due to an internal error.'}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@baccarat_bp.route('/hands/<int:hand_id>', methods=['GET'])
+@jwt_required()
+def get_baccarat_hand(hand_id):
+    user = current_user
+    hand = BaccaratHand.query.get(hand_id)
+
+    if not hand:
+        return jsonify({'status': False, 'status_message': f'Baccarat hand {hand_id} not found.'}), HTTPStatus.NOT_FOUND
+
+    if hand.user_id != user.id and not user.is_admin:
+        return jsonify({'status': False, 'status_message': 'You are not authorized to view this hand.'}), HTTPStatus.FORBIDDEN
+
+    return jsonify({'status': True, 'hand': BaccaratHandSchema().dump(hand)}), HTTPStatus.OK
+
+app.register_blueprint(baccarat_bp)

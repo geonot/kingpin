@@ -1,50 +1,50 @@
 <template>
   <div class="container mx-auto mt-10 max-w-lg px-4">
-    <h2 class="text-3xl font-bold text-center mb-8 text-gray-800 dark:text-gray-100">Account Settings</h2>
+    <h2 class="text-center mb-8">Account Settings</h2>
 
-    <div v-if="!currentUser" class="text-center p-6 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 rounded-md shadow">
+    <div v-if="!currentUser" class="card text-center">
       Please log in to access your settings.
     </div>
 
     <div v-else class="space-y-10">
       <!-- Update Email Section -->
-      <form @submit.prevent="handleUpdateEmail" class="bg-white dark:bg-dark-card p-6 md:p-8 rounded-lg shadow-lg space-y-6">
-        <h3 class="text-xl font-semibold text-gray-900 dark:text-white border-b dark:border-gray-700 pb-3">Update Email</h3>
+      <form @submit.prevent="handleUpdateEmail" class="card space-y-6">
+        <h3 class="border-b border-border pb-3">Update Email</h3>
 
         <error-message :error="emailApiError" @dismiss="emailApiError = null" />
-        <div v-if="emailSuccessMessage" class="mb-4 p-3 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-100 border border-green-300 dark:border-green-600 rounded-md text-sm">
+        <div v-if="emailSuccessMessage" class="alert-success mb-4 text-sm">
           {{ emailSuccessMessage }}
         </div>
 
         <div>
-          <label for="username_disabled" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
+          <label for="username_disabled" class="mb-1">Username</label>
           <input
             id="username_disabled"
             type="text"
             :value="currentUser.username"
-            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-gray-100 dark:bg-gray-700 dark:text-gray-400 cursor-not-allowed"
+            class="form-input mt-1 cursor-not-allowed"
             disabled
           />
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Username cannot be changed.</p>
         </div>
 
         <div>
-          <label for="email" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
+          <label for="email" class="mb-1">Email Address</label>
           <input
             v-model="emailForm.email"
             id="email"
             type="email"
-            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
+            class="form-input mt-1"
             placeholder="your.email@example.com"
             required
           />
-          <p v-if="formErrors.email" class="text-xs text-red-500 mt-1">{{ formErrors.email }}</p>
+          <p v-if="formErrors.email" class="text-xs text-brand-warning mt-1">{{ formErrors.email }}</p>
         </div>
         <div class="text-right">
           <button
             type="submit"
             :disabled="isEmailLoading || !isEmailFormChanged || formErrors.email"
-            class="inline-flex justify-center items-center px-6 py-2.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-royal-blue hover:bg-dark-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            class="btn-secondary inline-flex justify-center items-center"
           >
             <svg v-if="isEmailLoading" class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -56,44 +56,44 @@
       </form>
 
       <!-- Change Password Section -->
-      <form @submit.prevent="handleChangePassword" class="bg-white dark:bg-dark-card p-6 md:p-8 rounded-lg shadow-lg space-y-6">
-        <h3 class="text-xl font-semibold text-gray-900 dark:text-white border-b dark:border-gray-700 pb-3">Change Password</h3>
+      <form @submit.prevent="handleChangePassword" class="card space-y-6">
+        <h3 class="border-b border-border pb-3">Change Password</h3>
 
         <error-message :error="passwordApiError" @dismiss="passwordApiError = null" />
-         <div v-if="passwordSuccessMessage" class="mb-4 p-3 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-100 border border-green-300 dark:border-green-600 rounded-md text-sm">
+         <div v-if="passwordSuccessMessage" class="alert-success mb-4 text-sm">
           {{ passwordSuccessMessage }}
         </div>
 
         <div>
-          <label for="newPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Password</label>
+          <label for="newPassword" class="mb-1">New Password</label>
           <input
             v-model="passwordForm.password"
             id="newPassword"
             type="password"
-            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
+            class="form-input mt-1"
             placeholder="Enter new password"
           />
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char.</p>
-          <p v-if="formErrors.password" class="text-xs text-red-500 mt-1">{{ formErrors.password }}</p>
+          <p v-if="formErrors.password" class="text-xs text-brand-warning mt-1">{{ formErrors.password }}</p>
         </div>
 
         <div>
-          <label for="confirmPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm New Password</label>
+          <label for="confirmPassword" class="mb-1">Confirm New Password</label>
           <input
             v-model="passwordForm.confirmPassword"
             id="confirmPassword"
             type="password"
-            class="mt-1 block w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-royal-blue focus:border-royal-blue dark:bg-gray-700 dark:text-white"
+            class="form-input mt-1"
             placeholder="Confirm new password"
             :required="!!passwordForm.password"
           />
-          <p v-if="formErrors.confirmPassword" class="text-xs text-red-500 mt-1">{{ formErrors.confirmPassword }}</p>
+          <p v-if="formErrors.confirmPassword" class="text-xs text-brand-warning mt-1">{{ formErrors.confirmPassword }}</p>
         </div>
         <div class="text-right">
           <button
             type="submit"
             :disabled="isPasswordLoading || !passwordForm.password || formErrors.password || formErrors.confirmPassword"
-            class="inline-flex justify-center items-center px-6 py-2.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-royal-blue hover:bg-dark-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            class="btn-secondary inline-flex justify-center items-center"
           >
             <svg v-if="isPasswordLoading" class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -261,9 +261,9 @@ const handleChangePassword = async () => {
 
 <style scoped>
 /* Add specific styles if needed */
-input:disabled {
+/* input:disabled {
   opacity: 0.7;
-}
+} */
 </style>
 
 

@@ -2,7 +2,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone
 from passlib.hash import pbkdf2_sha256 as sha256
 from decimal import Decimal
-from sqlalchemy import BigInteger, Index, JSON, UniqueConstraint
+from sqlalchemy import BigInteger, Index, JSON, UniqueConstraint, Numeric
 
 db = SQLAlchemy()
 
@@ -28,6 +28,7 @@ class User(db.Model):
     poker_states = db.relationship('PokerPlayerState', back_populates='user', lazy='dynamic')
     plinko_drops = db.relationship('PlinkoDropLog', back_populates='user', lazy=True)
     # roulette_games backref will be added by RouletteGame model
+    baccarat_hands = db.relationship('BaccaratHand', back_populates='user', lazy='dynamic')
 
     def check_password(self, password):
         return sha256.verify(password, self.password)
@@ -50,6 +51,7 @@ class GameSession(db.Model):
     slot_id = db.Column(db.Integer, db.ForeignKey('slot.id'), nullable=True, index=True)
     table_id = db.Column(db.Integer, db.ForeignKey('blackjack_table.id'), nullable=True, index=True)
     poker_table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id'), nullable=True, index=True)
+    baccarat_table_id = db.Column(db.Integer, db.ForeignKey('baccarat_table.id'), nullable=True, index=True)
     game_type = db.Column(db.String(50), nullable=False, index=True)
     bonus_active = db.Column(db.Boolean, default=False, nullable=False)
     bonus_spins_remaining = db.Column(db.Integer, default=0, nullable=False)
@@ -64,6 +66,9 @@ class GameSession(db.Model):
     slot = db.relationship('Slot', backref='game_sessions')
     blackjack_table = db.relationship('BlackjackTable', backref='game_sessions')
     poker_table = db.relationship('PokerTable', backref='game_sessions')
+    baccarat_table = db.relationship('BaccaratTable', backref='game_sessions')
+    baccarat_hands = db.relationship('BaccaratHand', back_populates='session', lazy='dynamic')
+
 
     def __repr__(self):
         return f"<GameSession {self.id} (User: {self.user_id}, Type: {self.game_type})>"
@@ -102,6 +107,8 @@ class Transaction(db.Model):
     plinko_drop_log = db.relationship('PlinkoDropLog', backref=db.backref('transactions', lazy='dynamic'))
     poker_hand_id = db.Column(db.Integer, db.ForeignKey('poker_hand.id'), nullable=True, index=True)
     poker_hand = db.relationship('PokerHand', backref=db.backref('transactions', lazy='dynamic'))
+    baccarat_hand_id = db.Column(db.Integer, db.ForeignKey('baccarat_hand.id'), nullable=True, index=True)
+    baccarat_hand = db.relationship('BaccaratHand', backref=db.backref('transactions', lazy='dynamic'))
 
     def __repr__(self):
         return f"<Transaction {self.id} (User: {self.user_id}, Type: {self.transaction_type}, Amount: {self.amount})>"
@@ -425,3 +432,71 @@ class RouletteGame(db.Model):
 
     def __repr__(self):
         return f'<RouletteGame {self.id} by User {self.user_id} - Bet: {self.bet_amount} on {self.bet_type}>'
+
+# Baccarat Models
+class BaccaratTable(db.Model):
+    __tablename__ = 'baccarat_table'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    min_bet = db.Column(BigInteger, nullable=False)
+    max_bet = db.Column(BigInteger, nullable=False)
+    max_tie_bet = db.Column(BigInteger, nullable=False)
+    commission_rate = db.Column(Numeric(5, 4), default=Decimal("0.05"), nullable=False) # e.g., 0.05 for 5%
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    hands = db.relationship('BaccaratHand', back_populates='table', lazy='dynamic')
+
+    def __repr__(self):
+        return f"<BaccaratTable {self.id} ({self.name})>"
+
+class BaccaratHand(db.Model):
+    __tablename__ = 'baccarat_hand'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('baccarat_table.id'), nullable=False, index=True)
+    game_session_id = db.Column(db.Integer, db.ForeignKey('game_session.id'), nullable=False, index=True)
+    initial_bet_player = db.Column(BigInteger, default=0, nullable=False)
+    initial_bet_banker = db.Column(BigInteger, default=0, nullable=False)
+    initial_bet_tie = db.Column(BigInteger, default=0, nullable=False)
+    total_bet_amount = db.Column(BigInteger, nullable=False)
+    win_amount = db.Column(BigInteger, default=0, nullable=False)
+    player_cards = db.Column(JSON, nullable=True) # Store as list of strings e.g. ["H5", "C2"]
+    banker_cards = db.Column(JSON, nullable=True) # Store as list of strings
+    player_score = db.Column(db.Integer, nullable=True)
+    banker_score = db.Column(db.Integer, nullable=True)
+    outcome = db.Column(db.String(50), nullable=True, index=True) # e.g., "player_win", "banker_win", "tie"
+    commission_paid = db.Column(BigInteger, default=0, nullable=False)
+    status = db.Column(db.String(50), default='pending_bet', nullable=False, index=True) # e.g., "pending_bet", "dealing", "completed"
+    details = db.Column(JSON, nullable=True) # For extra info like deck state, third-card reasons
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    user = db.relationship('User', back_populates='baccarat_hands')
+    table = db.relationship('BaccaratTable', back_populates='hands')
+    session = db.relationship('GameSession', back_populates='baccarat_hands')
+    actions = db.relationship('BaccaratAction', back_populates='hand', lazy='dynamic')
+
+    def __repr__(self):
+        return f"<BaccaratHand {self.id} (User: {self.user_id}, Table: {self.table_id}, Status: {self.status})>"
+
+class BaccaratAction(db.Model):
+    __tablename__ = 'baccarat_action'
+    id = db.Column(db.Integer, primary_key=True)
+    baccarat_hand_id = db.Column(db.Integer, db.ForeignKey('baccarat_hand.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True) # User performing the action
+    action_type = db.Column(db.String(50), nullable=False) # e.g., "place_bet", "player_draw", "banker_draw"
+    bet_on_player = db.Column(BigInteger, nullable=True)
+    bet_on_banker = db.Column(BigInteger, nullable=True)
+    bet_on_tie = db.Column(BigInteger, nullable=True)
+    action_details = db.Column(JSON, nullable=True) # e.g., card dealt, updated scores
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    hand = db.relationship('BaccaratHand', back_populates='actions')
+    user = db.relationship('User', backref='baccarat_actions') # Simple backref as User might have many actions across games
+
+    def __repr__(self):
+        return f"<BaccaratAction {self.id} (Hand: {self.baccarat_hand_id}, User: {self.user_id}, Type: {self.action_type})>"

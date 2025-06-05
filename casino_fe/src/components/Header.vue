@@ -1,5 +1,5 @@
 <template>
-  <header class="bg-gradient-to-r from-gray-800 via-gray-900 to-black dark:from-neutral-800 dark:via-black dark:to-black text-white shadow-lg sticky top-0 z-50">
+  <header class="bg-bg-secondary text-text-primary shadow-lg sticky top-0 z-50">
     <nav class="container mx-auto px-4 py-3 flex justify-between items-center">
       <!-- Logo -->
       <router-link :to="isAuthenticated ? '/slots' : '/'" class="flex items-center flex-shrink-0">
@@ -15,7 +15,7 @@
           <router-link to="/spacecrash" class="nav-link">Spacecrash</router-link>
           <router-link to="/plinko" class="nav-link">Plinko</router-link>
           <router-link to="/deposit" class="nav-link">Deposit</router-link>
-          <div v-if="user && user.balance !== undefined" class="nav-link text-gold">
+          <div v-if="user && user.balance !== undefined" class="nav-link text-highlight">
              <i class="fas fa-coins mr-1"></i> {{ formatSatsToBtc(user.balance, true) }}
           </div>
         </template>
@@ -37,24 +37,24 @@
           <transition name="dropdown-fade">
             <ul
               v-if="dropdownOpen"
-              class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg overflow-hidden z-60"
+              class="absolute right-0 mt-2 w-48 bg-bg-secondary rounded-md shadow-lg overflow-hidden z-60"
             >
               <li><router-link to="/settings" @click="closeDropdownOnNav" class="dropdown-item"><i class="fas fa-cog mr-2 w-4 text-center"></i>Settings</router-link></li>
               <li><router-link to="/withdraw" @click="closeDropdownOnNav" class="dropdown-item"><i class="fas fa-wallet mr-2 w-4 text-center"></i>Withdraw</router-link></li>
               <li v-if="isAdmin"><router-link to="/admin" @click="closeDropdownOnNav" class="dropdown-item"><i class="fas fa-user-shield mr-2 w-4 text-center"></i>Admin</router-link></li>
-              <li><hr class="border-gray-200 dark:border-gray-700 my-1"/></li>
-              <li><a href="#" @click.prevent="handleLogout" class="dropdown-item text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900"><i class="fas fa-sign-out-alt mr-2 w-4 text-center"></i>Logout</a></li>
+              <li><hr class="dropdown-separator my-1"/></li>
+              <li><a href="#" @click.prevent="handleLogout" class="dropdown-item-logout"><i class="fas fa-sign-out-alt mr-2 w-4 text-center"></i>Logout</a></li>
             </ul>
           </transition>
         </div>
 
         <!-- Dark Mode Toggle Button -->
-        <button @click="toggleDarkMode" class="p-2 rounded-full hover:bg-gray-700 dark:hover:bg-gray-600 focus:outline-none" :title="isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+        <button @click="toggleDarkMode" class="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 focus:outline-none" :title="isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
           <i :class="isDarkMode ? 'fas fa-sun' : 'fas fa-moon'" class="text-lg text-yellow-400 dark:text-yellow-300"></i>
         </button>
 
         <!-- Mobile Menu Button (Hamburger) -->
-        <button @click="toggleMobileMenu" class="md:hidden p-2 rounded-md hover:bg-gray-700 dark:hover:bg-gray-600 focus:outline-none" aria-label="Open menu">
+        <button @click="toggleMobileMenu" class="md:hidden p-2 rounded-md hover:bg-black/10 dark:hover:bg-white/10 focus:outline-none" aria-label="Open menu">
           <i :class="mobileMenuOpen ? 'fas fa-times' : 'fas fa-bars'" class="text-lg"></i>
         </button>
       </div>
@@ -62,7 +62,7 @@
 
     <!-- Mobile Menu -->
     <transition name="slide-fade">
-      <div v-if="mobileMenuOpen" class="md:hidden absolute top-full left-0 right-0 bg-gray-800 dark:bg-black shadow-lg z-40 pb-4">
+      <div v-if="mobileMenuOpen" class="md:hidden absolute top-full left-0 right-0 bg-bg-secondary shadow-lg z-40 pb-4">
         <nav class="flex flex-col space-y-2 px-4 pt-2">
           <template v-if="isAuthenticated">
             <router-link to="/slots" @click="closeMobileMenu" class="mobile-nav-link">Slots</router-link>
@@ -70,10 +70,10 @@
             <router-link to="/spacecrash" @click="closeMobileMenu" class="mobile-nav-link">Spacecrash</router-link>
             <router-link to="/plinko" @click="closeMobileMenu" class="mobile-nav-link">Plinko</router-link> <!-- Added Plinko Link -->
             <router-link to="/deposit" @click="closeMobileMenu" class="mobile-nav-link">Deposit</router-link>
-            <div v-if="user && user.balance !== undefined" class="mobile-nav-link text-gold">
+            <div v-if="user && user.balance !== undefined" class="mobile-nav-link text-highlight">
                 <i class="fas fa-coins mr-1"></i> {{ formatSatsToBtc(user.balance, true) }}
             </div>
-            <hr class="border-gray-700 my-2"/>
+            <hr class="border-border my-2"/> <!-- Use border-border -->
             <router-link to="/settings" @click="closeMobileMenu" class="mobile-nav-link"><i class="fas fa-cog mr-2"></i>Settings</router-link>
             <router-link to="/withdraw" @click="closeMobileMenu" class="mobile-nav-link"><i class="fas fa-wallet mr-2"></i>Withdraw</router-link>
             <router-link v-if="isAdmin" to="/admin" @click="closeMobileMenu" class="mobile-nav-link"><i class="fas fa-user-shield mr-2"></i>Admin</router-link>
@@ -183,20 +183,38 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.nav-link {
-  @apply px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors;
+.nav-link { /* For desktop header links */
+  @apply px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150;
+  color: var(--color-text-secondary); /* Subtler than primary for nav links */
 }
-.mobile-nav-link {
-  @apply block px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors;
+.nav-link:hover {
+  color: var(--color-accent);
+  background-color: var(--color-highlight);
+}
+/* Active state for desktop nav-link */
+.router-link-exact-active.nav-link {
+  color: var(--color-accent);
+  background-color: var(--color-highlight);
+  font-weight: 600; /* Or @apply font-semibold */
 }
 
-.router-link-exact-active.nav-link,
+.mobile-nav-link {
+  @apply block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150;
+  color: var(--color-text-primary);
+}
+.mobile-nav-link:hover {
+  color: var(--color-accent);
+  background-color: var(--color-highlight);
+}
+/* Active state for mobile-nav-link */
 .router-link-exact-active.mobile-nav-link {
-   @apply bg-gray-700 text-white; /* More subtle active indication */
+  color: var(--color-accent);
+  background-color: var(--color-highlight);
+  font-weight: 600; /* Or @apply font-semibold */
 }
 
 .text-gold { /* Custom utility if needed, or use Tailwind's text-yellow-500 etc. */
-  color: #FFD700;
+  color: #FFD700; /* This class is still used in the template for balance, but will be overridden by text-highlight. Or remove this if text-highlight is used directly. */
 }
 
 .btn-outline-gold {
@@ -204,7 +222,26 @@ onBeforeUnmount(() => {
 }
 
 .dropdown-item {
-    @apply block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center transition-colors;
+    @apply block px-4 py-2 text-sm flex items-center transition-colors duration-150;
+    color: var(--color-text-primary); /* Uses CSS var for text */
+}
+.dropdown-item:hover {
+    background-color: var(--color-highlight);
+    color: var(--color-accent);
+}
+
+/* Logout link specific styling */
+.dropdown-item-logout {
+    @apply block px-4 py-2 text-sm flex items-center transition-colors duration-150;
+    color: var(--brand-warning); /* Default text color for logout */
+}
+.dropdown-item-logout:hover {
+    background-color: var(--brand-warning);
+    color: white; /* Ensure contrast on warning background */
+}
+
+.dropdown-separator {
+    border-color: var(--color-border);
 }
 
 /* Dropdown transition */
