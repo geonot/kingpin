@@ -27,39 +27,53 @@ manager.add_command('db', MigrateCommand)
 # Use host='0.0.0.0' to make it accessible externally if needed (e.g., in Docker)
 manager.add_command("runserver", Server(host="127.0.0.1", port=5000, use_debugger=True, use_reloader=True))
 
+import click # For prompting user input
+
 # Optional: Command to create admin user (if needed outside app run)
-@manager.command
-def create_admin():
-    """Creates the default admin user if it doesn't exist."""
+@manager.option('-u', '--username', dest='username', default=None, help='Admin username')
+@manager.option('-e', '--email', dest='email', default=None, help='Admin email')
+@manager.option('-p', '--password', dest='password', default=None, help='Admin password (will be prompted if not provided)')
+def create_admin(username, email, password):
+    """Creates an admin user with the given credentials."""
     from models import User # Import locally to avoid circular dependency issues
-    from config import Config
-    # from utils.bitcoin import generate_bitcoin_wallet # generate_bitcoin_wallet now only returns address
+    from utils.bitcoin import generate_bitcoin_wallet # Ensure this utility is available
 
-    if not User.query.filter_by(username=Config.ADMIN_USERNAME).first():
-        print(f"Creating default admin user: {Config.ADMIN_USERNAME}")
-        try:
-            admin_wallet_addr = generate_bitcoin_wallet() # Now only returns address
-            if not admin_wallet_addr:
-                print("Failed to generate wallet address for admin user. Aborting.")
-                return
+    if not username:
+        username = click.prompt("Enter admin username")
+    if not email:
+        email = click.prompt("Enter admin email")
+    if not password:
+        password = click.prompt("Enter admin password", hide_input=True, confirmation_prompt=True)
 
-            admin_user = User(
-                username=Config.ADMIN_USERNAME,
-                email=Config.ADMIN_EMAIL,
-                password=User.hash_password(Config.ADMIN_PASSWORD),
-                is_admin=True,
-                balance=1_000_000_000, # 10 BTC in Sats
-                deposit_wallet_address=admin_wallet_addr
-                # deposit_wallet_private_key removed
-            )
-            db.session.add(admin_user)
-            db.session.commit()
-            print(f"Admin user '{Config.ADMIN_USERNAME}' created successfully.")
-        except Exception as e:
-             db.session.rollback()
-             print(f"Failed to create admin user: {e}")
-    else:
-        print(f"Admin user '{Config.ADMIN_USERNAME}' already exists.")
+    existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
+    if existing_user:
+        if existing_user.username == username:
+            print(f"Error: User with username '{username}' already exists.")
+        if existing_user.email == email: # Check separately to provide specific message if email also matches
+            print(f"Error: User with email '{email}' already exists.")
+        return
+
+    print(f"Creating admin user: {username}")
+    try:
+        admin_wallet_addr = generate_bitcoin_wallet() # Now only returns address
+        if not admin_wallet_addr:
+            print("Failed to generate wallet address for admin user. Aborting.")
+            return
+
+        admin_user = User(
+            username=username,
+            email=email,
+            password=User.hash_password(password), # Hash the provided password
+            is_admin=True,
+            balance=1_000_000_000, # Default 10 BTC in Sats, can be adjusted later
+            deposit_wallet_address=admin_wallet_addr
+        )
+        db.session.add(admin_user)
+        db.session.commit()
+        print(f"Admin user '{username}' created successfully with email '{email}'.")
+    except Exception as e:
+         db.session.rollback()
+         print(f"Failed to create admin user: {e}")
 
 # The flask_script manager.run() will only execute flask_script commands.
 # The new command 'db_cleanup_expired_tokens' needs to be run via `flask db_cleanup_expired_tokens`.

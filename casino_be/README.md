@@ -25,14 +25,14 @@ This project is a Flask-based backend that implements user authentication, sessi
 
 3. **Configure Environment Variables**:
 
-    Set the following environment variables in your shell or in a `.env` file:
+    Set the following environment variables in your shell or in a `.env` file.
+    The application will fail to start if `DATABASE_URL` or `JWT_SECRET_KEY` are not set.
 
     ```bash
-    export DATABASE_URL="postgresql://user:password@localhost/dbname"
-    export JWT_SECRET_KEY="your-secret-key"
-    export ADMIN_PASSWORD="your-secure-admin-password"
-    export ADMIN_USERNAME="admin_user"  # Optional (Defaults to 'admin')
-    export ADMIN_EMAIL="admin@example.com"  # Optional (Defaults to 'admin@kingpincasino.local')
+    export DATABASE_URL="postgresql://user:password@localhost/dbname"  # Critical: Must be set for the application to run.
+    export JWT_SECRET_KEY="your-very-secret-key" # Critical: Must be set for the application to run.
+    # Note: ADMIN_USERNAME, ADMIN_PASSWORD, and ADMIN_EMAIL are no longer used for initial admin creation.
+    # Please use the 'create_admin' command described below.
     ```
 
 4. **Initialize the Database**:
@@ -43,7 +43,22 @@ This project is a Flask-based backend that implements user authentication, sessi
     python manage.py db upgrade
     ```
 
-5. **Run the Application**:
+5. **Creating an Admin User**:
+
+    After initializing the database, you can create an administrative user using the following command:
+
+    ```bash
+    python manage.py create_admin
+    ```
+    The command will prompt you to enter a username, email, and password for the admin account.
+
+    Alternatively, you can provide the credentials as command-line arguments:
+    ```bash
+    python manage.py create_admin --username myadmin --email admin@example.com --password 'yoursecurepassword'
+    ```
+    Ensure the password is changed from the example if using arguments.
+
+6. **Run the Application**:
 
     ```bash
     python app.py
