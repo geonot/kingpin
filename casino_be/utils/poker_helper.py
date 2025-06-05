@@ -510,42 +510,51 @@ def handle_stand_up(user_id: int, table_id: int):
 # --- Betting Logic Stubs ---
 
 def handle_fold(user_id: int, table_id: int, hand_id: int):
-    """Placeholder for handling a player's fold action."""
-    # TODO: Implement fold logic
-    # - Mark player as folded for the hand (PokerPlayerState.is_active_in_hand = False, or a status field)
-    # - Update PokerHand.hand_history
-    # - Check if hand ends (if only one player remains)
-    # - Determine next player to act
-    # - Update table/hand state (current_bet_to_match, etc.)
+    """
+    Handles a player's fold action.
+    - Fetches PokerPlayerState and PokerHand.
+    - If player state or hand not found, returns an error.
+    - Clears player_state.time_to_act_ends.
+    - If player not active in hand, returns an error.
+    - Sets player_state.is_active_in_hand = False.
+    - Sets player_state.last_action = "fold".
+    - Initializes poker_hand.hand_history to [] if None.
+    - Appends fold action (with user_id, seat_id, action, timestamp) to poker_hand.hand_history.
+    - Adds player_state and poker_hand to session.
+    - Calls game_flow_result = _check_betting_round_completion(hand_id, user_id, db.session).
+    - Commits session.
+    - Returns a success message with game_flow_result or an error from _check_betting_round_completion.
+    """
     session = db.session
     player_state = session.query(PokerPlayerState).filter_by(user_id=user_id, table_id=table_id).first()
     poker_hand = session.query(PokerHand).get(hand_id)
 
     if not player_state:
-        return {"error": f"Player {user_id} not found at table {table_id}."}
-
-    player_state.time_to_act_ends = None # Clear timer as player is acting
-    session.add(player_state)
-
+        return {"error": f"Player state for user {user_id} not found at table {table_id}."}
     if not poker_hand:
-        return {"error": f"Hand {hand_id} not found."}
-    
-    # TODO: Add check if it's actually the player's turn before allowing fold.
-    # This might be handled in a higher-level game logic controller.
-    # For now, we assume the action is valid if the player is active.
+        return {"error": f"Poker hand {hand_id} not found."}
+
+    # Clear player's action timer
+    player_state.time_to_act_ends = None
 
     if not player_state.is_active_in_hand:
+        session.add(player_state) # Add to session to save time_to_act_ends clearing even if erroring
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing player_state on inactive fold for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
     player_state.is_active_in_hand = False
     player_state.last_action = "fold"
 
-    if poker_hand.hand_history is None: # Should have been initialized in start_new_hand
+    if poker_hand.hand_history is None:
         poker_hand.hand_history = []
 
     poker_hand.hand_history.append({
         "user_id": user_id,
-        "seat_id": player_state.seat_id, # Assuming PokerPlayerState has seat_id
+        "seat_id": player_state.seat_id,
         "action": "fold",
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
@@ -554,8 +563,11 @@ def handle_fold(user_id: int, table_id: int, hand_id: int):
     session.add(poker_hand)
 
     try:
+        # _check_betting_round_completion is expected to handle session commit internally if it's the final step,
+        # or stage changes if further actions are needed within its scope.
+        # For actions like fold/check/call/bet/raise, the primary responsibility for commit lies with the action handler.
         game_flow_result = _check_betting_round_completion(hand_id, user_id, session)
-        session.commit()
+        session.commit() # Commit changes from this function and potentially from _check_betting_round_completion
         return {
             "message": f"User {user_id} folded successfully in hand {hand_id}.",
             "game_flow": game_flow_result
@@ -563,55 +575,68 @@ def handle_fold(user_id: int, table_id: int, hand_id: int):
     except Exception as e:
         session.rollback()
         print(f"Error during fold action for user {user_id} in hand {hand_id}: {e}")
+        # It's good to return a consistent error structure
         return {"error": "Could not process fold due to a server error.", "details": str(e)}
+
 
 def handle_check(user_id: int, table_id: int, hand_id: int):
     """Placeholder for handling a player's check action."""
-    # TODO: Implement check logic
-    # - Validate if check is a legal action (no outstanding bet)
-    # - Update PokerHand.hand_history
-    # - Determine next player to act or end of betting round
+    """
+    Handles a player's check action.
+    - Fetches PokerPlayerState and PokerHand.
+    - If player state or hand not found, returns an error.
+    - Clears player_state.time_to_act_ends.
+    - If player not active in hand, returns an error.
+    - Initializes poker_hand.player_street_investments to {} if None.
+    - Calculates player_invested_this_street and current_bet_to_match.
+    - If player_invested_this_street < current_bet_to_match, returns an error "Cannot check, must call...".
+    - Sets player_state.last_action = "check".
+    - Initializes poker_hand.hand_history to [] if None.
+    - Appends check action to poker_hand.hand_history.
+    - Adds player_state and poker_hand to session.
+    - Calls game_flow_result = _check_betting_round_completion(hand_id, user_id, db.session).
+    - Commits session.
+    - Returns a success message with game_flow_result or an error.
+    """
     session = db.session
     player_state = session.query(PokerPlayerState).filter_by(user_id=user_id, table_id=table_id).first()
     poker_hand = session.query(PokerHand).get(hand_id)
 
     if not player_state:
-        return {"error": f"Player {user_id} not found at table {table_id}."}
-
-    player_state.time_to_act_ends = None # Clear timer as player is acting
-    session.add(player_state)
+        return {"error": f"Player state for user {user_id} not found at table {table_id}."}
     if not poker_hand:
-        return {"error": f"Hand {hand_id} not found."}
+        return {"error": f"Poker hand {hand_id} not found."}
 
-    # TODO: Add check if it's actually the player's turn. (Handled by caller or game flow manager)
+    player_state.time_to_act_ends = None
 
     if not player_state.is_active_in_hand:
+        session.add(player_state) # Save cleared timer
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing player_state on inactive check for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
-    # --- Check Legality ---
-    # A check is legal if the player's current bet for the street matches the current_bet_to_match.
-    # These fields need to be reliably tracked on the PokerHand or related live game state.
-    # poker_hand.current_bet_to_match: The highest bet amount any player has made in this betting round.
-    # player_invested_this_street: How much this specific player has already bet in this round.
-
-    # Placeholder for where this value would come from.
-    # This might be stored in PokerHand.player_street_investments (JSON field) or a separate table.
-    # For now, assuming 0 if not explicitly set for the player for this street.
-    player_invested_this_street = poker_hand.player_street_investments.get(str(user_id), 0) if poker_hand.player_street_investments else 0
+    if poker_hand.player_street_investments is None:
+        poker_hand.player_street_investments = {}
     
-    # current_bet_to_match should be a field on PokerHand, updated after each bet/raise.
-    # If not present, we'll assume it's 0 for this placeholder.
-    current_bet_to_match_on_table = poker_hand.current_bet_to_match if hasattr(poker_hand, 'current_bet_to_match') else 0
-    # A more robust system would ensure current_bet_to_match is always present on PokerHand.
-    # For newly started hand/street, it would be 0 until a bet is made.
+    player_invested_this_street = poker_hand.player_street_investments.get(str(user_id), 0)
+    current_bet_to_match = poker_hand.current_bet_to_match or 0
 
-    if player_invested_this_street < current_bet_to_match_on_table:
-        return {"error": f"Cannot check. Player {user_id} needs to call {current_bet_to_match_on_table - player_invested_this_street} more."}
+    if player_invested_this_street < current_bet_to_match:
+        session.add(player_state) # Save cleared timer
+        session.add(poker_hand) # Save initialized player_street_investments
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing on check legality fail for user {user_id}: {e}")
+        return {"error": f"Cannot check. Player {user_id} needs to call {current_bet_to_match - player_invested_this_street} more to match current bet of {current_bet_to_match}."}
 
-    # If check is legal:
     player_state.last_action = "check"
 
-    if poker_hand.hand_history is None: # Should be initialized
+    if poker_hand.hand_history is None:
         poker_hand.hand_history = []
 
     poker_hand.hand_history.append({
@@ -636,87 +661,94 @@ def handle_check(user_id: int, table_id: int, hand_id: int):
         print(f"Error during check action for user {user_id} in hand {hand_id}: {e}")
         return {"error": "Could not process check due to a server error.", "details": str(e)}
 
+
 def handle_call(user_id: int, table_id: int, hand_id: int):
     """Placeholder for handling a player's call action."""
-    # TODO: Implement call logic
-    # - Determine amount to call
-    # - Validate if player has enough stack
-    # - Update player stack, pot size
-    # - Create Transaction
-    # - Update PokerHand.hand_history
-    # - Determine next player to act or end of betting round
+    """
+    Handles a player's call action.
+    - Fetches PokerPlayerState, PokerHand. User can be accessed via player_state.user.
+    - If player state or hand not found, returns an error.
+    - Clears player_state.time_to_act_ends.
+    - If player not active in hand, returns an error.
+    - Initializes poker_hand.player_street_investments to {} if None.
+    - Calculates player_invested_this_street, current_bet_to_match, and amount_to_call_due.
+    - If amount_to_call_due <= 0, returns an error "No pending bet to call...".
+    - Calculates actual_call_amount and is_all_in.
+    - Updates player_state.stack_sats, player_state.total_invested_this_hand.
+    - Updates poker_hand.player_street_investments, poker_hand.pot_size_sats.
+    - Sets action_string and player_state.last_action.
+    - Creates a Transaction.
+    - Initializes poker_hand.hand_history to [] if None and appends call action.
+    - Adds player_state, poker_hand, transaction to session.
+    - Calls _check_betting_round_completion and commits session.
+    - Returns success message or error.
+    """
     session = db.session
-    player_state = session.query(PokerPlayerState).filter_by(user_id=user_id, table_id=table_id).first()
+    # Eagerly load user for transaction details if needed, though not strictly for balance.
+    player_state = session.query(PokerPlayerState).options(joinedload(PokerPlayerState.user)).filter_by(user_id=user_id, table_id=table_id).first()
     poker_hand = session.query(PokerHand).get(hand_id)
-    user = session.query(User).get(user_id) # Needed for Transaction, though balance not debited
 
     if not player_state:
-        return {"error": f"Player {user_id} not found at table {table_id}."}
+        return {"error": f"Player state for user {user_id} not found at table {table_id}."}
     if not poker_hand:
-        return {"error": f"Hand {hand_id} not found."}
-    if not user: # Should not happen if player_state exists
-        return {"error": f"User {user_id} not found."}
+        return {"error": f"Poker hand {hand_id} not found."}
+    # player_state.user is available due to joinedload
 
-    player_state.time_to_act_ends = None # Clear timer as player is acting
-    session.add(player_state)
-
-    # TODO: Add check if it's actually the player's turn. (Handled by caller or game flow manager)
+    player_state.time_to_act_ends = None
 
     if not player_state.is_active_in_hand:
+        session.add(player_state) # Save cleared timer
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing player_state on inactive call for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
-    # --- Determine Call Amount & Legality ---
-    current_bet_to_match = poker_hand.current_bet_to_match if hasattr(poker_hand, 'current_bet_to_match') else 0
-
-    if poker_hand.player_street_investments is None: # Ensure the dict exists
+    if poker_hand.player_street_investments is None:
         poker_hand.player_street_investments = {}
-    player_invested_this_street = poker_hand.player_street_investments.get(str(user_id), 0)
 
+    player_invested_this_street = poker_hand.player_street_investments.get(str(user_id), 0)
+    current_bet_to_match = poker_hand.current_bet_to_match or 0
     amount_to_call_due = current_bet_to_match - player_invested_this_street
 
     if amount_to_call_due <= 0:
-        # This means player has already matched the bet or even overbet (e.g. if they were BB and it's folded to them, or an error)
-        # Or if current_bet_to_match is 0 and player also has 0 invested (can only check or bet)
-        return {"error": f"Player {user_id} has no pending bet to call. Amount due is {amount_to_call_due}. Can only check or bet/raise."}
+        session.add(player_state) # Save cleared timer
+        session.add(poker_hand) # Save initialized investments
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing on call legality fail for user {user_id}: {e}")
+        return {"error": f"No pending bet to call for user {user_id}. Amount due is {amount_to_call_due}. Current bet: {current_bet_to_match}, Player invested: {player_invested_this_street}."}
 
-    # --- Handle Stack and All-In ---
     actual_call_amount = min(amount_to_call_due, player_state.stack_sats)
     is_all_in = (actual_call_amount == player_state.stack_sats) and (actual_call_amount < amount_to_call_due)
 
-    # --- Update States ---
     player_state.stack_sats -= actual_call_amount
-    player_state.total_invested_this_hand += actual_call_amount # Increment total hand investment
+    player_state.total_invested_this_hand = (player_state.total_invested_this_hand or 0) + actual_call_amount
 
-    # Update player's investment for the current street
     poker_hand.player_street_investments[str(user_id)] = player_invested_this_street + actual_call_amount
-
-    poker_hand.pot_size_sats += actual_call_amount
+    poker_hand.pot_size_sats = (poker_hand.pot_size_sats or 0) + actual_call_amount
 
     action_string = "call_all_in" if is_all_in else "call"
     player_state.last_action = f"{action_string}_{actual_call_amount}"
 
-
-    # --- Create Transaction ---
-    # This transaction records the movement of chips from player's table stack to the pot.
-    # It does not affect User.balance directly.
     transaction = Transaction(
         user_id=user_id,
-        amount=-actual_call_amount, # Negative as it's an outflow from player's perspective at the table
-        transaction_type='poker_action_call', # Specific type for table actions
+        amount=-actual_call_amount,
+        transaction_type='poker_action_call',
         status='completed',
         details={
-            "hand_id": hand_id,
             "table_id": table_id,
+            "hand_id": hand_id,
             "action": action_string,
-            "amount": actual_call_amount,
-            "current_bet_to_match": current_bet_to_match,
-            "player_invested_this_street_before_call": player_invested_this_street
+            "amount": actual_call_amount
         },
         poker_hand_id=hand_id
     )
 
-    # --- Hand History ---
-    if poker_hand.hand_history is None: # Should be initialized
+    if poker_hand.hand_history is None:
         poker_hand.hand_history = []
 
     poker_hand.hand_history.append({
@@ -737,7 +769,7 @@ def handle_call(user_id: int, table_id: int, hand_id: int):
         return {
             "message": f"User {user_id} {action_string}s {actual_call_amount} successfully in hand {hand_id}.",
             "game_flow": game_flow_result
-            }
+        }
     except Exception as e:
         session.rollback()
         print(f"Error during call action for user {user_id} in hand {hand_id}: {e}")
@@ -746,118 +778,133 @@ def handle_call(user_id: int, table_id: int, hand_id: int):
 
 def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
     """Placeholder for handling a player's bet action."""
-    # TODO: Implement bet logic
-    # - Validate if bet is a legal action (no prior bet in the round, or it's a new street)
-    # - Validate bet amount (min bet, table limits, player stack) using _validate_bet
-    # - Update player stack, pot size
-    # - Create Transaction
-    # - Update PokerHand.hand_history, PokerHand.current_bet_to_match, PokerHand.last_raiser
-    # - Determine next player to act
+    """
+    Handles a player's bet action.
+    - Fetches PokerPlayerState, PokerHand, PokerTable.
+    - If any not found, or amount <= 0, returns an error.
+    - Clears player_state.time_to_act_ends.
+    - If player not active, returns an error.
+    - Initializes poker_hand.player_street_investments to {} if None.
+    - Calculates player_invested_this_street and current_bet_to_match_val.
+    - If current_bet_to_match_val > player_invested_this_street, returns error "Cannot bet, must call or raise...".
+    - Validates min_bet_val.
+    - Calculates actual_bet_amount_put_in_pot and is_all_in.
+    - Updates player_state (stack_sats, total_invested_this_hand).
+    - Updates poker_hand (player_street_investments, pot_size_sats, current_bet_to_match, last_raiser_user_id, min_next_raise_amount).
+    - Sets action_string and player_state.last_action.
+    - Creates Transaction.
+    - Initializes and appends to poker_hand.hand_history.
+    - Adds all modified objects to session.
+    - Calls _check_betting_round_completion and commits.
+    - Returns success message or error.
+    """
     session = db.session
     player_state = session.query(PokerPlayerState).filter_by(user_id=user_id, table_id=table_id).first()
     poker_hand = session.query(PokerHand).get(hand_id)
-    user = session.query(User).get(user_id) # For transaction record
-    poker_table = session.query(PokerTable).get(table_id) # For min_bet (big blind)
+    poker_table = session.query(PokerTable).get(table_id)
 
     if not player_state:
-        return {"error": f"Player {user_id} not found at table {table_id}."}
+        return {"error": f"Player state for user {user_id} not found at table {table_id}."}
     if not poker_hand:
-        return {"error": f"Hand {hand_id} not found."}
-    if not user:
-        return {"error": f"User {user_id} not found."}
+        return {"error": f"Poker hand {hand_id} not found."}
     if not poker_table:
-        return {"error": f"Table {table_id} not found."}
-
-    player_state.time_to_act_ends = None # Clear timer as player is acting
-    session.add(player_state)
-
-    # TODO: Add check if it's actually the player's turn.
-
-    if not player_state.is_active_in_hand:
-        return {"error": f"Player {user_id} is not active in hand {hand_id}."}
-
-    # --- Bet Legality Validation ---
-    current_bet_on_table = poker_hand.current_bet_to_match if hasattr(poker_hand, 'current_bet_to_match') else 0
-    player_invested_this_street = poker_hand.player_street_investments.get(str(user_id), 0) if poker_hand.player_street_investments else 0
-
-    # Condition for a "bet": current_bet_on_table should be 0, or player must have already matched it if it's from blinds.
-    # For simplicity, we'll allow a "bet" if current_bet_on_table is 0.
-    # If current_bet_on_table > 0, it should ideally be a "raise".
-    # This logic might need refinement based on how blinds are posted and if they count as first bet.
-    # Assuming a "bet" action implies opening the betting for this round or if previous bets are all matched.
-    if current_bet_on_table > 0 and player_invested_this_street < current_bet_on_table:
-        return {"error": f"Cannot bet. There is an outstanding bet of {current_bet_on_table} to call or raise."}
-
-
-    # Validate bet amount
+        return {"error": f"Poker table {table_id} not found."}
     if amount <= 0:
         return {"error": "Bet amount must be positive."}
 
-    min_bet_amount = poker_table.big_blind # Simplified minimum bet
-    # TODO: More complex min bet logic for specific game states (e.g. post-flop must be BB, or fixed limit rules)
+    player_state.time_to_act_ends = None
 
-    if amount < min_bet_amount and amount < player_state.stack_sats : # Allow all-in for less than min bet
-         return {"error": f"Bet amount {amount} is less than minimum bet of {min_bet_amount}."}
-
-
-    # --- Determine Actual Bet Amount (Handle All-In) ---
-    actual_bet_amount_put_in_pot = min(amount, player_state.stack_sats) # This is the amount taken from stack
-
-    # The "bet amount" for game rules is the total new money player is making it to.
-    # If player already has money in (e.g. straddle, or re-opening betting), this needs care.
-    # For a simple opening bet, actual_bet_amount_put_in_pot is the bet size.
-
-    is_all_in = (actual_bet_amount_put_in_pot == player_state.stack_sats) and (actual_bet_amount_put_in_pot < amount if amount else True)
-
-
-    # --- Update States ---
-    player_state.stack_sats -= actual_bet_amount_put_in_pot
-    player_state.total_invested_this_hand += actual_bet_amount_put_in_pot # Increment total hand investment
+    if not player_state.is_active_in_hand:
+        session.add(player_state) # Save cleared timer
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing player_state on inactive bet for user {user_id}: {e}")
+        return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
     if poker_hand.player_street_investments is None:
         poker_hand.player_street_investments = {}
 
-    # Total investment by player in this street becomes this bet amount
-    poker_hand.player_street_investments[str(user_id)] = player_invested_this_street + actual_bet_amount_put_in_pot
+    player_invested_this_street = poker_hand.player_street_investments.get(str(user_id), 0)
+    current_bet_to_match_on_table = poker_hand.current_bet_to_match or 0
 
-    poker_hand.pot_size_sats += actual_bet_amount_put_in_pot
+    # For a "bet" action, it's generally expected that either:
+    # 1. The current_bet_to_match_on_table is 0 (no prior bets this street).
+    # 2. The player has already matched the current_bet_to_match_on_table (e.g. BB checking option, then deciding to bet).
+    #    This means player_invested_this_street == current_bet_to_match_on_table.
+    # If current_bet_to_match_on_table > player_invested_this_street, it implies an outstanding bet the player must call or raise.
+    if current_bet_to_match_on_table > player_invested_this_street:
+        # session.add(player_state) # Save cleared timer - commit will be handled before return
+        # session.add(poker_hand)
+        # try: session.commit()
+        # except Exception as e: session.rollback(); print(f"Error committing on bet legality (must call/raise) for user {user_id}: {e}")
+        return {"error": f"Cannot bet. Must call or raise existing bet of {current_bet_to_match_on_table}. Player has invested {player_invested_this_street}."}
 
-    # This bet now becomes the amount to match for subsequent players
-    poker_hand.current_bet_to_match = poker_hand.player_street_investments[str(user_id)]
+    # `amount` is the additional amount the player wants to bet.
+    # `action_amount_total_for_street` is what their total investment for the street will become.
+    action_amount_total_for_street = player_invested_this_street + amount
 
-    # Mark this player as the last aggressor (raiser or better)
-    if hasattr(poker_hand, 'last_raiser_user_id'): # Add this field to PokerHand model
-        poker_hand.last_raiser_user_id = user_id
-    else:
-        # Log or handle missing attribute - for now, we'll skip if not present
-        print(f"Warning: PokerHand model missing 'last_raiser_user_id'. Skipping update.")
+    is_valid_bet, validation_message = _validate_bet(
+        player_state=player_state,
+        action_amount=action_amount_total_for_street, # Total investment this player is making it to for the street
+        current_bet_to_match=current_bet_to_match_on_table, # Current highest bet on table player needs to exceed
+        min_next_raise_increment=poker_hand.min_next_raise_amount or poker_table.big_blind, # For opening bet, this effectively sets min open size via logic in _validate_bet
+        limit_type=poker_table.limit_type,
+        poker_table=poker_table,
+        player_amount_invested_this_street=player_invested_this_street,
+        current_hand_pot_size=poker_hand.pot_size_sats or 0 # Pot size before this player's current action
+    )
 
-    # The minimum next raise would be at least this bet amount on top of current_bet_to_match
-    if hasattr(poker_hand, 'min_next_raise_amount'): # Add this field to PokerHand model
-        poker_hand.min_next_raise_amount = actual_bet_amount_put_in_pot # Simplified: The size of this bet itself.
-                                                                # More precisely: current_bet_to_match (after this bet) + this_bet_size
-    else:
-        print(f"Warning: PokerHand model missing 'min_next_raise_amount'. Skipping update.")
+    if not is_valid_bet:
+        # session.add(player_state) # Save cleared timer before returning error
+        # session.add(poker_hand)
+        # try: session.commit()
+        # except Exception as e: session.rollback(); print(f"Error committing on invalid bet validation for user {user_id}: {e}")
+        return {"error": f"Invalid bet: {validation_message}"}
+
+    # `amount` is the additional amount the player declared to bet.
+    # `actual_bet_amount_put_in_pot` is what they actually can put in (capped by stack).
+    actual_bet_amount_put_in_pot = min(amount, player_state.stack_sats)
+
+    # is_all_in means the player is putting their entire remaining stack into this bet.
+    # This happens if the amount they intend to bet (actual_bet_amount_put_in_pot) is equal to their stack.
+    # And, critically for the "bet_all_in" string, usually implies they *intended* to bet `amount` but were capped by stack,
+    # OR they intended to bet their exact stack.
+    # If `amount` (their declared bet) was greater than their stack, and they put in their stack, it's an all-in.
+    # If `amount` was equal to their stack, it's also an all-in.
+    is_all_in = (actual_bet_amount_put_in_pot == player_state.stack_sats)
+
+    player_state.stack_sats -= actual_bet_amount_put_in_pot
+    player_state.total_invested_this_hand = (player_state.total_invested_this_hand or 0) + actual_bet_amount_put_in_pot
+
+    new_player_street_investment = player_invested_this_street + actual_bet_amount_put_in_pot
+    poker_hand.player_street_investments[str(user_id)] = new_player_street_investment
+    poker_hand.pot_size_sats = (poker_hand.pot_size_sats or 0) + actual_bet_amount_put_in_pot
+
+    # This bet action sets a new current_bet_to_match for others.
+    poker_hand.current_bet_to_match = new_player_street_investment
+    poker_hand.last_raiser_user_id = user_id # This player made the latest aggressive action.
+    # The minimum next raise increment is the size of this bet itself (the additional amount put in).
+    poker_hand.min_next_raise_amount = actual_bet_amount_put_in_pot
 
     action_string = "bet_all_in" if is_all_in else "bet"
     player_state.last_action = f"{action_string}_{actual_bet_amount_put_in_pot}"
 
-    # --- Create Transaction ---
     transaction = Transaction(
         user_id=user_id,
         amount=-actual_bet_amount_put_in_pot,
         transaction_type='poker_action_bet',
         status='completed',
         details={
-            "hand_id": hand_id,
             "table_id": table_id,
+            "hand_id": hand_id,
             "action": action_string,
             "amount": actual_bet_amount_put_in_pot
         },
         poker_hand_id=hand_id
     )
 
-    # --- Hand History ---
     if poker_hand.hand_history is None:
         poker_hand.hand_history = []
 
@@ -865,12 +912,13 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
         "user_id": user_id,
         "seat_id": player_state.seat_id,
         "action": action_string,
-        "amount": actual_bet_amount_put_in_pot,
+        "amount": actual_bet_amount_put_in_pot, # The amount put into the pot for this bet action
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
     session.add(player_state)
     session.add(poker_hand)
+    session.add(poker_table) # Though not modified, good practice if accessed
     session.add(transaction)
 
     try:
@@ -885,125 +933,142 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
         print(f"Error during bet action for user {user_id} in hand {hand_id}: {e}")
         return {"error": "Could not process bet due to a server error.", "details": str(e)}
 
+
 def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
     """Placeholder for handling a player's raise action."""
-    # TODO: Implement raise logic
-    # - Validate if raise is a legal action
-    # - Validate raise amount (min raise, table limits, player stack) using _validate_bet
-    # - Update player stack, pot size
-    # - Create Transaction
-    # - Update PokerHand.hand_history, PokerHand.current_bet_to_match, PokerHand.last_raiser
-    # - Determine next player to act
+    """
+    Handles a player's raise action.
+    - Fetches PokerPlayerState, PokerHand, PokerTable.
+    - If any not found, or amount <= 0, returns error.
+    - Clears player_state.time_to_act_ends.
+    - If player not active, returns error.
+    - Initializes poker_hand.player_street_investments.
+    - Validates raise conditions (prior bet, amount > current bet, min raise increment).
+    - Calculates amounts, is_all_in.
+    - Updates player_state (stack_sats, total_invested_this_hand).
+    - Updates poker_hand (player_street_investments, pot_size_sats, min_next_raise_amount, current_bet_to_match, last_raiser_user_id).
+    - Sets action_string and player_state.last_action.
+    - Creates Transaction.
+    - Initializes and appends to poker_hand.hand_history.
+    - Adds all modified objects to session.
+    - Calls _check_betting_round_completion and commits.
+    - Returns success message or error.
+    """
     session = db.session
     player_state = session.query(PokerPlayerState).filter_by(user_id=user_id, table_id=table_id).first()
     poker_hand = session.query(PokerHand).get(hand_id)
-    user = session.query(User).get(user_id) # For transaction record
-    poker_table = session.query(PokerTable).get(table_id) # For table rules like min_bet, big_blind
+    poker_table = session.query(PokerTable).get(table_id)
 
     if not player_state:
-        return {"error": f"Player {user_id} not found at table {table_id}."}
+        return {"error": f"Player state for user {user_id} not found at table {table_id}."}
     if not poker_hand:
-        return {"error": f"Hand {hand_id} not found."}
-    if not user:
-        return {"error": f"User {user_id} not found."}
+        return {"error": f"Poker hand {hand_id} not found."}
     if not poker_table:
-        return {"error": f"Table {table_id} not found."}
+        return {"error": f"Poker table {table_id} not found."}
+    if amount <= 0: # Amount is the total sum the player is raising TO for the street
+        return {"error": "Raise amount must be positive."}
 
-    player_state.time_to_act_ends = None # Clear timer as player is acting
-    session.add(player_state)
-
-    # TODO: Add check if it's actually the player's turn.
+    player_state.time_to_act_ends = None
 
     if not player_state.is_active_in_hand:
+        session.add(player_state) # Save cleared timer
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing player_state on inactive raise for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
-    # --- Raise Legality Validation ---
-    # Ensure poker_hand.player_street_investments is initialized
     if poker_hand.player_street_investments is None:
         poker_hand.player_street_investments = {}
 
     player_invested_this_street = poker_hand.player_street_investments.get(str(user_id), 0)
+    previous_bet_to_match_on_table = poker_hand.current_bet_to_match or 0 # This is current_bet_to_match for _validate_bet
 
-    # current_bet_to_match is the current highest total bet a player has made in this street.
-    # It should be > 0 for a raise to be possible.
-    previous_bet_to_match = poker_hand.current_bet_to_match if hasattr(poker_hand, 'current_bet_to_match') else 0
-    if previous_bet_to_match == 0:
-        return {"error": "Cannot raise. No prior bet in this round. Use 'bet' action instead."}
+    # `amount` for handle_raise IS the total action_amount for the street.
+    action_amount_total_for_street = amount
 
-    # The total amount the player is raising TO must be greater than their current investment.
-    if amount <= player_invested_this_street:
-        return {"error": f"Raise amount ({amount}) must be greater than current investment this street ({player_invested_this_street})."}
+    # Preliminary check: must be a bet to raise.
+    if previous_bet_to_match_on_table == 0:
+        # try: session.commit() # Commit cleared timer if necessary
+        # except Exception as e: session.rollback(); print(f"Error committing on raise legality (no prior bet) for user {user_id}: {e}")
+        return {"error": "Cannot raise, no prior bet. Use 'bet' action instead."}
 
-    # The total amount must be greater than the current bet to match.
-    if amount <= previous_bet_to_match:
-         return {"error": f"Raise amount ({amount}) must be greater than the current bet to match ({previous_bet_to_match})."}
+    # Preliminary check: raise amount must be greater than the current bet.
+    if action_amount_total_for_street <= previous_bet_to_match_on_table:
+        # try: session.commit()
+        # except Exception as e: session.rollback(); print(f"Error committing on raise legality (amount <= prev bet) for user {user_id}: {e}")
+        return {"error": f"Raise amount ({action_amount_total_for_street}) must be greater than current bet to match ({previous_bet_to_match_on_table})."}
 
+    is_valid_raise, validation_message = _validate_bet(
+        player_state=player_state,
+        action_amount=action_amount_total_for_street, # This is the 'amount' parameter of handle_raise
+        current_bet_to_match=previous_bet_to_match_on_table,
+        min_next_raise_increment=poker_hand.min_next_raise_amount or poker_table.big_blind,
+        limit_type=poker_table.limit_type,
+        poker_table=poker_table,
+        player_amount_invested_this_street=player_invested_this_street,
+        current_hand_pot_size=poker_hand.pot_size_sats or 0 # Pot size before this player's call portion
+    )
 
-    # Minimum Raise Increment Validation (Simplified)
-    # min_next_raise_amount on PokerHand should store the size of the last significant bet/raise.
-    # A new raise must be at least that increment on top of the previous_bet_to_match.
-    min_raise_increment_required = poker_hand.min_next_raise_amount if hasattr(poker_hand, 'min_next_raise_amount') and poker_hand.min_next_raise_amount is not None else poker_table.big_blind
+    if not is_valid_raise:
+        # try: session.commit()
+        # except Exception as e: session.rollback(); print(f"Error committing on invalid raise validation for user {user_id}: {e}")
+        return {"error": f"Invalid raise: {validation_message}"}
 
-    required_total_raise_amount = previous_bet_to_match + min_raise_increment_required
+    # Calculate the actual additional chips based on the validated action_amount_total_for_street (raise amount 'amount')
+    amount_player_needs_to_add_for_this_raise = action_amount_total_for_street - player_invested_this_street
 
-    is_going_all_in_for_less_than_min_raise = (amount < required_total_raise_amount) and (amount == (player_invested_this_street + player_state.stack_sats))
+    # This check should be covered by _validate_bet (chips_for_this_action < 0) or subsequent logic,
+    # but as a safeguard here if action_amount_total_for_street was somehow miscalculated.
+    if amount_player_needs_to_add_for_this_raise <= 0:
+         return {"error": "Raise results in no additional chips being added to the pot. This should have been caught by validation."}
 
-    if amount < required_total_raise_amount and not is_going_all_in_for_less_than_min_raise:
-        return {"error": f"Raise to {amount} is too small. Must raise to at least {required_total_raise_amount} (current bet {previous_bet_to_match} + min increment {min_raise_increment_required})."}
+    actual_amount_added_to_pot = min(amount_player_needs_to_add_for_this_raise, player_state.stack_sats)
 
-    # --- Determine Actual Amounts to Add (Handle All-In) ---
-    # `amount` is the total sum the player wants their current street investment to be.
-    amount_player_needs_to_add = amount - player_invested_this_street
-
-    if amount_player_needs_to_add <= 0: # Should be caught by earlier checks, but good safeguard
-        return {"error": "Internal error: calculated amount to add is not positive."}
-
-    actual_amount_added_to_pot = min(amount_player_needs_to_add, player_state.stack_sats)
-
+    # final_player_investment_this_street is same as action_amount_total_for_street if player not stack constrained,
+    # otherwise it's player_invested_this_street + actual_amount_added_to_pot (their all-in amount).
     final_player_investment_this_street = player_invested_this_street + actual_amount_added_to_pot
-    is_all_in = (actual_amount_added_to_pot == player_state.stack_sats) and (actual_amount_added_to_pot < amount_player_needs_to_add)
 
-    # --- Update States ---
+    # is_all_in is true if the player commits their entire stack AND this amount is less than what they *intended* to add for the raise
+    # OR if they intended to raise their exact stack size.
+    # More simply: if actual_amount_added_to_pot is their entire stack.
+    is_all_in = (actual_amount_added_to_pot == player_state.stack_sats)
+    # Refined is_all_in for "raise_all_in" string: implies they might have wanted to raise more but couldn't.
+    # This happens if the actual amount they could add is less than the amount they needed for their declared raise total,
+    # and they indeed added all their chips.
+    is_all_in_short = is_all_in and (actual_amount_added_to_pot < amount_player_needs_to_add_for_this_raise)
+
+
     player_state.stack_sats -= actual_amount_added_to_pot
-    player_state.total_invested_this_hand += actual_amount_added_to_pot # Increment total hand investment
+    player_state.total_invested_this_hand = (player_state.total_invested_this_hand or 0) + actual_amount_added_to_pot
+
     poker_hand.player_street_investments[str(user_id)] = final_player_investment_this_street
-    poker_hand.pot_size_sats += actual_amount_added_to_pot
+    poker_hand.pot_size_sats = (poker_hand.pot_size_sats or 0) + actual_amount_added_to_pot
 
-    # The new current_bet_to_match is the total amount this player has now invested in the street.
+    # The new minimum increment for the *next* raise is the size of this raise.
+    poker_hand.min_next_raise_amount = final_player_investment_this_street - previous_bet_to_match
     poker_hand.current_bet_to_match = final_player_investment_this_street
-
-    # Update who made the last raise and the size of that raise (for next min-raise calculation)
-    if hasattr(poker_hand, 'last_raiser_user_id'):
-        poker_hand.last_raiser_user_id = user_id
-    else:
-        print("Warning: PokerHand model missing 'last_raiser_user_id'.")
-        
-    new_raise_increment_size = final_player_investment_this_street - previous_bet_to_match
-    if hasattr(poker_hand, 'min_next_raise_amount'):
-        poker_hand.min_next_raise_amount = new_raise_increment_size
-    else:
-        print("Warning: PokerHand model missing 'min_next_raise_amount'.")
+    poker_hand.last_raiser_user_id = user_id
 
     action_string = "raise_all_in" if is_all_in else "raise"
     player_state.last_action = f"{action_string}_to_{final_player_investment_this_street}"
 
-    # --- Create Transaction ---
     transaction = Transaction(
         user_id=user_id,
-        amount=-actual_amount_added_to_pot, # Debit from player's table stack
+        amount=-actual_amount_added_to_pot,
         transaction_type='poker_action_raise',
         status='completed',
         details={
-            "hand_id": hand_id,
             "table_id": table_id,
+            "hand_id": hand_id,
             "action": action_string,
-            "raised_to_amount": final_player_investment_this_street, # Total investment this street
-            "amount_added_to_pot": actual_amount_added_to_pot
+            "raised_to_amount": final_player_investment_this_street,
+            "actual_amount_added_to_pot": actual_amount_added_to_pot
         },
         poker_hand_id=hand_id
     )
 
-    # --- Hand History ---
     if poker_hand.hand_history is None:
         poker_hand.hand_history = []
 
@@ -1011,13 +1076,14 @@ def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
         "user_id": user_id,
         "seat_id": player_state.seat_id,
         "action": action_string,
-        "amount": final_player_investment_this_street, # Record the total amount raised to
-        "added_to_pot": actual_amount_added_to_pot,
+        "amount": final_player_investment_this_street, # Total amount player has raised to this street
+        "added_to_pot": actual_amount_added_to_pot, # The portion added in this specific action
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
     session.add(player_state)
     session.add(poker_hand)
+    session.add(poker_table) # Though not modified
     session.add(transaction)
 
     try:
@@ -1033,128 +1099,145 @@ def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
         return {"error": "Could not process raise due to a server error.", "details": str(e)}
 
 
-def _validate_bet(player_state: PokerPlayerState, 
-                  action_amount: int, # The total amount the player is making their bet/raise to for this action
-                  current_bet_to_match: int, # The current highest bet on the table for this street
-                  min_raise_amount_total: int, # The minimum total amount a raise must be (current_bet_to_match + last_raise_delta)
+def _validate_bet(player_state: PokerPlayerState,
+                  action_amount: int, # The total amount the player's street investment will be post-action.
+                  current_bet_to_match: int, # The current highest total bet any player has made in this street.
+                  min_next_raise_increment: int, # The minimum additional amount for a valid raise (e.g., BB or last raise size).
+                                                # For an opening bet, this isn't strictly "raise increment" but helps define min opening bet.
                   limit_type: str, # "no_limit", "pot_limit", "fixed_limit"
-                  table_pot_size_if_pot_limit: int = 0, # Needed for pot_limit calculations
-                  player_amount_invested_this_street: int = 0 # How much player already put in this street
+                  poker_table: PokerTable, # Provides BB, SB, and for PLO, the current hand's pot_size_sats
+                  player_amount_invested_this_street: int,
+                  current_hand_pot_size: int # Crucial for PLO max bet calculation. This is pot *before* player's call.
                   ) -> tuple[bool, str]:
     """
     Validates a bet or raise amount based on game rules.
-    action_amount is the total amount the player is committing with this action (not just the raise portion).
-    min_raise_amount_total is the total sum a player must make it if they are raising.
-    player_amount_invested_this_street is the amount player already has in the pot for the current betting round.
-    Returns (is_valid, message).
-    """
-    """
-    Validates a bet or raise amount based on game rules.
-    `action_amount` is the total amount the player's investment for the current street will be if the action is valid.
+    `action_amount` is the total cumulative amount the player intends to have invested in the current street after this action.
 
     Args:
         player_state (PokerPlayerState): The state of the player making the action.
-        action_amount (int): The total cumulative amount the player intends to have invested in the current street after this action.
-        current_bet_to_match (int): The current highest total bet any player has made in this street.
-        min_raise_amount_total (int): For a raise, this is the minimum total amount the player's bet must reach for the street.
-                                     (i.e., current_bet_to_match + last valid raise increment).
+        action_amount (int): The total cumulative amount for the street post-action.
+        current_bet_to_match (int): Current highest total investment by any player this street.
+        min_next_raise_increment (int): The minimum delta for a raise (e.g., BB or last raise size).
+                                        Used to calculate min_raise_amount_total.
         limit_type (str): "no_limit", "pot_limit", "fixed_limit".
-        table_pot_size_if_pot_limit (int): Current total pot size in the middle, needed for Pot-Limit max raise calculation.
-        player_amount_invested_this_street (int): How much the player has already invested in this street before this action.
-        min_bet_this_game (int): The minimum size of an opening bet (e.g., the Big Blind).
+        poker_table (PokerTable): Provides big_blind, small_blind.
+        player_amount_invested_this_street (int): How much player already put in this street.
+        current_hand_pot_size (int): Current total pot size of the hand (for PLO calculations primarily).
+                                      This is the pot *before* the current player's implied call portion of a raise.
 
     Returns:
-        tuple[bool, str]: (is_valid, message). Message explains why invalid or confirms validity type (e.g. "all-in").
+        tuple[bool, str]: (is_valid, message). Message explains why invalid or confirms validity type.
     """
 
     chips_for_this_action = action_amount - player_amount_invested_this_street
 
     if chips_for_this_action < 0:
-        return False, "Invalid action: total bet amount is less than already invested."
+        # This case should ideally be prevented by UI or earlier logic,
+        # as action_amount should always be >= player_amount_invested_this_street.
+        return False, "Invalid action: Total action amount is less than already invested this street."
 
     if chips_for_this_action > player_state.stack_sats:
-        return False, f"Insufficient stack. Trying to bet {chips_for_this_action}, but only have {player_state.stack_sats}."
+        # Player doesn't have enough chips for the desired additional amount.
+        return False, f"Insufficient stack. Trying to commit {chips_for_this_action} additional chips, but only have {player_state.stack_sats}."
 
+    # An action is "all-in" if the player commits all their remaining stack with this action.
     is_all_in = (chips_for_this_action == player_state.stack_sats)
 
-    # --- Call / Check Path ---
-    if action_amount < current_bet_to_match:
-        if is_all_in: # All-in call for less than full amount
-            return True, "All-in call for less." # Valid, but specific type
-        return False, f"Amount {action_amount} is less than current bet to match {current_bet_to_match}."
+    min_opening_bet_size = poker_table.big_blind # Standard for NL/PL. FL is street-dependent.
 
+    # --- Path 1: Action is a Call or Check ---
+    # If action_amount makes player's total investment for street equal to current_bet_to_match
     if action_amount == current_bet_to_match:
-        if chips_for_this_action == 0: # It's a check
-            return True, "Check."
-        else: # It's a call of the exact amount
-            return True, "Call."
+        if chips_for_this_action == 0: # No additional chips, so it's a check.
+            # Legality of check (e.g. if there was a bet before them) is handled before calling _validate_bet typically.
+            # This path assumes it's a valid situation for a check amount-wise.
+            return True, "Valid check."
+        else: # Additional chips are being committed to match current_bet_to_match. This is a call.
+            # If is_all_in, it's an all-in call for the exact amount.
+            return True, "Valid call." if not is_all_in else "Valid all-in call (exact amount)."
 
-    # --- Bet / Raise Path (action_amount > current_bet_to_match) ---
-    is_opening_bet = (current_bet_to_match == 0) or \
-                     (current_bet_to_match == min_bet_this_game and player_amount_invested_this_street == current_bet_to_match and chips_for_this_action > 0) # e.g. BB raising themselves if allowed
+    # --- Path 2: Action is a Call for Less (Player is All-In) ---
+    # If action_amount is less than current_bet_to_match
+    if action_amount < current_bet_to_match:
+        if is_all_in: # Player must be all-in if their total street investment is less than current_bet_to_match
+            return True, "Valid all-in call for less."
+        else: # Not all-in, so it's an invalid under-call. This should be caught by chips_for_this_action > player_state.stack_sats.
+              # However, if action_amount was manually set lower without being all-in.
+            return False, f"Action amount {action_amount} is an invalid undercall of current bet {current_bet_to_match} (player not all-in)."
+
+    # --- Path 3: Action is a Bet or Raise (action_amount > current_bet_to_match) ---
+    # This means player is increasing the current bet to match.
+
+    is_opening_action = (current_bet_to_match == 0)
+    # Note: BB re-opening preflop is a special case: current_bet_to_match is BB, player_invested is BB.
+    # If they raise, action_amount > current_bet_to_match. This is not an "opening action" by current_bet_to_match == 0.
 
     if limit_type == "no_limit":
-        if is_opening_bet:
-            # Bet size is chips_for_this_action
-            if chips_for_this_action < min_bet_this_game and not is_all_in:
-                return False, f"Opening bet ({chips_for_this_action}) is less than minimum bet ({min_bet_this_game})."
-            return True, "Valid No-Limit opening bet."
-        else: # Raise
-            if action_amount < min_raise_amount_total and not is_all_in:
-                 return False, f"Raise to {action_amount} is less than minimum required raise total of {min_raise_amount_total}."
-            # Ensure raise is by at least the last bet/raise amount (min_raise_amount_total - current_bet_to_match)
-            # This is implicitly covered if min_raise_amount_total was set correctly.
-            return True, "Valid No-Limit raise."
+        if is_opening_action: # This is an opening bet
+            # chips_for_this_action is the size of the opening bet.
+            if chips_for_this_action < min_opening_bet_size and not is_all_in:
+                return False, f"No-Limit opening bet ({chips_for_this_action}) is less than minimum opening bet size ({min_opening_bet_size})."
+            return True, "Valid No-Limit opening bet." if not is_all_in else "Valid No-Limit all-in opening bet."
+        else: # This is a raise
+            # min_next_raise_increment is the minimum *additional* amount of the raise.
+            # So, the total amount for the raise must be at least current_bet_to_match + min_next_raise_increment.
+            min_raise_target_total = current_bet_to_match + min_next_raise_increment
+            if action_amount < min_raise_target_total and not is_all_in:
+                return False, f"No-Limit raise to {action_amount} is less than minimum required raise total of {min_raise_target_total} (current bet {current_bet_to_match} + min increment {min_next_raise_increment})."
+            return True, "Valid No-Limit raise." if not is_all_in else "Valid No-Limit all-in raise."
 
     elif limit_type == "pot_limit":
-        # min_bet_this_game often serves as the min_valid_raise_increment for the first raise,
-        # or it could be derived from poker_hand.min_next_raise_amount if available.
-        # For _calculate_pot_limit_raise_sizes, min_valid_raise_increment is key.
-        # Assuming min_bet_this_game can stand in for a basic min raise increment here.
-        # A more robust system would pass the true min_next_raise_amount (last bet/raise size) from PokerHand.
+        # For PLO, min_next_raise_increment from hand state (last raise size) or BB if first raise on street.
+        effective_min_valid_raise_increment_for_plo = min_next_raise_increment if min_next_raise_increment > 0 else poker_table.big_blind
 
-        min_raise_target, max_raise_target = _calculate_pot_limit_raise_sizes(
+        min_pl_raise_target, max_pl_raise_target = _calculate_pot_limit_raise_sizes(
             player_current_stack=player_state.stack_sats,
             player_invested_this_street=player_amount_invested_this_street,
-            current_pot_total=table_pot_size_if_pot_limit,
+            current_pot_total=current_hand_pot_size, # This is pot *before* this player's call portion
             bet_to_match_this_street=current_bet_to_match,
-            min_valid_raise_increment=min_bet_this_game # Simplified: Using BB as min raise increment for now
+            min_valid_raise_increment=effective_min_valid_raise_increment_for_plo
         )
 
-        if is_opening_bet: # Pot limit opening bet
-            if chips_for_this_action < min_bet_this_game and not is_all_in:
-                 return False, f"Opening Pot-Limit bet ({chips_for_this_action}) is less than minimum bet ({min_bet_this_game})."
-            if action_amount > max_raise_target and not is_all_in : # Max pot opening bet
-                 return False, f"Opening Pot-Limit bet ({action_amount}) exceeds max pot limit ({max_raise_target})."
-            return True, "Valid Pot-Limit opening bet."
-        else: # Pot limit raise
-            if action_amount < min_raise_target and not is_all_in:
-                return False, f"Raise to {action_amount} is less than Pot-Limit min raise target of {min_raise_target}."
-            if action_amount > max_raise_target and not is_all_in:
-                return False, f"Raise to {action_amount} exceeds Pot-Limit max raise target of {max_raise_target}."
-
-            # If all-in, it must still be a valid raise (i.e. action_amount > current_bet_to_match)
-            if is_all_in and action_amount <= current_bet_to_match:
-                 return False, f"All-in raise to {action_amount} does not exceed current bet {current_bet_to_match}."
-            return True, "Valid Pot-Limit raise."
+        if is_opening_action: # Pot-Limit opening bet
+            if chips_for_this_action < min_opening_bet_size and not is_all_in:
+                return False, f"Pot-Limit opening bet ({chips_for_this_action}) is less than minimum opening bet size ({min_opening_bet_size})."
+            # action_amount is total investment for street. For opening bet, this is chips_for_this_action.
+            # It must be <= max_pl_raise_target (which for opening bet, is calculated based on current_bet_to_match=0).
+            if action_amount > max_pl_raise_target and not is_all_in:
+                 return False, f"Pot-Limit opening bet to {action_amount} (chips: {chips_for_this_action}) exceeds max pot limit target of {max_pl_raise_target}."
+            return True, "Valid Pot-Limit opening bet." if not is_all_in else "Valid Pot-Limit all-in opening bet."
+        else: # Pot-Limit raise
+            # action_amount is the total player is making their investment for the street.
+            if action_amount < min_pl_raise_target and not is_all_in:
+                return False, f"Pot-Limit raise to {action_amount} is less than Pot-Limit min raise target of {min_pl_raise_target}."
+            if action_amount > max_pl_raise_target and not is_all_in:
+                return False, f"Pot-Limit raise to {action_amount} exceeds Pot-Limit max raise target of {max_pl_raise_target}."
+            # If all-in, validity is determined by action_amount > current_bet_to_match and _calculate_pot_limit_raise_sizes handling stack limits.
+            return True, "Valid Pot-Limit raise." if not is_all_in else "Valid Pot-Limit all-in raise."
 
     elif limit_type == "fixed_limit":
-        # TODO: Implement detailed Fixed-Limit validation
-        # - Bet/raise amounts must be specific fixed values based on street and number of raises.
-        # - Typically, pre-flop & flop use lower tier, turn & river use upper tier.
-        # - Limit on number of raises per round (e.g., 1 bet and 3 or 4 raises).
-        if is_opening_bet:
-            if chips_for_this_action != min_bet_this_game and not is_all_in: # min_bet_this_game is the fixed bet amount
-                return False, f"Fixed-Limit bet must be exactly {min_bet_this_game} (unless all-in)."
-        else: # Raise
-            # Fixed-Limit raise increment is usually same as fixed bet amount for that street
-            expected_raise_total = current_bet_to_match + min_bet_this_game
-            if action_amount != expected_raise_total and not is_all_in:
-                 return False, f"Fixed-Limit raise must make total {expected_raise_total} (current {current_bet_to_match} + increment {min_bet_this_game})."
-            # TODO: Check cap on number of raises.
-        return True, "Fixed-Limit validation (basic stub - check amounts)." # Placeholder
+        # Simplified: Assume poker_table.big_blind is the fixed bet/raise amount for the current street.
+        # A full FL implementation needs current_street to determine if it's small or big bet tier,
+        # and also needs to track number of raises made on the current street if there's a cap.
+        # For this function, we'll assume the correct fixed_bet_amount for the street is passed via min_next_raise_increment
+        # or derived if a street parameter were available. Using poker_table.big_blind is a placeholder.
+        fixed_bet_increment = poker_table.big_blind # Placeholder: This should be street-dependent (e.g. BB or 2xBB)
+                                                    # And could be passed in via a refined min_next_raise_increment for FL.
 
-    return False, f"Unknown limit type: {limit_type}"
+        if is_opening_action: # Fixed-Limit opening bet
+            # In FL, an opening bet must be exactly the fixed_bet_increment, unless all-in for less.
+            if chips_for_this_action != fixed_bet_increment and not is_all_in:
+                return False, f"Fixed-Limit bet ({chips_for_this_action}) must be exactly {fixed_bet_increment} (unless all-in for less)."
+            return True, "Valid Fixed-Limit bet." if not is_all_in else "Valid Fixed-Limit all-in bet."
+        else: # Fixed-Limit raise
+            # A raise must make the total investment for the street exactly current_bet_to_match + fixed_bet_increment.
+            expected_total_after_raise = current_bet_to_match + fixed_bet_increment
+            if action_amount != expected_total_after_raise and not is_all_in:
+                 return False, f"Fixed-Limit raise to {action_amount} is invalid. Must make total investment {expected_total_after_raise} (current bet {current_bet_to_match} + fixed increment {fixed_bet_increment})."
+            # Note: Cap on number of raises per street in FL games is not handled here. Needs more state if required.
+            return True, "Valid Fixed-Limit raise." if not is_all_in else "Valid Fixed-Limit all-in raise."
+
+    return False, f"Unknown limit type '{limit_type}' or unhandled validation scenario for action_amount {action_amount}."
 
 
 def _calculate_pot_limit_raise_sizes(
@@ -1233,28 +1316,66 @@ def _calculate_pot_limit_raise_sizes(
 
     # Ensure min raise is not more than max raise (can happen if stack is very small)
     # Also, ensure the "min raise" is actually a raise (i.e. results in total investment > bet_to_match_this_street)
-    # If effective_min_raise_total_street_investment <= bet_to_match_this_street, it means player cannot even make the min_raise_increment.
-    # In this case, their only "raise" option is all-in, if that all-in is > bet_to_match_this_street.
-    # If their all-in is <= bet_to_match_this_street, they can only call all-in.
+    # Amount player needs to add to just call the current bet_to_match_this_street
+    amount_to_call_action = bet_to_match_this_street - player_invested_this_street
+    if amount_to_call_action < 0:
+        amount_to_call_action = 0 # Player has already invested enough, effectively a call costs 0 more.
 
-    # If the calculated minimum raise is not even possible or not a real raise,
-    # then the only "raise" is an all-in, provided that all-in is greater than the call amount.
+    # 1. Calculate Minimum Raise Target
+    # The minimum total investment a player must make for a valid raise.
+    # This is the current bet to match plus the minimum valid raise increment.
+    min_raise_target_total_investment = bet_to_match_this_street + min_valid_raise_increment
+
+    # However, player cannot bet more than their stack.
+    # The actual number of chips they would add for a minimum raise:
+    chips_for_min_raise_action = min_raise_target_total_investment - player_invested_this_street
+    # Player can only add what they have in their stack
+    chips_for_min_raise_action_capped_by_stack = min(chips_for_min_raise_action, player_current_stack)
+
+    # Effective total investment if player makes the minimum possible raise (could be all-in)
+    effective_min_raise_total_street_investment = player_invested_this_street + chips_for_min_raise_action_capped_by_stack
+
+    # 2. Calculate Maximum Raise Target (Pot-Sized Raise)
+    # "The 'pot' in PLO is defined as the total of the active pot, plus all bets on the table,
+    #  plus the amount the active player must first call before raising."
+    # current_pot_total = all chips in the pot from previous streets and current street actions BEFORE this player acts.
+    # Pot size for calculation = current_pot_total + (all bets on table currently) + (the call this player makes)
+    # A simpler way to think: pot_size_if_player_calls = current_pot_total (which includes previous bets this street) + amount_to_call_action
+
+    pot_size_if_player_calls = current_pot_total + amount_to_call_action
+
+    # The player can raise BY this amount (pot_size_if_player_calls), ON TOP of their call.
+    # So, chips for pot raise action = amount_to_call_action (to call) + pot_size_if_player_calls (the raise amount).
+    chips_for_pot_raise_action = amount_to_call_action + pot_size_if_player_calls
+
+    # Player can only add what they have in their stack
+    chips_for_pot_raise_action_capped_by_stack = min(chips_for_pot_raise_action, player_current_stack)
+
+    # Effective total investment if player makes the maximum pot-sized raise (could be all-in)
+    effective_max_raise_total_street_investment = player_invested_this_street + chips_for_pot_raise_action_capped_by_stack
+
+    # Ensure that the calculated "max raise" isn't less than a "min raise" if stack is very constrained.
+    # If player is all-in, their max raise is their all-in amount.
+    # The min raise must still be a valid raise (i.e., more than just calling bet_to_match_this_street).
     if effective_min_raise_total_street_investment <= bet_to_match_this_street:
-        # If going all-in is more than just calling, that's the only "raise".
-        all_in_total_investment = player_invested_this_street + player_current_stack
-        if all_in_total_investment > bet_to_match_this_street:
-            # The only raise possible is all-in. Min and Max raise are the same: all-in.
-            return (all_in_total_investment, all_in_total_investment)
+        # This means the player cannot even make the minimum defined increment.
+        # Their only "raise" option is to go all-in, if that all-in amount is greater than bet_to_match_this_street.
+        all_in_total_investment_for_street = player_invested_this_street + player_current_stack
+        if all_in_total_investment_for_street > bet_to_match_this_street:
+            # The only possible "raise" is all-in. So min and max raise targets are the same (their all-in amount).
+            return (all_in_total_investment_for_street, all_in_total_investment_for_street)
         else:
-            # No raise is possible, only a call (or all-in call).
-            # Return values that make it impossible to raise.
-            # Or, the calling function should check if min_raise_target > bet_to_match_this_street.
-            # For now, return the (possibly invalid as a "raise") min and the capped max.
-            # The handler_raise function will do further validation.
-             return (effective_min_raise_total_street_investment, max(effective_min_raise_total_street_investment, effective_max_raise_total_street_investment))
+            # No raise is possible (even all-in is just a call or less).
+            # Return the bet_to_match_this_street as min_raise_target (effectively meaning only call is possible for this amount)
+            # and the all_in amount as max (which is <= bet_to_match_this_street).
+            # The calling function (_validate_bet) will interpret this.
+            return (bet_to_match_this_street, all_in_total_investment_for_street)
 
+    # Max raise cannot be less than min raise. If stack constrains pot raise to be less than a standard min raise,
+    # then the max is effectively the min (or all-in if that's even smaller but still a raise).
+    final_max_raise = max(effective_min_raise_total_street_investment, effective_max_raise_total_street_investment)
 
-    return (effective_min_raise_total_street_investment, effective_max_raise_total_street_investment)
+    return (effective_min_raise_total_street_investment, final_max_raise)
 
 
 # --- Hand Evaluation ---
@@ -1358,235 +1479,236 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
     Distributes the pot(s) to the winner(s), handling side pots.
     Updates PokerHand with rake and winner details.
     Creates Transaction records for winnings.
-
-    Args:
-        poker_hand (PokerHand): The PokerHand object for which to distribute pots.
-        showdown_player_states (list[PokerPlayerState]): A list of PokerPlayerState objects for all players
-                                                        who reached showdown (i.e., did not fold and have cards).
-                                                        It's assumed these states have `hole_cards` and an accurate
-                                                        `total_invested_this_hand` attribute or a reliable way to compute it.
     """
     session = db.session
     poker_table = session.query(PokerTable).get(poker_hand.table_id)
 
+    if not poker_table:
+        print(f"Error: PokerTable {poker_hand.table_id} not found for pot distribution of hand {poker_hand.id}.")
+        # This is a critical error, likely indicates data integrity issue or programming error.
+        # Depending on desired robustness, could try to proceed without rake or raise exception.
+        # For now, let's assume this is fatal for pot distribution.
+        return {"error": f"Table not found for pot distribution, hand {poker_hand.id}"}
+
     # --- 1. Prepare Player Data for Showdown ---
-    # Each element: {'user_id': int, 'total_invested': int, 'hole_cards_str': list[str], 'player_state_obj': PokerPlayerState}
-    players_at_showdown = []
+    players_data_for_pots = []
     for ps in showdown_player_states:
-        if not ps.hole_cards: # Should not happen for showdown players
-            print(f"Warning: Player {ps.user_id} at showdown has no hole cards. Skipping for pot distribution.")
+        if not ps.hole_cards or len(ps.hole_cards) != 2:
+            # Log this, but might not be critical to stop if other players are valid.
+            # However, a player at showdown should always have hole cards.
+            print(f"Warning: Player {ps.user_id} at showdown for hand {poker_hand.id} has invalid hole cards: {ps.hole_cards}. Skipping for pot eligibility.")
             continue
 
-        # TODO: CRITICAL - Ensure `ps.total_invested_this_hand` is accurately populated before calling _distribute_pot.
-        # This value represents the total amount a player has put into the pot for this entire hand.
-        # For this implementation, we'll assume it exists and is correct.
-        # If not, it needs to be calculated by summing contributions from hand_history or another tracking mechanism.
-        total_invested = getattr(ps, 'total_invested_this_hand', 0)
-        if total_invested == 0 and poker_hand.pot_size_sats > 0 : # Player must have invested something if pot > 0 (e.g. blinds)
-            # This is a fallback/warning. Real calculation is needed.
-            print(f"Warning: Player {ps.user_id} has 0 total_invested_this_hand. This might lead to incorrect side pot calculation.")
-            # As a rough placeholder if total_invested_this_hand is missing, try to use current street investments (highly inaccurate for multi-street)
-            # if poker_hand.player_street_investments and str(ps.user_id) in poker_hand.player_street_investments:
-            #    total_invested = poker_hand.player_street_investments[str(ps.user_id)]
+        # total_invested_this_hand should be accurately tracked by action handlers.
+        # Fallback or error if not present could be added, but spec assumes it's populated.
+        total_invested = ps.total_invested_this_hand if ps.total_invested_this_hand is not None else 0
 
-
-        players_at_showdown.append({
+        players_data_for_pots.append({
             'user_id': ps.user_id,
             'total_invested': total_invested,
-            'hole_cards_str': ps.hole_cards,
-            'player_state_obj': ps # Keep direct access to the player state object
+            'hole_cards_str': ps.hole_cards, # String representation like ["HA", "SK"]
+            'player_state_obj': ps # Direct reference to the SQLAlchemy object for stack updates
         })
 
-    if not players_at_showdown:
-        print(f"Error: No players at showdown for hand {poker_hand.id}. Pot distribution cannot occur.")
-        # This typically means one player won by default, which should be handled before calling _distribute_pot.
-        # However, if called, ensure pot is returned or handled.
-        # For now, if pot exists, it implies an error state or unhandled scenario.
+    if not players_data_for_pots:
         if poker_hand.pot_size_sats > 0:
-            print(f"Error: Pot for hand {poker_hand.id} is {poker_hand.pot_size_sats} but no showdown players identified in _distribute_pot.")
-        return
-
-    # Sort players by their total investment in ascending order
-    players_at_showdown.sort(key=lambda x: x['total_invested'])
+            # This case means the pot has money, but no valid showdown players were passed.
+            # This might happen if only one player remained due to folds (handled before calling _distribute_pot)
+            # or an error in game flow logic.
+            print(f"Warning: _distribute_pot called for hand {poker_hand.id} with pot {poker_hand.pot_size_sats} but no valid showdown players. Pot remains unawarded by this function.")
+            # Consider refunding pot or specific error handling based on game rules.
+        # If pot is 0 and no players, it's fine.
+        poker_hand.status = 'completed' # Ensure hand is marked completed
+        poker_hand.end_time = datetime.now(timezone.utc)
+        session.add(poker_hand)
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error committing hand completion with no showdown players for hand {poker_hand.id}: {e}")
+        return # Or return a status indicating no distribution needed/possible.
 
     # --- 2. Rake Calculation ---
-    total_pot_value = poker_hand.pot_size_sats
+    total_pot_value_before_rake = poker_hand.pot_size_sats or 0
     actual_rake = 0
-    if total_pot_value > 0 and poker_table:
-        # Ensure rake_percentage and max_rake_sats are Decimal and int respectively, or provide defaults.
-        rake_percentage_from_table = getattr(poker_table, 'rake_percentage', Decimal("0.00"))
-        if not isinstance(rake_percentage_from_table, Decimal):
-            try:
-                rake_percentage_from_table = Decimal(str(rake_percentage_from_table)) # Attempt conversion
-            except:
-                rake_percentage_from_table = Decimal("0.00") # Fallback
 
-        max_rake_cap_from_table = getattr(poker_table, 'max_rake_sats', 0)
-        if not isinstance(max_rake_cap_from_table, int):
-            try:
-                max_rake_cap_from_table = int(max_rake_cap_from_table) # Attempt conversion
-            except:
-                max_rake_cap_from_table = 0 # Fallback (effectively no cap if rake is percentage based and this is 0)
+    # Apply rake only if conditions are met (e.g., flop seen, or always if pot > 0 as per simplified rule)
+    # For now, applying if pot > 0 based on table settings.
+    # A more advanced rule: if poker_hand.status not in ['preflop', 'completed'] or len(poker_hand.board_cards) > 0
+    if total_pot_value_before_rake > 0:
+        rake_percentage = poker_table.rake_percentage if poker_table.rake_percentage is not None else Decimal("0.00")
+        max_rake = poker_table.max_rake_sats if poker_table.max_rake_sats is not None else 0
 
-
-        if rake_percentage_from_table > Decimal("0.00"):
-            calculated_rake = int(Decimal(total_pot_value) * rake_percentage_from_table)
-
-            if max_rake_cap_from_table > 0: # Apply cap only if it's a positive value
-                actual_rake = min(calculated_rake, max_rake_cap_from_table)
-            else: # No cap defined (or cap is 0), so take the full calculated percentage rake
+        if rake_percentage > Decimal("0.00"):
+            calculated_rake = int(Decimal(total_pot_value_before_rake) * rake_percentage)
+            if max_rake > 0: # Apply cap only if max_rake is positive
+                actual_rake = min(calculated_rake, max_rake)
+            else: # No cap or cap is 0
                 actual_rake = calculated_rake
 
-        # Ensure rake is not negative and does not exceed the total pot value itself.
-        actual_rake = max(0, actual_rake)
-        actual_rake = min(actual_rake, total_pot_value)
+        actual_rake = max(0, actual_rake) # Ensure rake is not negative
+        actual_rake = min(actual_rake, total_pot_value_before_rake) # Rake cannot exceed total pot
 
     poker_hand.rake_sats = actual_rake
-    distributable_pot_overall = total_pot_value - actual_rake
-    if distributable_pot_overall < 0:
-        distributable_pot_overall = 0 # Pot cannot be negative
+    distributable_pot_overall = total_pot_value_before_rake - actual_rake
+    if distributable_pot_overall < 0: # Should not happen with current logic
+        distributable_pot_overall = 0
 
-    # --- 3. Create and Calculate Pots (Main and Side Pots) ---
-    # pots is a list of dictionaries: {'amount': int, 'eligible_user_ids': set[int], 'description': str}
-    created_pots = []
-    processed_investment_level = 0 # Tracks the investment level already accounted for in previous pots
 
-    # Iterate through unique investment levels to define pot layers
-    unique_investment_caps = sorted(list(set(p['total_invested'] for p in players_at_showdown)))
+    # --- 3. Create Pots (Main and Side Pots) ---
+    # Sort players by their total investment for this hand in ascending order
+    # This order is crucial for correctly layering investments into pots.
+    sorted_players_by_investment = sorted(players_data_for_pots, key=lambda x: x['total_invested'])
 
-    for cap_level in unique_investment_caps:
-        if cap_level <= processed_investment_level:
+    created_pots = [] # List of dicts: {'amount': int, 'eligible_user_ids': set[int], 'description': str}
+    last_cap_level = 0 # Tracks the investment level covered by previous pots
+
+    # Iterate through each player's unique investment level to define pot boundaries
+    unique_investment_levels = sorted(list(set(p['total_invested'] for p in sorted_players_by_investment)))
+
+    for cap_level in unique_investment_levels:
+        if cap_level <= last_cap_level: # Already processed up to or beyond this level
             continue
 
-        # Amount each contributing player puts into this specific layer of the pot
-        contribution_per_player_this_layer = cap_level - processed_investment_level
+        contribution_this_layer = cap_level - last_cap_level
+        current_pot_value_from_investments = 0
+        eligible_players_for_this_pot = set()
 
-        # Identify players who contribute to this layer
-        players_contributing_to_this_layer = []
-        for p_data in players_at_showdown:
-            if p_data['total_invested'] >= processed_investment_level: # Must have met previous levels
-                # How much this player actually adds to *this specific layer*
-                actual_added_by_player_to_layer = min(contribution_per_player_this_layer, p_data['total_invested'] - processed_investment_level)
-                if actual_added_by_player_to_layer > 0:
-                    players_contributing_to_this_layer.append(p_data['user_id'])
+        for p_data in sorted_players_by_investment: # Iterate all players to see who contributes to this layer
+            # Amount this player contributes *to this specific layer*
+            player_contribution_to_layer = min(contribution_this_layer, max(0, p_data['total_invested'] - last_cap_level))
 
-        if not players_contributing_to_this_layer: # Should not happen if cap_level > processed_investment_level
-            continue
+            if player_contribution_to_layer > 0:
+                current_pot_value_from_investments += player_contribution_to_layer
+                eligible_players_for_this_pot.add(p_data['user_id'])
 
-        # The value of this pot layer is sum of contributions to it
-        value_of_this_pot_layer = contribution_per_player_this_layer * len(players_contributing_to_this_layer)
+        if current_pot_value_from_investments > 0:
+            pot_description = f"Main Pot" if not created_pots else f"Side Pot {len(created_pots)}"
+            # The actual amount for this pot is capped by what's left in distributable_pot_overall
+            amount_for_this_pot = min(current_pot_value_from_investments, distributable_pot_overall - sum(p['amount'] for p in created_pots))
 
-        # Deduct from overall distributable pot (ensure no overallocation)
-        value_to_assign_to_this_pot = min(value_of_this_pot_layer, distributable_pot_overall - sum(p['amount'] for p in created_pots))
+            if amount_for_this_pot > 0 :
+                 created_pots.append({
+                    'amount': amount_for_this_pot,
+                    'eligible_user_ids': eligible_players_for_this_pot,
+                    'description': pot_description
+                })
+            elif distributable_pot_overall <= sum(p['amount'] for p in created_pots) and current_pot_value_from_investments > 0:
+                # This means no more distributable money left for further side pots from player actual investments.
+                # This can happen if rake consumed the remaining amounts.
+                print(f"Hand {poker_hand.id}: Pot layer for cap {cap_level} calculated {current_pot_value_from_investments}, but no distributable funds left due to rake. Sum of created pots: {sum(p['amount'] for p in created_pots)}, Distributable: {distributable_pot_overall}")
+                break # No more money to distribute
 
-        if value_to_assign_to_this_pot > 0:
-            pot_description = f"Main Pot (up to {cap_level})" if not created_pots else f"Side Pot for investments up to {cap_level}"
-            created_pots.append({
-                'amount': value_to_assign_to_this_pot,
-                'eligible_user_ids': set(players_contributing_to_this_layer), # Players who put money into this layer are eligible
-                'description': pot_description
-            })
+        last_cap_level = cap_level
 
-        processed_investment_level = cap_level
-
-    # If sum of created pots is less than total distributable (e.g. rounding, or complex all-ins not perfectly layered by unique caps)
-    # Add remainder to the first pot (main pot) - this is a simplification.
-    current_sum_of_created_pots = sum(p['amount'] for p in created_pots)
-    if distributable_pot_overall > current_sum_of_created_pots and created_pots:
-        remainder = distributable_pot_overall - current_sum_of_created_pots
-        created_pots[0]['amount'] += remainder
-        print(f"Hand {poker_hand.id}: Added remainder of {remainder} to the main pot.")
-    elif not created_pots and distributable_pot_overall > 0 and players_at_showdown:
-         # Fallback if unique_investment_caps logic was empty but pot exists (e.g. all invested same)
-        created_pots.append({
-            'amount': distributable_pot_overall,
-            'eligible_user_ids': {p['user_id'] for p in players_at_showdown},
-            'description': "Main Pot (all players)"
-        })
-
+    # Sanity check: If sum of created pots (from distributable amount) is less than total distributable_pot_overall
+    # (e.g., due to all players being all-in for same small amount and rake making it complex),
+    # distribute any remaining small amount. This is rare with integer math if rake is handled first.
+    # The current logic should allocate distributable_pot_overall correctly across layers.
+    # If any distributable_pot_overall remains unallocated to a pot layer (shouldn't happen if players invested), it's an issue.
 
     # --- 4. Determine Winners and Distribute Each Pot ---
     final_hand_winners_summary = [] # To be stored in PokerHand.winners
 
     for pot_info in created_pots:
-        pot_amount_to_distribute = pot_info['amount']
-        eligible_ids_this_pot = pot_info['eligible_user_ids']
+        pot_amount = pot_info['amount']
+        eligible_user_ids = pot_info['eligible_user_ids']
         pot_description = pot_info['description']
 
-        if pot_amount_to_distribute <= 0:
+        if pot_amount <= 0: # No value in this pot to distribute
             continue
 
-        # Get hole cards for players eligible for *this* pot
-        player_hole_cards_map_for_this_pot = {
-            p['user_id']: p['hole_cards_str']
-            for p in players_at_showdown if p['user_id'] in eligible_ids_this_pot and p['hole_cards_str']
+        # Prepare data for _determine_winning_hand for this specific pot
+        hole_cards_for_this_pot_eval = {
+            p_data['user_id']: p_data['hole_cards_str']
+            for p_data in players_data_for_pots # Use original full list to find user_ids
+            if p_data['user_id'] in eligible_user_ids and p_data['hole_cards_str']
         }
 
-        if not player_hole_cards_map_for_this_pot:
-            print(f"Warning: No eligible players with cards for pot '{pot_description}'. Amount {pot_amount_to_distribute} unawarded from this pot.")
+        if not hole_cards_for_this_pot_eval:
+            print(f"Warning: Hand {poker_hand.id}, Pot '{pot_description}': No eligible players with cards found for evaluation. Amount {pot_amount} unawarded.")
             continue
 
-        # Determine winner(s) for this specific pot
-        winners_of_this_pot = _determine_winning_hand(player_hole_cards_map_for_this_pot, poker_hand.board_cards)
+        # Determine winner(s) for this pot
+        # _determine_winning_hand returns list of dicts: [{"user_id": X, "winning_hand": "...", "best_five_cards": [...]}, ...]
+        winners_of_this_pot = _determine_winning_hand(hole_cards_for_this_pot_eval, poker_hand.board_cards or [])
 
         if not winners_of_this_pot:
-            print(f"Warning: _determine_winning_hand returned no winners for pot '{pot_description}'. Amount {pot_amount_to_distribute} unawarded.")
+            print(f"Warning: Hand {poker_hand.id}, Pot '{pot_description}': _determine_winning_hand returned no winners. Amount {pot_amount} unawarded.")
             continue
 
         num_winners_this_pot = len(winners_of_this_pot)
-        amount_per_winner_this_pot = pot_amount_to_distribute // num_winners_this_pot
-        # TODO: Handle odd chips if pot doesn't split evenly (e.g., award to player closest to button)
+        # Handle odd chips: integer division means leftover chips are currently discarded per pot.
+        # For more precise handling, odd chips could be awarded to player in earliest position, or accumulated.
+        amount_per_winner = pot_amount // num_winners_this_pot
 
-        for winner_detail in winners_of_this_pot:
-            winner_user_id = winner_detail['user_id']
+        if amount_per_winner <= 0 and pot_amount > 0 : # If pot has value but per-winner is 0 (many winners of tiny pot)
+            print(f"Warning: Hand {poker_hand.id}, Pot '{pot_description}': pot amount {pot_amount} results in {amount_per_winner} per winner for {num_winners_this_pot} winners. Chips may be lost.")
+            # Potentially award to first winner if amount_per_winner is 0 but pot_amount > 0
+            # For now, proceeding with amount_per_winner as calculated.
 
-            # Find the original PokerPlayerState object for the winner to update stack
-            winner_player_state_obj = next((p['player_state_obj'] for p in players_at_showdown if p['user_id'] == winner_user_id), None)
-            winner_user_obj = session.query(User).get(winner_user_id)
+        for winner_data in winners_of_this_pot:
+            winner_user_id = winner_data['user_id']
 
-            if winner_player_state_obj and winner_user_obj:
-                winner_player_state_obj.stack_sats += amount_per_winner_this_pot
-                session.add(winner_player_state_obj)
+            # Find the PokerPlayerState object for the winner to update their stack
+            winner_player_state = next((p['player_state_obj'] for p in players_data_for_pots if p['user_id'] == winner_user_id), None)
+            winner_user_account = session.query(User).get(winner_user_id) # For username in summary
 
-                transaction = Transaction(
-                    user_id=winner_user_id,
-                    amount=amount_per_winner_this_pot,
-                    transaction_type='poker_win',
-                    status='completed',
-                    details={
-                        "hand_id": poker_hand.id, "table_id": poker_hand.table_id,
-                        "pot_description": pot_description,
-                        "pot_total_amount_awarded_to_player": amount_per_winner_this_pot,
-                        "this_pot_total_value": pot_amount_to_distribute,
-                        "num_winners_for_this_pot": num_winners_this_pot,
-                        "winning_hand": winner_detail.get("winning_hand", "Unknown"),
-                        "board_cards": poker_hand.board_cards
-                    },
-                    poker_hand_id=poker_hand.id
-                )
-                session.add(transaction)
+            if winner_player_state and winner_user_account:
+                if amount_per_winner > 0: # Only process if there's an actual amount to award
+                    winner_player_state.stack_sats += amount_per_winner
+                    session.add(winner_player_state)
 
+                    # Create Transaction for winnings
+                    win_transaction = Transaction(
+                        user_id=winner_user_id,
+                        amount=amount_per_winner,
+                        transaction_type='poker_win',
+                        status='completed',
+                        details={
+                            "hand_id": poker_hand.id,
+                            "table_id": poker_hand.table_id,
+                            "pot_description": pot_description,
+                            "amount_won_from_this_pot": amount_per_winner,
+                            "this_pot_total_value_distributed": pot_amount, # Pot value before this winner's share
+                            "num_winners_for_this_pot": num_winners_this_pot,
+                            "winning_hand_description": winner_data.get("winning_hand", "Unknown"),
+                            "board_cards_at_showdown": poker_hand.board_cards or []
+                        },
+                        poker_hand_id=poker_hand.id
+                    )
+                    session.add(win_transaction)
+
+                # Add to summary regardless of amount (e.g. won a $0 split pot if that's possible)
                 final_hand_winners_summary.append({
-                    "user_id": winner_user_id, "username": winner_user_obj.username,
-                    "amount_won": amount_per_winner_this_pot,
+                    "user_id": winner_user_id,
+                    "username": winner_user_account.username,
+                    "amount_won": amount_per_winner, # This is share from this specific pot
                     "pot_description": pot_description,
-                    "winning_hand": winner_detail.get("winning_hand", "Unknown"),
-                    "best_five_cards": winner_detail.get("best_five_cards", []) # From _determine_winning_hand
+                    "winning_hand": winner_data.get("winning_hand", "Unknown"),
+                    "best_five_cards": winner_data.get("best_five_cards", []) # From _determine_winning_hand
                 })
             else:
-                print(f"Error: Could not find full PlayerState or User object for winner ID {winner_user_id} of pot '{pot_description}'.")
+                print(f"Error: Hand {poker_hand.id}, Pot '{pot_description}': Could not find PlayerState or User account for winner ID {winner_user_id}.")
 
-    poker_hand.winners = final_hand_winners_summary
+    # --- 5. Finalize Hand ---
+    poker_hand.winners = final_hand_winners_summary # Store detailed winner breakdown
     poker_hand.end_time = datetime.now(timezone.utc)
+    poker_hand.status = 'completed' # Mark hand as fully completed
     session.add(poker_hand)
 
     try:
         session.commit()
-        # print(f"Hand {poker_hand.id}: Pot distribution complete. Rake: {actual_rake}. Winners: {final_hand_winners_summary}")
+        # print(f"Hand {poker_hand.id} pot distribution complete. Rake: {poker_hand.rake_sats}. Winners summary: {final_hand_winners_summary}")
     except Exception as e:
         session.rollback()
-        print(f"Error during final pot distribution commit for hand {poker_hand.id}: {e}")
-        # Consider how to signal this error to the game flow
+        print(f"Error during final commit of pot distribution for hand {poker_hand.id}: {e}")
+        # This is a server-side error; the calling context might need to be aware.
+        # For now, error is logged. Potentially return an error status.
+        return {"error": f"Failed to commit pot distribution for hand {poker_hand.id}: {str(e)}"}
+
+    return {"status": "pot_distributed", "hand_id": poker_hand.id, "winners": final_hand_winners_summary, "rake_taken": poker_hand.rake_sats}
+
 
 # Example of how a full hand might proceed (very simplified flow):
 # 1. new_hand_data = start_new_hand(table_id=1)
