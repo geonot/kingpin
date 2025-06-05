@@ -27,6 +27,7 @@ class User(db.Model):
     spacecrash_bets = db.relationship('SpacecrashBet', back_populates='user', lazy='dynamic')
     poker_states = db.relationship('PokerPlayerState', back_populates='user', lazy='dynamic')
     plinko_drops = db.relationship('PlinkoDropLog', back_populates='user', lazy=True)
+    # roulette_games backref will be added by RouletteGame model
 
     def check_password(self, password):
         return sha256.verify(password, self.password)
@@ -93,7 +94,7 @@ class Transaction(db.Model):
     details = db.Column(JSON, nullable=True)
     slot_spin_id = db.Column(db.Integer, db.ForeignKey('slot_spin.id'), nullable=True, index=True)
     blackjack_hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id'), nullable=True, index=True)
-    plinko_drop_id = db.Column(db.Integer, db.ForeignKey('plinko_drop_log.id'), nullable=True, index=True) # ADDED THIS LINE
+    plinko_drop_id = db.Column(db.Integer, db.ForeignKey('plinko_drop_log.id'), nullable=True, index=True)
 
     # Relationships to game events
     slot_spin = db.relationship('SlotSpin', backref=db.backref('transactions', lazy='dynamic'))
@@ -408,3 +409,19 @@ class TokenBlacklist(db.Model):
     
     def __repr__(self):
         return f'<TokenBlacklist {self.jti}>'
+
+class RouletteGame(db.Model):
+    __tablename__ = 'roulette_game'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    bet_amount = db.Column(db.Float, nullable=False)
+    bet_type = db.Column(db.String(50), nullable=False)  # e.g., 'straight_up_0', 'red', 'even', 'column_1', 'dozen_1'
+    winning_number = db.Column(db.Integer, nullable=True) # Nullable until wheel spins
+    payout = db.Column(db.Float, nullable=True) # Nullable until result
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Add this line
+    user = db.relationship('User', backref=db.backref('roulette_games', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<RouletteGame {self.id} by User {self.user_id} - Bet: {self.bet_amount} on {self.bet_type}>'

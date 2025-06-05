@@ -16,6 +16,7 @@ const Withdraw = () => import('@views/Withdraw.vue');
 const Settings = () => import('@views/Settings.vue');
 const Spacecrash = () => import('@/views/Spacecrash.vue'); // Import Spacecrash view
 const Plinko = () => import('@views/Plinko.vue'); // Added Plinko
+const Roulette = () => import('@/views/Roulette.vue'); // Added Roulette
 
 // Placeholder components for routes added
 const Terms = () => import('@/views/static/TermsPage.vue');
@@ -112,6 +113,12 @@ const routes = [
     component: PokerTable,
     props: true, // Pass route params as props
     meta: { title: 'Poker Table', requiresAuth: true }
+  },
+  {
+    path: '/roulette',
+    name: 'Roulette',
+    component: Roulette,
+    meta: { title: 'Roulette', requiresAuth: true }
   },
    // Placeholder routes for footer links
   { path: '/terms', name: 'Terms', component: Terms, meta: { title: 'Terms & Conditions' } },

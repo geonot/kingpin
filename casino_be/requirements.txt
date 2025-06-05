@@ -12,3 +12,4 @@ marshmallow-sqlalchemy==0.26.1 # To align with older marshmallow and SQLAlchemy
 passlib==1.7.4 # For password hashing
 Flask-Limiter==3.5.0 # For rate limiting
 treys==0.1.8
+psycopg2-binary # For PostgreSQL connection
