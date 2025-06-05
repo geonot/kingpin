@@ -110,10 +110,11 @@ def generate_images(theme_name, short_name, slot_id, asset_path_for_creation):
     print(f"INFO: Image placeholder generation phase complete. {len(image_specs)} placeholder images targeted.")
     return sorted(generated_symbol_details, key=lambda x: x['id'])
 
-def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, asset_path_for_creation, symbol_config_details):
+def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, asset_path_for_creation, symbol_config_details,
+                         is_cascading_arg=False, cascade_type_arg=None, min_symbols_to_match_arg=None, win_multipliers_arg_str="[]"):
     """
     Generates the gameConfig.json file for the new slot game.
-    Populates based on theme, symbol details, and default game mechanics.
+    Populates based on theme, symbol details, and provided game mechanics.
     Saves the file to the specified asset creation path.
     Returns a dictionary of details for database migration.
     """
@@ -194,7 +195,12 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
             "animations": { "spin": { "duration": 800 }, "winLine": { "duration": 500 } }, # Simplified
             "bonus": {"triggerSymbolId": 10, "triggerCount": 3, "spinsAwarded": 10, "multiplier": 2.0},
             "sound": { "spin": "/assets/sounds/spin.wav" }, # Simplified, use generic sounds
-            "settings": {"betOptions": [10, 20, 50, 100, 200, 500]}
+            "settings": {"betOptions": [10, 20, 50, 100, 200, 500]},
+            # Cascading features
+            "is_cascading": is_cascading_arg,
+            "cascade_type": cascade_type_arg if is_cascading_arg else None,
+            "min_symbols_to_match": min_symbols_to_match_arg if is_cascading_arg else None,
+            "win_multipliers": json.loads(win_multipliers_arg_str) if is_cascading_arg else []
         }
     }
 
@@ -226,7 +232,12 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
         "bonus_subtype_db": theme_name, # Specific theme for subtype
         "bonus_spins_trigger_count_db": game_config_dict['game']['bonus']['triggerCount'],
         "bonus_spins_awarded_db": game_config_dict['game']['bonus']['spinsAwarded'],
-        "is_active_db": True
+        "is_active_db": True,
+        # Cascading fields for DB
+        "is_cascading_db": game_config_dict['game']['is_cascading'],
+        "cascade_type_db": game_config_dict['game']['cascade_type'],
+        "min_symbols_to_match_db": game_config_dict['game']['min_symbols_to_match'],
+        "win_multipliers_db": game_config_dict['game']['win_multipliers']
     }
 
 def generate_migration_file(theme_name, short_name, slot_id, asset_dir_for_config, db_slot_details, symbol_db_details):
@@ -299,6 +310,10 @@ def generate_migration_file(theme_name, short_name, slot_id, asset_dir_for_confi
         'is_active': db_slot_details['is_active_db'],
         'is_multiway': False,
         'reel_configurations': None,
+        'is_cascading': db_slot_details['is_cascading_db'],
+        'cascade_type': db_slot_details['cascade_type_db'],
+        'min_symbols_to_match': db_slot_details['min_symbols_to_match_db'],
+        'win_multipliers': db_slot_details['win_multipliers_db'],
         'created_at': datetime.now(timezone.utc)
     }
 
@@ -378,6 +393,10 @@ def upgrade():
         sa.Column('is_active', sa.Boolean()),
         sa.Column('is_multiway', sa.Boolean()),
         sa.Column('reel_configurations', JSONB_TYPE),
+        sa.Column('is_cascading', sa.Boolean()),
+        sa.Column('cascade_type', sa.String(50)),
+        sa.Column('min_symbols_to_match', sa.Integer()),
+        sa.Column('win_multipliers', JSONB_TYPE),
         sa.Column('created_at', sa.DateTime(timezone=True)) # Ensure timezone=True if model expects it
     )
 
@@ -429,10 +448,19 @@ def main():
     )
     parser.add_argument("theme", type=str, help="Theme for the slot game (e.g., 'Mystic Forest').")
     parser.add_argument("--slot_id", type=int, help="Optional DB ID for the new slot game.\nIf not provided, script tries to find the next available ID.")
+    parser.add_argument("--cascading", action="store_true", help="Enable cascading feature for this slot.")
+    parser.add_argument("--cascade_type", type=str, default=None, help="Type of cascade (e.g., 'fall_from_top', 'replace_in_place').")
+    parser.add_argument("--min_match", type=int, default=None, help="Minimum symbols to match for cluster/match-N wins.")
+    parser.add_argument("--multipliers", type=str, default="[]", help="JSON string for win multipliers array (e.g., '[1,2,3,5]').")
 
     args = parser.parse_args()
     theme_name = args.theme
     provided_slot_id = args.slot_id
+    # New arguments for cascading features
+    is_cascading_arg = args.cascading
+    cascade_type_arg = args.cascade_type
+    min_symbols_to_match_arg = args.min_match
+    win_multipliers_arg_str = args.multipliers
 
     print(f"--- SlotBuilder Starting for theme: '{theme_name}' ---")
 
@@ -478,7 +506,11 @@ def main():
             return
 
         # Step 2: Generate gameConfig.json and get DB details for migration
-        db_details_from_config = generate_game_config(theme_name, short_name, actual_db_slot_id, asset_dir_for_config, asset_path_for_creation, symbol_config_details)
+        db_details_from_config = generate_game_config(
+            theme_name, short_name, actual_db_slot_id,
+            asset_dir_for_config, asset_path_for_creation, symbol_config_details,
+            is_cascading_arg, cascade_type_arg, min_symbols_to_match_arg, win_multipliers_arg_str
+        )
         if not db_details_from_config:
             print("ERROR: gameConfig.json generation step failed. Aborting.")
             return

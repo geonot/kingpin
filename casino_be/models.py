@@ -70,6 +70,7 @@ class SlotSpin(db.Model):
     win_amount = db.Column(BigInteger, nullable=False)
     bet_amount = db.Column(BigInteger, nullable=False)
     is_bonus_spin = db.Column(db.Boolean, default=False, nullable=False)
+    current_multiplier_level = db.Column(db.Integer, default=0, nullable=False) # Tracks current multiplier for cascading wins
     spin_time = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     game_session = db.relationship('GameSession', backref='slot_spins')
@@ -137,6 +138,10 @@ class Slot(db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
     is_multiway = db.Column(db.Boolean, default=False, nullable=False)
     reel_configurations = db.Column(JSON, nullable=True)
+    is_cascading = db.Column(db.Boolean, default=False, nullable=False)
+    cascade_type = db.Column(db.String(50), nullable=True)  # e.g., "replace_in_place", "fall_from_top"
+    min_symbols_to_match = db.Column(db.Integer, nullable=True) # For non-payline wins, e.g. scatter-pays or cluster-pays if is_multiway is False
+    win_multipliers = db.Column(JSON, nullable=True)  # e.g., [1, 2, 4, 8, 10] for cascading wins
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     symbols = db.relationship('SlotSymbol', backref='slot', lazy='select')
