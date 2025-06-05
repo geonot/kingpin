@@ -17,7 +17,7 @@ from .models import (
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
-    PlinkoDropLog,  # Plinko models
+    PlinkoDropLog, RouletteGame,  # Plinko models, added RouletteGame
     BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
 )
 from .schemas import (
@@ -38,6 +38,7 @@ from .utils.multiway_helper import handle_multiway_spin
 from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
 from .utils import spacecrash_handler
 from .utils import poker_helper
+from .utils import roulette_helper # Import the new helper
 from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
 from .utils import baccarat_helper
 from .config import Config
@@ -1461,7 +1462,99 @@ def spacecrash_admin_next_phase():
         logger.error(f"Error transitioning Spacecrash game {game.id} to {target_phase} by admin {current_user.id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to transition game phase due to an internal error.'}), 500
 
-# === Baccarat Endpoints ===
+@app.route('/api/roulette/bet', methods=['POST'])
+@jwt_required()
+def roulette_bet():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing data"}), 400
+
+    bet_amount_req = data.get('bet_amount')
+    bet_type_req = data.get('bet_type') # e.g., "straight_up", "red"
+    bet_value_req = data.get('bet_value') # e.g., 7 for straight_up, "1" for column_1/dozen_1, None for red/black
+
+    if not all([bet_amount_req, bet_type_req]):
+        return jsonify({"error": "Missing bet_amount or bet_type"}), 400
+
+    try:
+        bet_amount = float(bet_amount_req)
+        if bet_amount <= 0:
+            raise ValueError("Bet amount must be positive.")
+    except ValueError:
+        return jsonify({"error": "Invalid bet_amount"}), 400
+
+    user = current_user
+    if user.balance < bet_amount: # Assuming balance is in the same unit as bet_amount (e.g., main currency unit, not sats)
+        return jsonify({"error": "Insufficient balance"}), 400
+
+    # Deduct bet amount (will be returned with winnings if any)
+    user.balance -= bet_amount
+    # db.session.add(user) # Not strictly necessary if balance is updated directly and committed later
+
+    winning_number = roulette_helper.spin_wheel()
+
+    # Get multiplier from helper
+    multiplier = roulette_helper.get_bet_type_multiplier(bet_type_req, bet_value_req, winning_number)
+
+    payout = 0
+    if multiplier > 0:
+        # calculate_payout includes the stake
+        payout = roulette_helper.calculate_payout(bet_amount, multiplier)
+        user.balance += payout # Add winnings (which includes original stake)
+
+    # Construct a descriptive bet_type for storage, including bet_value if relevant
+    stored_bet_type = bet_type_req
+    if bet_value_req is not None and bet_type_req in ["straight_up", "column", "dozen"]: # Add other types if bet_value is part of their common naming
+        stored_bet_type = f"{bet_type_req}_{bet_value_req}"
+    elif bet_type_req not in ["red", "black", "even", "odd", "low", "high"]: # For specific number/group bets not covered above
+        if bet_value_req is not None:
+             stored_bet_type = f"{bet_type_req}_{bet_value_req}"
+
+
+    game_record = RouletteGame(
+        user_id=user.id,
+        bet_amount=bet_amount,
+        bet_type=stored_bet_type,
+        winning_number=winning_number,
+        payout=payout,
+        timestamp=datetime.now(timezone.utc) # Ensure timestamp is set
+    )
+    db.session.add(game_record)
+    db.session.add(user) # Ensure user balance changes are staged
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Roulette bet by user {user.id} failed: {str(e)}", exc_info=True)
+        return jsonify({"error": "Failed to process bet due to a server error."}), 500
+
+    return jsonify({
+        "message": "Bet placed successfully!",
+        "winning_number": winning_number,
+        "your_bet_type": stored_bet_type,
+        "your_bet_amount": bet_amount,
+        "payout_received": payout, # This includes the stake back if won
+        "new_balance": user.balance
+    }), 200
+
+@app.route('/api/roulette/history', methods=['GET'])
+@jwt_required()
+def roulette_history():
+    user = current_user
+    games = RouletteGame.query.filter_by(user_id=user.id).order_by(RouletteGame.timestamp.desc()).limit(20).all()
+
+    history_data = [{
+        "id": game.id,
+        "bet_amount": game.bet_amount,
+        "bet_type": game.bet_type,
+        "winning_number": game.winning_number,
+        "payout": game.payout,
+        "timestamp": game.timestamp.isoformat() if game.timestamp else None
+    } for game in games]
+
+    return jsonify(history_data), 200
+
 baccarat_bp = Blueprint('baccarat_bp', __name__, url_prefix='/api/baccarat')
 
 @baccarat_bp.route('/tables', methods=['GET'])

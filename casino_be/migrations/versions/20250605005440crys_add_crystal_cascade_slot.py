@@ -17,7 +17,7 @@ except ImportError:
 
 # revision identifiers, used by Alembic.
 revision = '20250605005440crys'
-down_revision = 'plinko' # Uses repr to correctly format None or string
+down_revision = 'plinko_features_manual' # Was 'plinko', corrected to actual revision ID
 branch_labels = None
 depends_on = None
 

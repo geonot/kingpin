@@ -86,7 +86,15 @@ def run_migrations_online():
                 directives[:] = []
                 logger.info('No changes in schema detected.')
 
-    connectable = current_app.extensions['migrate'].db.engine
+    # FORCED FOR OFFLINE-LIKE GENERATION WHEN DB IS UNAVAILABLE
+    # connectable = current_app.extensions['migrate'].db.engine
+    dummy_sqlite_url = 'sqlite:///./_alembic_dummy_for_generation.db'
+    logger.info(f"Migration generation: Forcing connectable to use dummy SQLite URL: {dummy_sqlite_url}")
+    connectable = engine_from_config(
+        {'sqlalchemy.url': dummy_sqlite_url},  # Pass config dict directly
+        prefix='sqlalchemy.',
+        poolclass=pool.NullPool
+    )
 
     with connectable.connect() as connection:
         context.configure(
@@ -127,6 +135,9 @@ else:
     # raise ValueError("Missing database URL configuration for Alembic.")
     config.set_main_option('sqlalchemy.url', 'sqlite:///./_alembic_dummy.db')
 
+# Force SQLite for migration generation if DB is not available
+config.set_main_option('sqlalchemy.url', 'sqlite:///./_alembic_dummy.db')
+logger.info("Forcing Alembic to use a dummy SQLite DB for migration generation.")
 
 if context.is_offline_mode():
     run_migrations_offline()
