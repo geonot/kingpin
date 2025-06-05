@@ -1,8 +1,8 @@
 <template>
   <div class="container mx-auto px-4 py-8">
-    <h1 class="text-3xl font-bold mb-6 text-gray-800 dark:text-white">Responsible Gaming</h1>
+    <h1 class="mb-6">Responsible Gaming</h1>
 
-    <div class="prose dark:prose-invert max-w-none bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+    <div class="card prose dark:prose-invert max-w-none">
       <p class="mb-4">
         Kingpin Casino is committed to responsible gaming and providing a safe and enjoyable experience for all our players. We understand that gambling can be addictive for some individuals, and we aim to provide resources and tools to help manage your play.
       </p>
@@ -78,14 +78,5 @@ export default defineComponent({
 </script>
 
 <style scoped>
-/* Using Tailwind's prose class for typography styling. */
-.prose h1, .prose-invert h1 {
-  font-size: 1.875rem; /* 30px */
-  margin-bottom: 1.5rem;
-}
-.prose h2, .prose-invert h2 {
-  font-size: 1.5rem; /* 24px */
-  margin-top: 1.5rem;
-  margin-bottom: 0.75rem;
-}
+/* Add specific styles if needed */
 </style>
