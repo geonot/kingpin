@@ -4,6 +4,8 @@ from flask import current_app
 # (No model imports needed for this subtask, use comments for DB interaction points)
 
 # --- Constants ---
+SATOSHIS_PER_UNIT = 100000000  # 1 BTC = 100,000,000 satoshis
+
 PAYOUT_MULTIPLIERS = {
     '0.5x': 0.5,
     '2x': 2.0,
