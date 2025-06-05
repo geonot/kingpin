@@ -20,7 +20,8 @@
       { "id": 6, "icon": "/slot1/sprite_5.png", "value": 10, "name": "Symbol 6" },
       { "id": 7, "icon": "/slot1/sprite_6.png", "value": 20, "name": "Symbol 7" },
       { "id": 8, "icon": "/slot1/sprite_7.png", "value": null, "name": "Scatter" },
-      { "id": 9, "icon": "/slot1/sprite_8.png", "value": null, "name": "Wild" }
+      { "id": 9, "icon": "/slot1/sprite_8.png", "value": null, "name": "Wild" },
+      { "id": 10, "icon": "/slot1/coin.png", "value": 0, "name": "Coin", "isBonusCoin": true }
     ],
     "paylines": [
       {"id": 0, "coords": [[0,0],[0,1],[0,2],[0,3],[0,4]]},
@@ -79,6 +80,18 @@
       "triggerCount": 3,
       "spinsAwarded": 10,
       "multiplier": 3.0 
+    },
+    "holdAndWinBonus": {
+      "triggerSymbolId": 8,
+      "minTriggerCount": 3,
+      "coinSymbolId": 10,
+      "bonusReelLayout": { "rows": 3, "columns": 5 },
+      "initialRespins": 3,
+      "resetRespinsValue": 3,
+      "coinValueSource": "randomRange",
+      "coinValueRange": [1, 10],
+      "bonusBackgroundAsset": "/slot1/bonus_bg.png",
+      "bonusMusic": "/assets/sounds/bonus_music.wav"
     },
     "sound": {
       "spin": "/assets/sounds/spin.wav",

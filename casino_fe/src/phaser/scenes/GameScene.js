@@ -128,6 +128,42 @@ export default class GameScene extends Phaser.Scene {
     console.log('GameScene: Ready.');
     // Notify Vue that Phaser is ready (if needed)
     // EventBus.$emit('phaserReady');
+
+    EventBus.$on('bonusGameComplete', this.handleBonusComplete, this);
+  }
+
+  shutdown() {
+    console.log('GameScene: shutdown');
+    EventBus.$off('turboSettingChanged');
+    EventBus.$off('soundSettingChanged');
+    EventBus.$off('bonusGameComplete', this.handleBonusComplete, this);
+
+    this.reels.forEach(reelSymbols => {
+        reelSymbols.forEach(symbol => {
+            this.tweens.killTweensOf(symbol); // Kill any active tweens on symbols
+            symbol.destroy(); // Destroy symbols
+        });
+    });
+    this.reels = [];
+    this.reelContainers.forEach(container => container.destroy()); // Destroy containers
+    this.reelContainers = [];
+    this.symbolMap = {};
+
+    this.paylineGraphics?.destroy();
+    this.winEmitter?.destroy(); // Destroy particle emitter
+    this.currentWinDisplay?.destroy();
+
+    if (this.paylineTimer) this.paylineTimer.remove();
+
+    // It's good practice to also nullify references if the scene might be restarted
+    this.gameConfig = null;
+    this.slotId = null;
+  }
+
+  // Adding destroy method to call shutdown for completeness, standard Phaser practice
+  destroy() {
+    this.shutdown();
+    super.destroy();
   }
 
   createBackground() {
@@ -398,11 +434,67 @@ export default class GameScene extends Phaser.Scene {
   onAllReelsStopped() {
       console.log('GameScene: All reels stopped.');
       this.isSpinning = false;
-      EventBus.$emit('spinAnimationComplete', this.lastSpinResponse);
+      // EventBus.$emit('spinAnimationComplete', this.lastSpinResponse); // Emit after bonus check or normal win processing
+
+      const bonusConfig = this.gameConfig?.holdAndWinBonus;
+      if (bonusConfig && bonusConfig.triggerSymbolId && bonusConfig.minTriggerCount && this.lastSpinResponse?.result) {
+          const triggerSymbolId = bonusConfig.triggerSymbolId;
+          let triggerCount = 0;
+          const actualInitialCoins = [];
+
+          // Determine grid structure from lastSpinResponse
+          // Assuming this.lastSpinResponse.result.symbols_grid is [cols][rows] for multiway
+          // and this.lastSpinResponse.result (which becomes formattedGrid) is [rows][cols] for standard
+          const grid = this.isMultiwayGame ? this.lastSpinResponse.result.symbols_grid : this.transposeMatrix(this.formatSpinResult(this.lastSpinResponse.result));
+          // Note: After transposeMatrix, standard grid is also [cols][rows] like multiway for this logic.
+
+          if (grid) {
+              for (let c = 0; c < grid.length; c++) {
+                  const colSymbols = grid[c];
+                  for (let r = 0; r < colSymbols.length; r++) {
+                      if (colSymbols[r] === triggerSymbolId) {
+                          triggerCount++;
+                          // Store all found trigger symbols for potential use in initialCoins
+                          // We'll only pass up to minTriggerCount or a specific number if defined in bonusConfig
+                          actualInitialCoins.push({ col: c, row: r, value: bonusConfig.defaultCoinValue || 1 });
+                      }
+                  }
+              }
+          }
+
+          console.log(`Hold and Win: Found ${triggerCount} of symbol ${triggerSymbolId}. Min required: ${bonusConfig.minTriggerCount}`);
+
+          if (triggerCount >= bonusConfig.minTriggerCount) {
+              console.log('Hold and Win Bonus Triggered!');
+              this.playSound('snd-common-bonus-trigger'); // Make sure this is loaded
+
+              // Optional: Select only minTriggerCount coins or specific logic from bonusConfig
+              const coinsToPass = actualInitialCoins.slice(0, bonusConfig.maxInitialCoins || actualInitialCoins.length);
+
+
+              const dataForBonus = {
+                  gameConfig: this.gameConfig,
+                  currentBet: this.lastSpinResponse.bet_amount,
+                  initialCoins: coinsToPass
+              };
+
+              EventBus.$emit('spinAnimationComplete', this.lastSpinResponse); // Emit before pausing
+
+              this.scene.launch('BonusHoldAndWinScene', dataForBonus);
+              this.scene.pause('GameScene');
+              this.scene.pause('UIScene');
+              return; // Return early to prevent normal win processing
+          }
+      }
+
+      EventBus.$emit('spinAnimationComplete', this.lastSpinResponse); // Emit if bonus not triggered
 
       if (this.lastSpinResponse && this.lastSpinResponse.win_amount > 0 && this.lastSpinResponse.winning_lines) {
           this.playSoundWin(this.lastSpinResponse.win_amount);
           this.displayWinningLines(this.lastSpinResponse.winning_lines, this.lastSpinResponse.win_amount);
+      } else {
+          // If no wins and no bonus, ensure UI is idle
+          EventBus.$emit('uiSetIdle');
       }
   }
 
@@ -686,6 +778,50 @@ export default class GameScene extends Phaser.Scene {
             }
         }
     }
+
+  handleBonusComplete(data) {
+    console.log('GameScene: Bonus game complete.', data);
+    this.scene.stop('BonusHoldAndWinScene');
+    // Ensure GameScene and UIScene are properly resumed and brought to top if necessary
+    this.scene.resume('GameScene');
+    this.scene.resume('UIScene');
+    this.scene.bringToTop('GameScene');
+    this.scene.bringToTop('UIScene');
+
+
+    const bonusWinAmount = data.winAmount || 0;
+
+    if (bonusWinAmount > 0) {
+        // Add bonus win to the session's total or display separately
+        // For now, let's assume lastSpinResponse might not be the right place if other wins already processed.
+        // We can directly update UI or manage a separate "bonus_win" field if API supports.
+
+        // Update global balance (example, actual implementation might differ)
+        EventBus.$emit('updateBalance', bonusWinAmount); // This is a client-side reflection.
+
+        // Display the bonus win amount prominently
+        // Option 1: Use existing currentWinDisplay
+        this.currentWinDisplay.setText(`Bonus Win: ${formatSatsToBtc(bonusWinAmount)}`).setVisible(true).setAlpha(1);
+        this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION * 1.5, () => { // Show longer
+            this.currentWinDisplay.setVisible(false);
+            EventBus.$emit('uiSetIdle'); // Set UI to idle after bonus win display
+        });
+
+        // Option 2: Emit to UIScene to handle special bonus win display
+        EventBus.$emit('uiUpdate', { winAmount: bonusWinAmount, isBonusWin: true, isTotalWin: true });
+
+        // Play a win sound for the bonus total
+        this.playSoundWin(bonusWinAmount); // You might want a specific sound for "bonus_total_win"
+
+    } else {
+      // No win from bonus, just set UI to idle
+      EventBus.$emit('uiSetIdle');
+    }
+
+    // Ensure isSpinning is false and UI controls are enabled
+    this.isSpinning = false;
+    // EventBus.$emit('enableSpinButton'); // Or let uiSetIdle handle this
+  }
 
 }
 
