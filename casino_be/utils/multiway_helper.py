@@ -1,6 +1,7 @@
 import os
 import json
 import random
+from flask import current_app
 import secrets
 from casino_be.utils.spin_handler import SLOT_CONFIG_BASE_PATH
 
@@ -75,7 +76,7 @@ def generate_multiway_spin_grid(
              # If `reel_configurations` can be None for a multiway slot, a default needs to be defined.
              # If `reel_configurations` *must* exist for `is_multiway=True` slots, then this is an error condition.
             # Defaulting to 3 panes per reel if config is missing.
-            print(f"Warning: 'possible_counts_per_reel' missing or malformed in slot_reel_configurations. Defaulting to 3 panes for {num_reels} reels.")
+            current_app.logger.warning(f"'possible_counts_per_reel' missing or malformed in slot_reel_configurations. Defaulting to 3 panes for {num_reels} reels.")
             panes_per_reel = [3] * num_reels
         else: # Config exists but is malformed for the number of reels
             raise ValueError(
@@ -89,7 +90,7 @@ def generate_multiway_spin_grid(
             possible_counts_for_this_reel = possible_counts_per_reel[reel_idx]
             if not possible_counts_for_this_reel or not isinstance(possible_counts_for_this_reel, list):
                 # Default for this specific reel if its config is bad
-                print(f"Warning: Malformed 'possible_counts' for reel {reel_idx}. Defaulting to 3 panes.")
+                current_app.logger.warning(f"Malformed 'possible_counts' for reel {reel_idx}. Defaulting to 3 panes.")
                 panes_per_reel.append(3)
             else:
                 panes_per_reel.append(secure_random.choice(possible_counts_for_this_reel))
@@ -98,7 +99,7 @@ def generate_multiway_spin_grid(
             # If possible_counts_per_reel was None initially and we defaulted, this won't be hit.
             # If it was present but shorter than num_reels (and not caught by initial length check for some reason),
             # we default this specific reel.
-            print(f"Warning: Configuration missing for reel {reel_idx} beyond 'possible_counts_per_reel' length. Defaulting to 3 panes.")
+            current_app.logger.warning(f"Configuration missing for reel {reel_idx} beyond 'possible_counts_per_reel' length. Defaulting to 3 panes.")
             panes_per_reel.append(3)
 
 
@@ -146,7 +147,7 @@ def generate_multiway_spin_grid(
             # Add an empty list for this reel if it somehow gets 0 or negative panes.
             # This indicates bad configuration.
             reel_symbols = []
-            print(f"Warning: Reel {reel_idx} has {num_panes_for_this_reel} panes. Check reel_configurations.")
+            current_app.logger.warning(f"Reel {reel_idx} has {num_panes_for_this_reel} panes. Check reel_configurations.")
         elif not symbols_for_choice : # Should be caught earlier
             reel_symbols = [] # No symbols to choose from
         else:

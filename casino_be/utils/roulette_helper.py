@@ -1,4 +1,5 @@
 import random
+from flask import current_app
 
 # European Roulette: numbers 0-36
 ROULETTE_NUMBERS = list(range(37)) # 0 to 36
@@ -97,7 +98,7 @@ def get_bet_type_multiplier(bet_type: str, bet_value, winning_number: int) -> in
     # For now, we'll return 0 for unimplemented types.
     # A more robust system might involve passing the specific numbers bet on.
 
-    print(f"Warning: Unhandled bet_type '{bet_type}' or invalid bet_value '{bet_value}'.")
+    current_app.logger.warning(f"Unhandled bet_type '{bet_type}' or invalid bet_value '{bet_value}'.")
     return 0
 
 

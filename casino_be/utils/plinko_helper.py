@@ -1,5 +1,6 @@
 # casino_be/utils/plinko_helper.py
 
+from flask import current_app
 # (No model imports needed for this subtask, use comments for DB interaction points)
 
 # --- Constants ---
@@ -56,14 +57,14 @@ def calculate_winnings(stake_amount_sats, slot_landed_label):
     multiplier = PAYOUT_MULTIPLIERS.get(slot_landed_label)
     if multiplier is None:
         # This should ideally not be reached if params are pre-validated.
-        print(f"Critical Error: Invalid slot label '{slot_landed_label}' in calculate_winnings.")
+        current_app.logger.error(f"Invalid slot label '{slot_landed_label}' in calculate_winnings.")
         return 0 # Return integer satoshis
     
     try:
         # Ensure stake_amount_sats is an integer (or can be treated as such)
         current_stake_sats = int(stake_amount_sats)
     except ValueError:
-        print(f"Critical Error: Invalid stake_amount_sats format '{stake_amount_sats}' in calculate_winnings.")
+        current_app.logger.error(f"Invalid stake_amount_sats format '{stake_amount_sats}' in calculate_winnings.")
         return 0 # Return integer satoshis
         
     # Perform calculation and ensure the result is an integer (satoshis)

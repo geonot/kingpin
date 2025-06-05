@@ -2,6 +2,7 @@ import random
 import secrets
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal # For precise monetary calculations
+from flask import current_app
 
 # treys library for hand evaluation
 from treys import Card, Evaluator
@@ -55,7 +56,7 @@ def deal_hole_cards(poker_hand: PokerHand, player_states: list[PokerPlayerState]
     Returns True if successful, False if not enough cards.
     """
     if not poker_hand.deck_state:
-        print(f"Error: Hand {poker_hand.id} has no deck_state.")
+        current_app.logger.error(f"Hand {poker_hand.id} has no deck_state.")
         return False
 
     # Work with a mutable copy of the deck_state for this operation
@@ -63,7 +64,7 @@ def deal_hole_cards(poker_hand: PokerHand, player_states: list[PokerPlayerState]
 
     num_active_players = sum(1 for ps in player_states if ps.is_active_in_hand)
     if len(current_deck_list) < num_active_players * 2:
-        print(f"Error: Not enough cards in hand's deck ({len(current_deck_list)}) to deal hole cards to {num_active_players} players.")
+        current_app.logger.error(f"Not enough cards in hand's deck ({len(current_deck_list)}) to deal hole cards to {num_active_players} players.")
         return False
 
     for _ in range(2): # Deal one card at a time to each player
@@ -76,7 +77,7 @@ def deal_hole_cards(poker_hand: PokerHand, player_states: list[PokerPlayerState]
                     player_state.hole_cards.append(card)
                 else:
                     # This should not happen if initial check passed
-                    print("Error: Deck ran out unexpectedly during hole card dealing.")
+                    current_app.logger.error("Deck ran out unexpectedly during hole card dealing.")
                     # poker_hand.deck_state is not updated yet, so no rollback of that needed here
                     return False
 
@@ -93,7 +94,7 @@ def deal_community_cards(poker_hand: PokerHand, street: str) -> list[str] | None
     Returns the list of newly dealt community cards for this street, or None on error.
     """
     if not poker_hand.deck_state:
-        print(f"Error: Hand {poker_hand.id} has no deck_state for dealing {street}.")
+        current_app.logger.error(f"Hand {poker_hand.id} has no deck_state for dealing {street}.")
         return None
 
     # Work with a mutable copy of the deck_state
@@ -110,22 +111,22 @@ def deal_community_cards(poker_hand: PokerHand, street: str) -> list[str] | None
     elif street == 'turn' or street == 'river':
         cards_to_deal_count = 1
     else:
-        print(f"Error: Invalid street name '{street}'.")
+        current_app.logger.error(f"Invalid street name '{street}'.")
         return None
 
     if len(current_deck_list) < cards_to_deal_count: # Check against the mutable copy
-        print(f"Error: Not enough cards in hand's deck to deal {street}.")
+        current_app.logger.error(f"Not enough cards in hand's deck to deal {street}.")
         return None
 
     # Optional: Burn a card. If burning, ensure deck has enough for burn + deal.
     # if len(current_deck_list) < cards_to_deal_count + 1: # If burning
-    #     print(f"Error: Not enough cards to burn and deal {street}.")
+    #     current_app.logger.error(f"Error: Not enough cards to burn and deal {street}.")
     #     return None
     # burned_card = _deal_card_from_deck_list(current_deck_list)
     # if burned_card:
     #     poker_hand.hand_history.append({"action": "burn_card", "card": burned_card, "street_before": street})
     # else: # Should not happen if check above is done
-    #     print(f"Error: Failed to burn card before {street} deal.")
+    #     current_app.logger.error(f"Error: Failed to burn card before {street} deal.")
     #     return None
 
 
@@ -136,7 +137,7 @@ def deal_community_cards(poker_hand: PokerHand, street: str) -> list[str] | None
             newly_dealt_street_cards.append(card)
         else:
             # Should not happen if initial checks passed
-            print(f"Error: Deck ran out unexpectedly during {street} dealing for hand {poker_hand.id}.")
+            current_app.logger.error(f"Error: Deck ran out unexpectedly during {street} dealing for hand {poker_hand.id}.")
             return None # Indicates critical error
             
     # Update the hand's board_cards and deck_state
@@ -330,7 +331,7 @@ def start_new_hand(table_id: int):
         session.commit()
     except Exception as e:
         session.rollback()
-        print(f"Error during start_new_hand commit: {e}")
+        current_app.logger.error(f"Error during start_new_hand commit: {e}")
         return {"error": f"Database error starting new hand: {str(e)}"}
 
     # TODO: Return a more comprehensive game state for the API, tailored per player.
@@ -429,7 +430,7 @@ def handle_sit_down(user_id: int, table_id: int, seat_id: int, buy_in_amount: in
     except Exception as e:
         session.rollback()
         # Log error e
-        print(f"Error during sit down: {e}")
+        current_app.logger.error(f"Error during sit down: {e}")
         return {"error": "Could not process sit down due to a server error."}
 
 
@@ -477,7 +478,7 @@ def handle_stand_up(user_id: int, table_id: int):
 
         player_state.is_active_in_hand = False # Mark as folded essentially
         # Chips in pot are lost for this hand.
-        print(f"Player {user_id} stood up and auto-folded from active hand {current_poker_hand.id if current_poker_hand else 'unknown'}.")
+        current_app.logger.info(f"Player {user_id} stood up and auto-folded from active hand {current_poker_hand.id if current_poker_hand else 'unknown'}.")
 
     amount_to_return = player_state.stack_sats
     user.balance += amount_to_return
@@ -503,7 +504,7 @@ def handle_stand_up(user_id: int, table_id: int):
     except Exception as e:
         session.rollback()
         # Log error e
-        print(f"Error during stand up: {e}")
+        current_app.logger.error(f"Error during stand up: {e}")
         return {"error": "Could not process stand up due to a server error."}
 
 
@@ -543,7 +544,7 @@ def handle_fold(user_id: int, table_id: int, hand_id: int):
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing player_state on inactive fold for user {user_id}: {e}")
+            current_app.logger.error(f"Error committing player_state on inactive fold for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
     player_state.is_active_in_hand = False
@@ -574,7 +575,7 @@ def handle_fold(user_id: int, table_id: int, hand_id: int):
         }
     except Exception as e:
         session.rollback()
-        print(f"Error during fold action for user {user_id} in hand {hand_id}: {e}")
+        current_app.logger.error(f"Error during fold action for user {user_id} in hand {hand_id}: {e}")
         # It's good to return a consistent error structure
         return {"error": "Could not process fold due to a server error.", "details": str(e)}
 
@@ -615,7 +616,7 @@ def handle_check(user_id: int, table_id: int, hand_id: int):
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing player_state on inactive check for user {user_id}: {e}")
+            current_app.logger.error(f"Error committing player_state on inactive check for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
     if poker_hand.player_street_investments is None:
@@ -631,7 +632,7 @@ def handle_check(user_id: int, table_id: int, hand_id: int):
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing on check legality fail for user {user_id}: {e}")
+            current_app.logger.error(f"Error committing on check legality fail for user {user_id}: {e}")
         return {"error": f"Cannot check. Player {user_id} needs to call {current_bet_to_match - player_invested_this_street} more to match current bet of {current_bet_to_match}."}
 
     player_state.last_action = "check"
@@ -658,7 +659,7 @@ def handle_check(user_id: int, table_id: int, hand_id: int):
         }
     except Exception as e:
         session.rollback()
-        print(f"Error during check action for user {user_id} in hand {hand_id}: {e}")
+        current_app.logger.error(f"Error during check action for user {user_id} in hand {hand_id}: {e}")
         return {"error": "Could not process check due to a server error.", "details": str(e)}
 
 
@@ -702,7 +703,7 @@ def handle_call(user_id: int, table_id: int, hand_id: int):
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing player_state on inactive call for user {user_id}: {e}")
+            current_app.logger.error(f"Error committing player_state on inactive call for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
     if poker_hand.player_street_investments is None:
@@ -719,7 +720,7 @@ def handle_call(user_id: int, table_id: int, hand_id: int):
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing on call legality fail for user {user_id}: {e}")
+            current_app.logger.error(f"Error committing on call legality fail for user {user_id}: {e}")
         return {"error": f"No pending bet to call for user {user_id}. Amount due is {amount_to_call_due}. Current bet: {current_bet_to_match}, Player invested: {player_invested_this_street}."}
 
     actual_call_amount = min(amount_to_call_due, player_state.stack_sats)
@@ -772,7 +773,7 @@ def handle_call(user_id: int, table_id: int, hand_id: int):
         }
     except Exception as e:
         session.rollback()
-        print(f"Error during call action for user {user_id} in hand {hand_id}: {e}")
+        current_app.logger.error(f"Error during call action for user {user_id} in hand {hand_id}: {e}")
         return {"error": "Could not process call due to a server error.", "details": str(e)}
 
 
@@ -820,7 +821,7 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing player_state on inactive bet for user {user_id}: {e}")
+            current_app.logger.error(f"Error committing player_state on inactive bet for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
     if poker_hand.player_street_investments is None:
@@ -930,7 +931,7 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
         }
     except Exception as e:
         session.rollback()
-        print(f"Error during bet action for user {user_id} in hand {hand_id}: {e}")
+        current_app.logger.error(f"Error during bet action for user {user_id} in hand {hand_id}: {e}")
         return {"error": "Could not process bet due to a server error.", "details": str(e)}
 
 
@@ -976,7 +977,7 @@ def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing player_state on inactive raise for user {user_id}: {e}")
+            current_app.logger.error(f"Error committing player_state on inactive raise for user {user_id}: {e}")
         return {"error": f"Player {user_id} is not active in hand {hand_id}."}
 
     if poker_hand.player_street_investments is None:
@@ -1095,7 +1096,7 @@ def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
         }
     except Exception as e:
         session.rollback()
-        print(f"Error during raise action for user {user_id} in hand {hand_id}: {e}")
+        current_app.logger.error(f"Error during raise action for user {user_id} in hand {hand_id}: {e}")
         return {"error": "Could not process raise due to a server error.", "details": str(e)}
 
 
@@ -1415,7 +1416,7 @@ def _determine_winning_hand(player_hole_cards_map: dict[int, list[str]], board_c
         board = [Card.from_string(to_treys_card_str(c)) for c in board_cards_str]
     except Exception as e:
         # Log error: Invalid card string in board_cards
-        print(f"Error converting board cards for treys: {board_cards_str} - {e}")
+        current_app.logger.error(f"Error converting board cards for treys: {board_cards_str} - {e}")
         # Consider how to handle this - perhaps invalidate the hand or return error
         return []
 
@@ -1425,7 +1426,7 @@ def _determine_winning_hand(player_hole_cards_map: dict[int, list[str]], board_c
     for user_id, hole_cards_str_list in player_hole_cards_map.items():
         if not hole_cards_str_list or len(hole_cards_str_list) != 2:
             # Log warning or skip player
-            print(f"Warning: User {user_id} has invalid hole cards: {hole_cards_str_list}")
+            current_app.logger.warning(f"User {user_id} has invalid hole cards: {hole_cards_str_list}")
             continue
 
         try:
@@ -1433,7 +1434,7 @@ def _determine_winning_hand(player_hole_cards_map: dict[int, list[str]], board_c
             hand = [Card.from_string(to_treys_card_str(c)) for c in hole_cards_str_list]
         except Exception as e:
             # Log error: Invalid card string in hole_cards
-            print(f"Error converting hole cards for user {user_id}: {hole_cards_str_list} - {e}")
+            current_app.logger.error(f"Error converting hole cards for user {user_id}: {hole_cards_str_list} - {e}")
             continue # Skip this player
 
         # Evaluate the hand (board + player's hole cards)
@@ -1445,9 +1446,9 @@ def _determine_winning_hand(player_hole_cards_map: dict[int, list[str]], board_c
         # A more advanced implementation might try to find the exact 5 cards.
         combined_cards_str = hole_cards_str_list + board_cards_str
 
-        # DEBUG LOG: Original line logged hole cards: print(f"User {user_id}, Hole: {hole_cards_str_list}, Board: {board_cards_str}, Score: {score}, Hand Class: {hand_class_str}")
+        # DEBUG LOG: Original line logged hole cards: current_app.logger.debug(f"User {user_id}, Hole: {hole_cards_str_list}, Board: {board_cards_str}, Score: {score}, Hand Class: {hand_class_str}")
         # Hole cards redacted for security in general logging:
-        print(f"User {user_id} evaluation - Board: {board_cards_str}, Score: {score}, Hand Class: {hand_class_str}")
+        current_app.logger.info(f"User {user_id} evaluation - Board: {board_cards_str}, Score: {score}, Hand Class: {hand_class_str}")
 
         if score < best_score:
             best_score = score
@@ -1484,7 +1485,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
     poker_table = session.query(PokerTable).get(poker_hand.table_id)
 
     if not poker_table:
-        print(f"Error: PokerTable {poker_hand.table_id} not found for pot distribution of hand {poker_hand.id}.")
+        current_app.logger.error(f"PokerTable {poker_hand.table_id} not found for pot distribution of hand {poker_hand.id}.")
         # This is a critical error, likely indicates data integrity issue or programming error.
         # Depending on desired robustness, could try to proceed without rake or raise exception.
         # For now, let's assume this is fatal for pot distribution.
@@ -1496,7 +1497,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
         if not ps.hole_cards or len(ps.hole_cards) != 2:
             # Log this, but might not be critical to stop if other players are valid.
             # However, a player at showdown should always have hole cards.
-            print(f"Warning: Player {ps.user_id} at showdown for hand {poker_hand.id} has invalid hole cards: {ps.hole_cards}. Skipping for pot eligibility.")
+            current_app.logger.warning(f"Player {ps.user_id} at showdown for hand {poker_hand.id} has invalid hole cards: {ps.hole_cards}. Skipping for pot eligibility.")
             continue
 
         # total_invested_this_hand should be accurately tracked by action handlers.
@@ -1515,7 +1516,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
             # This case means the pot has money, but no valid showdown players were passed.
             # This might happen if only one player remained due to folds (handled before calling _distribute_pot)
             # or an error in game flow logic.
-            print(f"Warning: _distribute_pot called for hand {poker_hand.id} with pot {poker_hand.pot_size_sats} but no valid showdown players. Pot remains unawarded by this function.")
+            current_app.logger.warning(f"_distribute_pot called for hand {poker_hand.id} with pot {poker_hand.pot_size_sats} but no valid showdown players. Pot remains unawarded by this function.")
             # Consider refunding pot or specific error handling based on game rules.
         # If pot is 0 and no players, it's fine.
         poker_hand.status = 'completed' # Ensure hand is marked completed
@@ -1525,7 +1526,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
             session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error committing hand completion with no showdown players for hand {poker_hand.id}: {e}")
+            current_app.logger.error(f"Error committing hand completion with no showdown players for hand {poker_hand.id}: {e}")
         return # Or return a status indicating no distribution needed/possible.
 
     # --- 2. Rake Calculation ---
@@ -1596,7 +1597,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
             elif distributable_pot_overall <= sum(p['amount'] for p in created_pots) and current_pot_value_from_investments > 0:
                 # This means no more distributable money left for further side pots from player actual investments.
                 # This can happen if rake consumed the remaining amounts.
-                print(f"Hand {poker_hand.id}: Pot layer for cap {cap_level} calculated {current_pot_value_from_investments}, but no distributable funds left due to rake. Sum of created pots: {sum(p['amount'] for p in created_pots)}, Distributable: {distributable_pot_overall}")
+                current_app.logger.info(f"Hand {poker_hand.id}: Pot layer for cap {cap_level} calculated {current_pot_value_from_investments}, but no distributable funds left due to rake. Sum of created pots: {sum(p['amount'] for p in created_pots)}, Distributable: {distributable_pot_overall}")
                 break # No more money to distribute
 
         last_cap_level = cap_level
@@ -1626,7 +1627,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
         }
 
         if not hole_cards_for_this_pot_eval:
-            print(f"Warning: Hand {poker_hand.id}, Pot '{pot_description}': No eligible players with cards found for evaluation. Amount {pot_amount} unawarded.")
+            current_app.logger.warning(f"Hand {poker_hand.id}, Pot '{pot_description}': No eligible players with cards found for evaluation. Amount {pot_amount} unawarded.")
             continue
 
         # Determine winner(s) for this pot
@@ -1634,7 +1635,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
         winners_of_this_pot = _determine_winning_hand(hole_cards_for_this_pot_eval, poker_hand.board_cards or [])
 
         if not winners_of_this_pot:
-            print(f"Warning: Hand {poker_hand.id}, Pot '{pot_description}': _determine_winning_hand returned no winners. Amount {pot_amount} unawarded.")
+            current_app.logger.warning(f"Hand {poker_hand.id}, Pot '{pot_description}': _determine_winning_hand returned no winners. Amount {pot_amount} unawarded.")
             continue
 
         num_winners_this_pot = len(winners_of_this_pot)
@@ -1643,7 +1644,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
         amount_per_winner = pot_amount // num_winners_this_pot
 
         if amount_per_winner <= 0 and pot_amount > 0 : # If pot has value but per-winner is 0 (many winners of tiny pot)
-            print(f"Warning: Hand {poker_hand.id}, Pot '{pot_description}': pot amount {pot_amount} results in {amount_per_winner} per winner for {num_winners_this_pot} winners. Chips may be lost.")
+            current_app.logger.warning(f"Hand {poker_hand.id}, Pot '{pot_description}': pot amount {pot_amount} results in {amount_per_winner} per winner for {num_winners_this_pot} winners. Chips may be lost.")
             # Potentially award to first winner if amount_per_winner is 0 but pot_amount > 0
             # For now, proceeding with amount_per_winner as calculated.
 
@@ -1689,7 +1690,7 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
                     "best_five_cards": winner_data.get("best_five_cards", []) # From _determine_winning_hand
                 })
             else:
-                print(f"Error: Hand {poker_hand.id}, Pot '{pot_description}': Could not find PlayerState or User account for winner ID {winner_user_id}.")
+                current_app.logger.error(f"Hand {poker_hand.id}, Pot '{pot_description}': Could not find PlayerState or User account for winner ID {winner_user_id}.")
 
     # --- 5. Finalize Hand ---
     poker_hand.winners = final_hand_winners_summary # Store detailed winner breakdown
@@ -1699,10 +1700,10 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
 
     try:
         session.commit()
-        # print(f"Hand {poker_hand.id} pot distribution complete. Rake: {poker_hand.rake_sats}. Winners summary: {final_hand_winners_summary}")
+        # current_app.logger.info(f"Hand {poker_hand.id} pot distribution complete. Rake: {poker_hand.rake_sats}. Winners summary: {final_hand_winners_summary}")
     except Exception as e:
         session.rollback()
-        print(f"Error during final commit of pot distribution for hand {poker_hand.id}: {e}")
+        current_app.logger.error(f"Error during final commit of pot distribution for hand {poker_hand.id}: {e}")
         # This is a server-side error; the calling context might need to be aware.
         # For now, error is logged. Potentially return an error status.
         return {"error": f"Failed to commit pot distribution for hand {poker_hand.id}: {str(e)}"}
@@ -1801,14 +1802,14 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
 #     if player_to_act_state and hasattr(player_to_act_state, 'turn_starts_at') and player_to_act_state.turn_starts_at:
 #         time_elapsed = (datetime.now(timezone.utc) - player_to_act_state.turn_starts_at).total_seconds()
 #         if time_elapsed > POKER_ACTION_TIMEOUT_SECONDS:
-#             print(f"Player {player_to_act_state.user_id} at seat {player_to_act_state.seat_id} timed out after {time_elapsed:.2f}s. Auto-folding.")
+#             current_app.logger.info(f"Player {player_to_act_state.user_id} at seat {player_to_act_state.seat_id} timed out after {time_elapsed:.2f}s. Auto-folding.")
 #
 #             original_turn_user_id = player_to_act_state.user_id
 #             # It's crucial that handle_fold is called, which then calls _check_betting_round_completion
 #             # to correctly update game state including turn timers and player status.
 #             # The handle_fold function should also ensure player_to_act_state.turn_starts_at is cleared after folding.
 #             fold_result = handle_fold(original_turn_user_id, poker_hand.table_id, poker_hand.id) # handle_fold will manage session commit
-#             print(f"Auto-fold result for user {original_turn_user_id}: {fold_result}")
+#             current_app.logger.info(f"Auto-fold result for user {original_turn_user_id}: {fold_result}")
 #             return True # Timeout action was taken
 #     return False
 
@@ -1962,7 +1963,7 @@ def _advance_to_next_street(hand_id: int, session: Session) -> dict:
         })
     else:
         # Should be handled by the active_players_in_hand check earlier or implies showdown
-        print(f"Warning: Could not determine first player to act for {next_street_name} in hand {hand_id}.")
+        current_app.logger.warning(f"Could not determine first player to act for {next_street_name} in hand {hand_id}.")
         poker_hand.status = "showdown" # Default to showdown if no one can act
         poker_hand.current_turn_user_id = None
 
@@ -2211,7 +2212,7 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
         # This should ideally be caught by the 'round_complete' logic.
         # If it reaches here, it's an unexpected state.
         # Timer for last_actor_user_id was already cleared at the start of the function.
-        print(f"Warning: Betting round logic fell through for hand {hand_id}. No specific next actor determined, but round not flagged as complete earlier. Current turn on hand: {poker_hand.current_turn_user_id}")
+        current_app.logger.warning(f"Betting round logic fell through for hand {hand_id}. No specific next actor determined, but round not flagged as complete earlier. Current turn on hand: {poker_hand.current_turn_user_id}")
         # This might indicate an issue in round_complete logic or player state.
         # For safety, assume round is over and try to advance.
         # If advancing to showdown, status will be set there.
@@ -2246,14 +2247,14 @@ def check_and_handle_player_timeouts(table_id: int, session: Session) -> bool:
     ).first()
 
     if not player_to_act_state:
-        print(f"Error: Player state not found for current turn user {poker_hand.current_turn_user_id} in hand {poker_hand.id}")
+        current_app.logger.error(f"Player state not found for current turn user {poker_hand.current_turn_user_id} in hand {poker_hand.id}")
         return False # Should not happen
 
     if player_to_act_state.time_to_act_ends and datetime.now(timezone.utc) > player_to_act_state.time_to_act_ends:
         original_turn_user_id = player_to_act_state.user_id
         seat_id = player_to_act_state.seat_id # For logging
 
-        print(f"Player {original_turn_user_id} at seat {seat_id} on table {table_id} timed out for hand {poker_hand.id}. Auto-folding.")
+        current_app.logger.info(f"Player {original_turn_user_id} at seat {seat_id} on table {table_id} timed out for hand {poker_hand.id}. Auto-folding.")
 
         # Clear the timer immediately to prevent re-entry if handle_fold has delays or issues
         player_to_act_state.time_to_act_ends = None
@@ -2262,17 +2263,17 @@ def check_and_handle_player_timeouts(table_id: int, session: Session) -> bool:
             session.commit() # Commit the timer clear before calling handle_fold
         except Exception as e:
             session.rollback()
-            print(f"Error committing timeout clear for user {original_turn_user_id}: {e}")
+            current_app.logger.error(f"Error committing timeout clear for user {original_turn_user_id}: {e}")
             # Proceed with fold attempt anyway, but this is problematic
 
         # Call handle_fold. This function is expected to manage its own session commits/rollbacks.
         fold_result = handle_fold(original_turn_user_id, poker_hand.table_id, poker_hand.id)
 
         if "error" in fold_result:
-            print(f"Error during auto-fold for user {original_turn_user_id} due to timeout: {fold_result['error']}")
+            current_app.logger.error(f"Error during auto-fold for user {original_turn_user_id} due to timeout: {fold_result['error']}")
             # Potentially mark player as sitting out or other error handling
         else:
-            print(f"Auto-fold successful for user {original_turn_user_id} due to timeout.")
+            current_app.logger.info(f"Auto-fold successful for user {original_turn_user_id} due to timeout.")
             # The game_flow result from handle_fold will indicate next player and their timer will be set
             # by _check_betting_round_completion.
 
@@ -2315,7 +2316,7 @@ def get_table_state(table_id: int, hand_id: int | None, user_id: int):
     if hand_id:
         current_hand = session.query(PokerHand).filter_by(id=hand_id, table_id=table_id).first()
         # if not current_hand: # It's okay if a hand_id is passed that doesn't exist or isn't current
-            # print(f"Warning: Hand {hand_id} not found for table {table_id}, but returning table state.")
+            # current_app.logger.warning(f"Hand {hand_id} not found for table {table_id}, but returning table state.")
 
     player_states_serializable = []
     for ps in table.player_states: # Use eager-loaded player_states
@@ -2380,4 +2381,4 @@ def get_table_state(table_id: int, hand_id: int | None, user_id: int):
 #   The return structure needs to be different for actual game clients vs internal state.
 #   For now, acknowledging this as a placeholder structure.
 
-print("poker_helper.py structure created with placeholders.")
+# current_app.logger.info("poker_helper.py structure created with placeholders.") # This print is at module level
