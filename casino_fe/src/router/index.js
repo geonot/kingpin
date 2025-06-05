@@ -6,6 +6,8 @@ const Home = () => import('@views/Home.vue');
 const Slots = () => import('@views/Slots.vue');
 const Slot = () => import('@views/Slot.vue');
 const Tables = () => import('@views/Tables.vue');
+const PokerTables = () => import('@/views/PokerTables.vue');
+const PokerTable = () => import('@/views/PokerTable.vue'); // Added PokerTable
 const Blackjack = () => import('@views/Blackjack.vue');
 const Register = () => import('@views/Register.vue');
 const Login = () => import('@views/Login.vue');
@@ -97,6 +99,19 @@ const routes = [
     name: 'Plinko',
     component: Plinko,
     meta: { title: 'Plinko', requiresAuth: true }
+  },
+  {
+    path: '/poker/tables',
+    name: 'PokerTables',
+    component: PokerTables,
+    meta: { title: 'Poker Tables', requiresAuth: true }
+  },
+  {
+    path: '/poker/table/:id(\\d+)', // Ensure ID is numeric
+    name: 'PokerTable',
+    component: PokerTable,
+    props: true, // Pass route params as props
+    meta: { title: 'Poker Table', requiresAuth: true }
   },
    // Placeholder routes for footer links
   { path: '/terms', name: 'Terms', component: Terms, meta: { title: 'Terms & Conditions' } },

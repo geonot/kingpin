@@ -35,29 +35,39 @@ def _shuffle_deck(deck: list[str]) -> None:
     random.shuffle(deck)
 
 
-def _deal_card(deck_list: list[str]) -> str | None:
-    """Removes and returns the top card from the deck list. Returns None if deck is empty."""
+def _deal_card_from_deck_list(deck_list: list[str]) -> str | None:
+    """
+    Removes and returns the top card from a given mutable deck list.
+    Returns None if deck_list is empty.
+    This function MODIFIES the passed deck_list.
+    """
     if deck_list:
         return deck_list.pop(0) # Assuming top card is at the start of the list
     return None
 
-def deal_hole_cards(player_states: list[PokerPlayerState], deck: list[str]) -> bool:
+def deal_hole_cards(poker_hand: PokerHand, player_states: list[PokerPlayerState]) -> bool:
     """
-    Deals two cards to each player in player_states who is is_active_in_hand.
-    Updates player_states with hole cards.
-    Assumes deck is already shuffled.
+    Deals two cards to each player in player_states who is is_active_in_hand,
+    using the deck from poker_hand.deck_state.
+    Updates player_states with hole cards and poker_hand.deck_state.
     Returns True if successful, False if not enough cards.
     """
+    if not poker_hand.deck_state:
+        print(f"Error: Hand {poker_hand.id} has no deck_state.")
+        return False
+
+    # Work with a mutable copy of the deck_state for this operation
+    current_deck_list = list(poker_hand.deck_state)
+
     num_active_players = sum(1 for ps in player_states if ps.is_active_in_hand)
-    if len(deck) < num_active_players * 2:
-        # Log error: Not enough cards to deal hole cards
-        print(f"Error: Not enough cards ({len(deck)}) to deal hole cards to {num_active_players} players.")
+    if len(current_deck_list) < num_active_players * 2:
+        print(f"Error: Not enough cards in hand's deck ({len(current_deck_list)}) to deal hole cards to {num_active_players} players.")
         return False
 
     for _ in range(2): # Deal one card at a time to each player
         for player_state in player_states:
             if player_state.is_active_in_hand:
-                card = _deal_card(deck)
+                card = _deal_card_from_deck_list(current_deck_list) # Modifies current_deck_list
                 if card:
                     if player_state.hole_cards is None:
                         player_state.hole_cards = []
@@ -65,39 +75,78 @@ def deal_hole_cards(player_states: list[PokerPlayerState], deck: list[str]) -> b
                 else:
                     # This should not happen if initial check passed
                     print("Error: Deck ran out unexpectedly during hole card dealing.")
+                    # poker_hand.deck_state is not updated yet, so no rollback of that needed here
                     return False
+
+    # Persist the modified deck back to the hand
+    poker_hand.deck_state = current_deck_list
+    db.session.add(poker_hand) # Mark poker_hand as dirty to ensure deck_state update is saved
     return True
 
 
-def deal_community_cards(street: str, deck: list[str], current_board_cards: list[str]) -> list[str]:
+def deal_community_cards(poker_hand: PokerHand, street: str) -> list[str] | None:
     """
-    Deals community cards for the given street.
-    Street can be 'flop' (3 cards), 'turn' (1 card), 'river' (1 card).
-    Appends cards to current_board_cards and returns the updated list.
+    Deals community cards for the given street using poker_hand.deck_state.
+    Updates poker_hand.board_cards and poker_hand.deck_state.
+    Returns the list of newly dealt community cards for this street, or None on error.
     """
-    cards_to_deal = 0
+    if not poker_hand.deck_state:
+        print(f"Error: Hand {poker_hand.id} has no deck_state for dealing {street}.")
+        return None
+
+    # Work with a mutable copy of the deck_state
+    current_deck_list = list(poker_hand.deck_state)
+
+    # Ensure board_cards is a list
+    if poker_hand.board_cards is None:
+        poker_hand.board_cards = []
+
+
+    cards_to_deal_count = 0
     if street == 'flop':
-        cards_to_deal = 3
+        cards_to_deal_count = 3
     elif street == 'turn' or street == 'river':
-        cards_to_deal = 1
+        cards_to_deal_count = 1
+    else:
+        print(f"Error: Invalid street name '{street}'.")
+        return None
 
-    if len(deck) < cards_to_deal:
-        print(f"Error: Not enough cards in deck to deal {street}.")
-        return current_board_cards # Or raise an error
+    if len(current_deck_list) < cards_to_deal_count: # Check against the mutable copy
+        print(f"Error: Not enough cards in hand's deck to deal {street}.")
+        return None
 
-    # Burn a card (optional, common practice)
-    # _deal_card(deck) 
+    # Optional: Burn a card. If burning, ensure deck has enough for burn + deal.
+    # if len(current_deck_list) < cards_to_deal_count + 1: # If burning
+    #     print(f"Error: Not enough cards to burn and deal {street}.")
+    #     return None
+    # burned_card = _deal_card_from_deck_list(current_deck_list)
+    # if burned_card:
+    #     poker_hand.hand_history.append({"action": "burn_card", "card": burned_card, "street_before": street})
+    # else: # Should not happen if check above is done
+    #     print(f"Error: Failed to burn card before {street} deal.")
+    #     return None
 
-    for _ in range(cards_to_deal):
-        card = _deal_card(deck)
+
+    newly_dealt_street_cards = []
+    for _ in range(cards_to_deal_count):
+        card = _deal_card_from_deck_list(current_deck_list) # Modifies current_deck_list
         if card:
-            current_board_cards.append(card)
+            newly_dealt_street_cards.append(card)
         else:
-            # Should not happen if initial check passed
-            print(f"Error: Deck ran out unexpectedly during {street} dealing.")
-            break 
+            # Should not happen if initial checks passed
+            print(f"Error: Deck ran out unexpectedly during {street} dealing for hand {poker_hand.id}.")
+            return None # Indicates critical error
             
-    return current_board_cards
+    # Update the hand's board_cards and deck_state
+    # Ensure poker_hand.board_cards is a list that can be extended
+    if not isinstance(poker_hand.board_cards, list): # If it was None or other type
+        poker_hand.board_cards = []
+    poker_hand.board_cards.extend(newly_dealt_street_cards)
+    poker_hand.deck_state = current_deck_list # Persist the deck with cards removed
+
+    db.session.add(poker_hand) # Mark dirty
+    return newly_dealt_street_cards
+
 
 # --- Basic Hand State & Player Management ---
 
@@ -235,17 +284,20 @@ def start_new_hand(table_id: int):
     sb_tx.poker_hand_id = new_hand.id # Link transaction to hand
     bb_tx.poker_hand_id = new_hand.id # Link transaction to hand
 
-    # 5. Create and Shuffle Deck
-    deck = _create_deck()
-    _shuffle_deck(deck)
+    # 5. Create and Shuffle Deck for the Hand
+    initial_deck = _create_deck()
+    _shuffle_deck(initial_deck)
+    new_hand.deck_state = initial_deck # Store the shuffled deck with the hand
 
     # 6. Deal Hole Cards (to all players marked active_in_hand, which are eligible_players_for_hand)
-    if not deal_hole_cards(eligible_players_for_hand, deck):
+    # deal_hole_cards will now use and update new_hand.deck_state
+    if not deal_hole_cards(new_hand, eligible_players_for_hand):
         session.rollback() # Rollback all DB changes if dealing fails
-        return {"error": "Failed to deal hole cards due to insufficient cards."}
+        # deal_hole_cards logs specific errors
+        return {"error": "Failed to deal hole cards."}
     
-    for ps in eligible_players_for_hand: # Persist hole cards dealt by deal_hole_cards
-        session.add(ps)
+    # Player states (hole cards) and new_hand (deck_state) have been modified by deal_hole_cards
+    # and added to session if necessary by that function.
 
     # 7. Determine First Player to Act (Pre-flop)
     first_to_act_player = None
@@ -263,6 +315,14 @@ def start_new_hand(table_id: int):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "next_to_act": {"user_id": first_to_act_player.user_id, "seat_id": first_to_act_player.seat_id}
     })
+
+    # Set turn_starts_at for the first player to act
+    # Conceptual: Assumes PokerPlayerState has a 'turn_starts_at' field (db.Column(db.DateTime, nullable=True))
+    if first_to_act_player and hasattr(first_to_act_player, 'turn_starts_at'):
+        first_to_act_player.turn_starts_at = datetime.now(timezone.utc)
+        session.add(first_to_act_player)
+    elif first_to_act_player: # Defensive check if attribute exists
+        print(f"Warning: PlayerState for user {first_to_act_player.user_id} does not have 'turn_starts_at' attribute.")
     
     # Final commit for PokerTable, PokerPlayerStates (stacks, actions), new PokerHand, Transactions
     try:
@@ -1246,7 +1306,9 @@ def _determine_winning_hand(player_hole_cards_map: dict[int, list[str]], board_c
         # A more advanced implementation might try to find the exact 5 cards.
         combined_cards_str = hole_cards_str_list + board_cards_str
 
-        print(f"User {user_id}, Hole: {hole_cards_str_list}, Board: {board_cards_str}, Score: {score}, Hand Class: {hand_class_str}")
+        # DEBUG LOG: Original line logged hole cards: print(f"User {user_id}, Hole: {hole_cards_str_list}, Board: {board_cards_str}, Score: {score}, Hand Class: {hand_class_str}")
+        # Hole cards redacted for security in general logging:
+        print(f"User {user_id} evaluation - Board: {board_cards_str}, Score: {score}, Hand Class: {hand_class_str}")
 
         if score < best_score:
             best_score = score
@@ -1575,6 +1637,41 @@ def _distribute_pot(poker_hand: PokerHand, showdown_player_states: list[PokerPla
 # - `handle_sit_down` checks for user already seated at *any* seat at the table. This is correct.
 
 # --- Game Progression Logic ---
+
+# Conceptual placeholder for timeout logic
+# Assumes PokerPlayerState has a 'turn_starts_at' field (db.Column(db.DateTime, nullable=True)).
+# And a POKER_ACTION_TIMEOUT_SECONDS constant is defined in config or globally.
+# def check_and_handle_player_timeouts(poker_hand_id: int, session: Session, POKER_ACTION_TIMEOUT_SECONDS: int = 60):
+#     """
+#     Checks the current player for timeout and auto-folds them.
+#     This would ideally be triggered by a separate scheduler or before processing any player action request.
+#     Returns True if a timeout action was taken, False otherwise.
+#     The actual auto-fold action should call the handle_fold function to ensure game state consistency.
+#     """
+#     poker_hand = session.query(PokerHand).get(poker_hand_id)
+#     if not poker_hand or poker_hand.current_turn_user_id is None or poker_hand.status in ['completed', 'showdown']:
+#         return False # No active turn or hand is over
+#
+#     player_to_act_state = session.query(PokerPlayerState).filter_by(
+#         user_id=poker_hand.current_turn_user_id,
+#         table_id=poker_hand.table_id # Ensure we get player at the correct table
+#     ).first()
+#
+#     if player_to_act_state and hasattr(player_to_act_state, 'turn_starts_at') and player_to_act_state.turn_starts_at:
+#         time_elapsed = (datetime.now(timezone.utc) - player_to_act_state.turn_starts_at).total_seconds()
+#         if time_elapsed > POKER_ACTION_TIMEOUT_SECONDS:
+#             print(f"Player {player_to_act_state.user_id} at seat {player_to_act_state.seat_id} timed out after {time_elapsed:.2f}s. Auto-folding.")
+#
+#             original_turn_user_id = player_to_act_state.user_id
+#             # It's crucial that handle_fold is called, which then calls _check_betting_round_completion
+#             # to correctly update game state including turn timers and player status.
+#             # The handle_fold function should also ensure player_to_act_state.turn_starts_at is cleared after folding.
+#             fold_result = handle_fold(original_turn_user_id, poker_hand.table_id, poker_hand.id) # handle_fold will manage session commit
+#             print(f"Auto-fold result for user {original_turn_user_id}: {fold_result}")
+#             return True # Timeout action was taken
+#     return False
+
+
 def _advance_to_next_street(hand_id: int, session: Session) -> dict:
     """
     Advances the hand to the next street (Flop, Turn, River) or to Showdown.
@@ -1635,50 +1732,24 @@ def _advance_to_next_street(hand_id: int, session: Session) -> dict:
     else:
         return {"error": f"Invalid number of board cards ({num_board_cards}) for hand {hand_id}."}
 
-    # --- Deck Reconstruction (Simplified with TODO) ---
-    # TODO: Implement robust deck management. This reconstruction is not secure or suitable for production.
-    # A persistent, shuffled deck should be associated with the hand from the start.
-    temp_deck = _create_deck()
-
-    # Remove known cards (board)
-    for card_str in current_board_cards:
-        if card_str in temp_deck:
-            temp_deck.remove(card_str)
-
-    # Remove known cards (player hole cards for all players in hand - even folded ones for deck integrity)
-    # Need all player states associated with this hand, not just currently active for betting.
-    # For simplicity, querying all player states at the table. This might include players not in *this specific hand*.
-    # This should ideally be players dealt into this hand.
-    all_player_states_at_table = session.query(PokerPlayerState).filter(PokerPlayerState.table_id == poker_table.id).all()
-    for ps in all_player_states_at_table:
-        if ps.hole_cards: # hole_cards might be from current or previous hand if not cleared properly
-            # This is problematic if ps.hole_cards are not cleared for players who folded *this* hand.
-            # Assuming for now hole_cards are only for players dealt into *this* hand.
-            for card_str in ps.hole_cards:
-                if card_str in temp_deck:
-                    temp_deck.remove(card_str)
-    _shuffle_deck(temp_deck)
-    # --- End Deck Reconstruction ---
+    # --- Deck Management: Use poker_hand.deck_state ---
+    # The insecure deck reconstruction is removed.
+    # deal_community_cards will now use and update poker_hand.deck_state directly.
 
     if cards_to_deal_count > 0:
-        # Burn one card (optional, common practice)
-        # _deal_card(temp_deck) # Uncomment if burning is desired
+        newly_dealt_street_cards = deal_community_cards(poker_hand, next_street_name)
 
-        newly_dealt_cards = []
-        for _ in range(cards_to_deal_count):
-            card = _deal_card(temp_deck)
-            if card:
-                newly_dealt_cards.append(card)
-            else:
-                # This should ideally not happen with correct deck management and player count.
-                # session.rollback() # Rollback if something is wrong
-                return {"error": f"Not enough cards in reconstructed deck to deal {next_street_name} for hand {hand_id}."}
+        if newly_dealt_street_cards is None:
+            # Error already logged by deal_community_cards
+            # Potentially rollback or handle error state if critical (e.g. could not deal flop)
+            # For now, assume deal_community_cards handles session correctly or we handle it after call
+            return {"error": f"Failed to deal {next_street_name} for hand {hand_id}."}
 
-        poker_hand.board_cards.extend(newly_dealt_cards) # board_cards is a JSON list, ensure it extends
+        # Hand history for dealing the street
         poker_hand.hand_history.append({
             "action": f"deal_{next_street_name}",
-            "cards": newly_dealt_cards,
-            "board": list(poker_hand.board_cards), # Send current full board
+            "cards": newly_dealt_street_cards, # Only the cards dealt this street
+            "board": list(poker_hand.board_cards), # Full board after this street
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
@@ -1737,6 +1808,14 @@ def _advance_to_next_street(hand_id: int, session: Session) -> dict:
 
     if first_to_act_postflop:
         poker_hand.current_turn_user_id = first_to_act_postflop.user_id
+        # Set turn_starts_at for the first player of the new street
+        # Conceptual: Assumes PokerPlayerState has 'turn_starts_at'
+        if hasattr(first_to_act_postflop, 'turn_starts_at'):
+            first_to_act_postflop.turn_starts_at = datetime.now(timezone.utc)
+            session.add(first_to_act_postflop)
+        else:
+            print(f"Warning: PlayerState for user {first_to_act_postflop.user_id} does not have 'turn_starts_at' attribute in _advance_to_next_street.")
+
         poker_hand.hand_history.append({
             "action": "set_next_to_act",
             "street": next_street_name,
@@ -1794,9 +1873,25 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
     # Players who are still in the hand (haven't folded)
     active_players_still_in_hand = [ps for ps in all_player_states_in_hand if ps.is_active_in_hand]
 
+    # Clear timer for the player who just acted (last_actor_user_id)
+    # Conceptual: Assumes PokerPlayerState has 'turn_starts_at'
+    last_actor_ps = session.query(PokerPlayerState).filter_by(user_id=last_actor_user_id, table_id=poker_hand.table_id).first()
+    if last_actor_ps and hasattr(last_actor_ps, 'turn_starts_at'):
+        last_actor_ps.turn_starts_at = None
+        session.add(last_actor_ps)
+
     # 1. Check for Hand End by Folds
     if len(active_players_still_in_hand) <= 1:
         winner_user_id = active_players_still_in_hand[0].user_id if active_players_still_in_hand else None
+
+        # Ensure any other potentially active timer is cleared
+        if poker_hand.current_turn_user_id and poker_hand.current_turn_user_id != last_actor_user_id:
+            # This case should be rare if current_turn_user_id was last_actor_user_id
+            other_ps_to_clear = session.query(PokerPlayerState).filter_by(user_id=poker_hand.current_turn_user_id, table_id=poker_hand.table_id).first()
+            if other_ps_to_clear and hasattr(other_ps_to_clear, 'turn_starts_at'):
+                other_ps_to_clear.turn_starts_at = None
+                session.add(other_ps_to_clear)
+
         poker_hand.status = 'completed'
         poker_hand.current_turn_user_id = None
         # _distribute_pot needs a list of PokerPlayerState objects for showdown.
@@ -1860,14 +1955,22 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
                 if adv_result["status"] == "showdown_reached": break
             # After all streets, it should be showdown
             if poker_hand.status != 'showdown': poker_hand.status = 'showdown' # Force if not set by advance
-            poker_hand.current_turn_user_id = None
+
+            # Clear timer for the current_turn_user_id if it was set (now effectively null as it's all-in)
+            if poker_hand.current_turn_user_id:
+                 prev_turn_ps_all_in = session.query(PokerPlayerState).filter_by(user_id=poker_hand.current_turn_user_id, table_id=poker_hand.table_id).first()
+                 if prev_turn_ps_all_in and hasattr(prev_turn_ps_all_in, 'turn_starts_at'):
+                     prev_turn_ps_all_in.turn_starts_at = None
+                     session.add(prev_turn_ps_all_in)
+
+            poker_hand.current_turn_user_id = None # No more turns
             poker_hand.hand_history.append({"action": "all_in_proceed_to_showdown", "timestamp": datetime.now(timezone.utc).isoformat()})
             session.add(poker_hand)
-            return {"status": "all_in_showdown", "hand_id": hand_id}
+            return {"status": "all_in_showdown", "hand_id": hand_id} # Or "all_in_runout_pending_cards" if not river yet
         else: # Normal round completion, advance to next street
+            # last_actor_ps timer already cleared at the start of this function.
+            # _advance_to_next_street will handle setting the timer for the first player of the new street.
             adv_result = _advance_to_next_street(hand_id, session)
-            # session.add(poker_hand) # _advance_to_next_street adds to session
-            # session.commit()
             return {"status": "round_completed_advancing_street",
                     "next_street_status": poker_hand.status,
                     "next_to_act_user_id": poker_hand.current_turn_user_id,
@@ -1930,19 +2033,64 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
             "seat_id": next_player_to_act.seat_id,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
+
+        # Set turn_starts_at for the next player
+        # Conceptual: Assumes PokerPlayerState has 'turn_starts_at'
+        if hasattr(next_player_to_act, 'turn_starts_at'):
+            next_player_to_act.turn_starts_at = datetime.now(timezone.utc)
+            session.add(next_player_to_act)
+        else:
+            print(f"Warning: PlayerState for user {next_player_to_act.user_id} does not have 'turn_starts_at' attribute.")
+
         session.add(poker_hand)
-        # session.commit() # Commit handled by calling action function
         return {"status": "betting_continues", "next_to_act_user_id": poker_hand.current_turn_user_id, "hand_id": hand_id}
     else:
         # This case implies that all bettable players have acted and matched the bet, or are all-in.
         # This should ideally be caught by the 'round_complete' logic.
-        # If it reaches here, it's an unexpected state, possibly advance to next street or showdown.
-        print(f"Warning: Betting round seems complete but not caught by primary logic for hand {hand_id}. Advancing cautiously.")
+        # If it reaches here, it's an unexpected state.
+        # Timer for last_actor_user_id was already cleared at the start of the function.
+        print(f"Warning: Betting round logic fell through for hand {hand_id}. No specific next actor determined, but round not flagged as complete earlier. Current turn on hand: {poker_hand.current_turn_user_id}")
+        # This might indicate an issue in round_complete logic or player state.
+        # For safety, assume round is over and try to advance.
         adv_result = _advance_to_next_street(hand_id, session)
         return {"status": "round_completed_advancing_street_fallback",
-                "next_street_status": poker_hand.status, # status after advance
-                "next_to_act_user_id": poker_hand.current_turn_user_id,
+                "next_street_status": poker_hand.status,
+                "next_to_act_user_id": poker_hand.current_turn_user_id, # Could be None
                 "hand_id": hand_id}
+
+
+# Conceptual placeholder for timeout logic
+# Assumes PokerPlayerState has a 'turn_starts_at' field (db.Column(db.DateTime, nullable=True)).
+# And a POKER_ACTION_TIMEOUT_SECONDS constant is defined in config or globally.
+# def check_and_handle_player_timeouts(poker_hand_id: int, session: Session, POKER_ACTION_TIMEOUT_SECONDS: int = 60):
+#     """
+#     Checks the current player for timeout and auto-folds them.
+#     This would ideally be triggered by a separate scheduler or before processing any player action request.
+#     Returns True if a timeout action was taken, False otherwise.
+#     The actual auto-fold action should call the handle_fold function to ensure game state consistency.
+#     """
+#     poker_hand = session.query(PokerHand).get(poker_hand_id)
+#     if not poker_hand or poker_hand.current_turn_user_id is None or poker_hand.status in ['completed', 'showdown']:
+#         return False # No active turn or hand is over
+#
+#     player_to_act_state = session.query(PokerPlayerState).filter_by(
+#         user_id=poker_hand.current_turn_user_id,
+#         table_id=poker_hand.table_id # Ensure we get player at the correct table
+#     ).first()
+#
+#     if player_to_act_state and hasattr(player_to_act_state, 'turn_starts_at') and player_to_act_state.turn_starts_at:
+#         time_elapsed = (datetime.now(timezone.utc) - player_to_act_state.turn_starts_at).total_seconds()
+#         if time_elapsed > POKER_ACTION_TIMEOUT_SECONDS:
+#             print(f"Player {player_to_act_state.user_id} at seat {player_to_act_state.seat_id} timed out after {time_elapsed:.2f}s. Auto-folding.")
+#
+#             original_turn_user_id = player_to_act_state.user_id
+#             # It's crucial that handle_fold is called, which then calls _check_betting_round_completion
+#             # to correctly update game state including turn timers and player status.
+#             # The handle_fold function should also ensure player_to_act_state.turn_starts_at is cleared after folding.
+#             fold_result = handle_fold(original_turn_user_id, poker_hand.table_id, poker_hand.id) # handle_fold will manage session commit
+#             print(f"Auto-fold result for user {original_turn_user_id}: {fold_result}")
+#             return True # Timeout action was taken
+#     return False
 
 
 def get_table_state(table_id: int, hand_id: int | None, user_id: int):
@@ -1991,10 +2139,14 @@ def get_table_state(table_id: int, hand_id: int | None, user_id: int):
             "is_sitting_out": ps.is_sitting_out,
             "is_active_in_hand": ps.is_active_in_hand,
             "last_action": ps.last_action,
-            "hole_cards": None 
+            "hole_cards": None # Default to None
         }
-        if ps.user_id == user_id and ps.hole_cards:
+        if ps.user_id == user_id: # Requesting user
             player_data["hole_cards"] = ps.hole_cards 
+        elif ps.hole_cards: # Other players with cards
+            player_data["hole_cards"] = ["X", "X"] # Masked cards
+        # If ps.hole_cards is None (e.g. player not in hand or cards not revealed yet), it remains None
+
         player_states_serializable.append(player_data)
     
     # Placeholder response
