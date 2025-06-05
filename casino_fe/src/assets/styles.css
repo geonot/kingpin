@@ -118,17 +118,40 @@ body {
 
 /* Custom global styles */
 h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold; /* Example global heading style */
+    font-family: 'Poppins', sans-serif;
+    color: var(--color-text-primary);
+}
+
+h1 { @apply text-4xl font-bold leading-tight; } /* approx 2.5rem (36px in Tailwind) */
+h2 { @apply text-3xl font-bold leading-tight; } /* approx 2rem (30px) */
+h3 { @apply text-2xl font-semibold leading-snug; } /* approx 1.75rem (24px) */
+h4 { @apply text-xl font-semibold leading-snug; } /* approx 1.5rem (20px) */
+h5 { @apply text-lg font-semibold leading-normal; } /* approx 1.25rem (18px) */
+h6 { @apply text-base font-semibold leading-normal; } /* approx 1rem (16px) */
+
+/* Base paragraph and body text styles */
+p {
+    font-family: 'Poppins', sans-serif; /* Ensure Poppins */
+    font-size: 1rem; /* 16px */
+    line-height: 1.6;
+    color: var(--color-text-primary); /* Default paragraph text color */
+    margin-bottom: 1rem; /* Add some default spacing for paragraphs */
+}
+
+small {
+     font-size: 0.875rem; /* 14px */
+     line-height: 1.5;
+     color: var(--color-text-secondary); /* Secondary color for small text */
 }
 
 /* Alert styles (if not using a component library) */
 .alert-success {
+  @apply rounded-lg;
   padding: 1rem;
   margin-bottom: 1rem;
   font-size: 0.875rem;
   color: #047857; /* text-green-700 */
   background-color: #d1fae5; /* bg-green-100 */
-  border-radius: 0.5rem;
   border: 1px solid #6ee7b7; /* border-green-300 */
   
   .dark & {
@@ -139,12 +162,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .alert-error {
+  @apply rounded-lg;
   padding: 1rem;
   margin-bottom: 1rem;
   font-size: 0.875rem;
   color: #b91c1c; /* text-red-700 */
   background-color: #fee2e2; /* bg-red-100 */
-  border-radius: 0.5rem;
   border: 1px solid #fca5a5; /* border-red-300 */
   
   .dark & {
@@ -154,7 +177,54 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-/* Add styles for custom scrollbar if desired */
+/* Form Input Styles */
+.form-input, .form-select, .form-textarea {
+  @apply block w-full px-4 py-2 border rounded-md shadow-sm sm:text-sm; /* py-2 consistent with btn, px-4 for more space */
+  font-family: 'Poppins', sans-serif;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border); /* Use CSS var for border */
+  transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-hover); /* Focus ring using accent color */
+}
+
+.form-input::placeholder, .form-textarea::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
+.dark .form-input, .dark .form-select, .dark .form-textarea {
+  background-color: var(--color-bg-secondary); /* Ensure dark bg for inputs */
+  color: var(--color-text-primary); /* Ensure dark text for inputs */
+  border-color: var(--color-border); /* Dark mode border */
+}
+
+.dark .form-input:focus, .dark .form-select:focus, .dark .form-textarea:focus {
+  border-color: var(--color-accent); /* Dark mode accent */
+  box-shadow: 0 0 0 2px var(--color-accent-hover); /* Dark mode accent hover for focus ring */
+}
+
+.dark .form-input::placeholder, .dark .form-textarea::placeholder {
+  color: var(--color-text-secondary); /* Dark mode placeholder */
+  opacity: 0.6;
+}
+
+label {
+    @apply block text-sm font-medium mb-1;
+    font-family: 'Poppins', sans-serif;
+    color: var(--color-text-secondary); /* Default label color */
+}
+
+.dark label {
+    color: var(--color-text-secondary); /* Adjust if a lighter/different secondary is needed for dark labels */
+}
+
+/* Custom Scrollbar styles (moved from App.vue) */
 /* (Scrollbar styles from App.vue are already global, no need to repeat here unless preferred) */
 
 /* Page transition styles (moved from App.vue) */
@@ -203,12 +273,18 @@ h1, h2, h3, h4, h5, h6 {
   /* If removing outline, ensure focus state is visually distinct */
 }
 *:focus-visible {
-   /* Use focus-visible for keyboard users */
    outline: none;
-   box-shadow: 0 0 0 2px var(--brand-royal-blue), 0 0 0 4px white;
-   .dark & {
-     box-shadow: 0 0 0 2px var(--brand-light-purple), 0 0 0 4px #1a1a2e;
-   }
+   box-shadow: 0 0 0 2px var(--color-bg-secondary), 0 0 0 4px var(--color-accent);
+}
+/* The .dark *:focus-visible rule will be automatically handled if --color-bg-secondary and --color-accent are correctly defined for dark mode,
+   or a specific .dark *:focus-visible rule can be kept if fine-tuning is needed.
+   The existing one is:
+   .dark & { box-shadow: 0 0 0 2px var(--brand-light-purple), 0 0 0 4px #1a1a2e; }
+   This should be changed to use the CSS variables for consistency:
+*/
+.dark *:focus-visible {
+   /* This explicitly overrides if the general one is not enough due to var scope or specificity */
+   box-shadow: 0 0 0 2px var(--color-bg-secondary), 0 0 0 4px var(--color-accent);
 }
 
 
