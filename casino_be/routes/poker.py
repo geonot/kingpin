@@ -10,7 +10,8 @@ from ..schemas import (
     PokerPlayerStateSchema, PokerHandSchema
 )
 from ..utils import poker_helper
-from ..app import limiter # Assuming limiter can be imported directly
+from ..app import limiter, socketio # Import socketio instance
+from flask_socketio import join_room, leave_room, emit
 
 poker_bp = Blueprint('poker', __name__, url_prefix='/api/poker')
 
@@ -218,3 +219,56 @@ def poker_hand_action(table_id, hand_id):
         'user': updated_user_data,
         'game_flow': game_flow_data
     }), HTTPStatus.OK
+
+# --- SocketIO Event Handlers for Poker ---
+
+@socketio.on('join_poker_table_room')
+@jwt_required()
+def handle_join_poker_table_room(data):
+    """Handles a user joining a specific poker table's SocketIO room."""
+    table_id = data.get('table_id')
+    if not isinstance(table_id, int): # Basic validation
+        current_app.logger.warning(f"handle_join_poker_table_room: Invalid table_id format received: {table_id}")
+        emit('room_join_error', {'status_message': 'Invalid table_id format.'})
+        return
+
+    user = current_user
+    room_name = f"poker_table_{table_id}"
+    join_room(room_name)
+    current_app.logger.info(f"User {user.id} ({user.username}) joined poker SocketIO room: {room_name}")
+    emit('room_joined', {'room': room_name, 'message': f'Successfully joined room {room_name} for table {table_id}.'}, room=request.sid) # Emit to the specific client
+
+    # Optionally, emit the current table state to the user who just joined.
+    # Fetch the current active hand_id for the table to pass to get_table_state.
+    current_active_hand = db.session.query(PokerHand).filter(
+        PokerHand.table_id == table_id,
+        PokerHand.status.notin_(['completed', 'showdown'])
+    ).order_by(PokerHand.start_time.desc()).first()
+    current_hand_id_for_state = current_active_hand.id if current_active_hand else None
+
+    state_data = poker_helper.get_table_state(table_id, hand_id=current_hand_id_for_state, user_id=user.id)
+    if 'error' not in state_data:
+        # Emit 'poker_table_update' specifically to the user who just joined.
+        # The general broadcast for this action would have happened in the helper function (e.g. handle_sit_down).
+        # This ensures the new joiner gets the current state immediately.
+        emit('poker_table_update', state_data, room=request.sid) # request.sid is the unique session ID of the client
+    else:
+        current_app.logger.error(f"Error getting table state for user {user.id} upon joining room {room_name}: {state_data.get('error')}")
+        emit('poker_table_update_error', {'status_message': state_data.get('error')}, room=request.sid)
+
+
+@socketio.on('leave_poker_table_room')
+@jwt_required()
+def handle_leave_poker_table_room(data):
+    """Handles a user leaving a specific poker table's SocketIO room."""
+    table_id = data.get('table_id')
+    if not isinstance(table_id, int): # Basic validation
+        current_app.logger.warning(f"handle_leave_poker_table_room: Invalid table_id format received: {table_id}")
+        emit('room_leave_error', {'status_message': 'Invalid table_id format.'})
+        return
+
+    user = current_user
+    room_name = f"poker_table_{table_id}"
+    leave_room(room_name)
+    current_app.logger.info(f"User {user.id} ({user.username}) left poker SocketIO room: {room_name}")
+    emit('room_left', {'room': room_name, 'message': f'Successfully left room {room_name} for table {table_id}.'}, room=request.sid) # Emit to the specific client

@@ -3,6 +3,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal # For precise monetary calculations
 from flask import current_app
+from flask_socketio import emit
 
 # treys library for hand evaluation
 from treys import Card, Evaluator
@@ -13,6 +14,7 @@ from sqlalchemy import func, desc
 # Assuming models are in casino_be.models
 # Adjust the import path if your project structure is different.
 # from ..models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction # if utils is a module inside casino_be
+from ..app import socketio # Import socketio instance
 from casino_be.models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction
 
 # Card Constants
@@ -336,7 +338,7 @@ def start_new_hand(table_id: int):
 
     # TODO: Return a more comprehensive game state for the API, tailored per player.
     # This simplified return is for basic confirmation.
-    return {
+    result = {
         "message": "New hand started successfully.",
         "hand_id": new_hand.id,
         "table_id": table_id,
@@ -348,6 +350,15 @@ def start_new_hand(table_id: int):
         "board_cards": new_hand.board_cards,
         "active_player_count_in_hand": len(eligible_players_for_hand)
     }
+    # Emit state update
+    table_room = f"poker_table_{table_id}"
+    updated_state_data = get_table_state(table_id, hand_id=new_hand.id, user_id=None) # user_id=None for broadcast
+    if socketio and 'error' not in updated_state_data: # Ensure socketio is available and state is valid
+        socketio.emit('poker_table_update', updated_state_data, room=table_room)
+    elif 'error' in updated_state_data:
+        current_app.logger.error(f"Error getting table state for poker_table_{table_id} after new hand: {updated_state_data.get('error')}")
+
+    return result
 
 def handle_sit_down(user_id: int, table_id: int, seat_id: int, buy_in_amount: int):
     """
@@ -416,7 +427,7 @@ def handle_sit_down(user_id: int, table_id: int, seat_id: int, buy_in_amount: in
     
     try:
         session.commit()
-        return {
+        result = {
             "message": f"User {user.username} successfully sat down at table {poker_table.name}, seat {seat_id} with {buy_in_amount} satoshis.",
             "player_state": {
                 "user_id": player_state.user_id,
@@ -427,6 +438,22 @@ def handle_sit_down(user_id: int, table_id: int, seat_id: int, buy_in_amount: in
             },
             "user_balance": user.balance
         }
+        # Emit state update
+        table_room = f"poker_table_{table_id}"
+        # Fetch current active hand_id for the table, if any
+        current_active_hand = session.query(PokerHand).filter(
+            PokerHand.table_id == table_id,
+            PokerHand.status.notin_(['completed', 'showdown'])
+        ).order_by(PokerHand.start_time.desc()).first()
+        current_hand_id_for_state = current_active_hand.id if current_active_hand else None
+
+        updated_state_data = get_table_state(table_id, hand_id=current_hand_id_for_state, user_id=None) # user_id=None for broadcast
+        if socketio and 'error' not in updated_state_data: # Ensure socketio is available and state is valid
+            socketio.emit('poker_table_update', updated_state_data, room=table_room)
+        elif 'error' in updated_state_data:
+            current_app.logger.error(f"Error getting table state for poker_table_{table_id} after sit down: {updated_state_data.get('error')}")
+
+        return result
     except Exception as e:
         session.rollback()
         # Log error e
@@ -497,10 +524,26 @@ def handle_stand_up(user_id: int, table_id: int):
     
     try:
         session.commit()
-        return {
+        result = {
             "message": f"User {user.username} successfully stood up from table {table_id}. Returned {amount_to_return} satoshis to balance.",
             "user_balance": user.balance
         }
+        # Emit state update
+        table_room = f"poker_table_{table_id}"
+        # Fetch current active hand_id for the table, if any (though player is now gone)
+        current_active_hand = session.query(PokerHand).filter(
+            PokerHand.table_id == table_id,
+            PokerHand.status.notin_(['completed', 'showdown'])
+        ).order_by(PokerHand.start_time.desc()).first()
+        current_hand_id_for_state = current_active_hand.id if current_active_hand else None
+
+        updated_state_data = get_table_state(table_id, hand_id=current_hand_id_for_state, user_id=None) # user_id=None for broadcast
+        if socketio and 'error' not in updated_state_data: # Ensure socketio is available and state is valid
+            socketio.emit('poker_table_update', updated_state_data, room=table_room)
+        elif 'error' in updated_state_data:
+            current_app.logger.error(f"Error getting table state for poker_table_{table_id} after stand up: {updated_state_data.get('error')}")
+
+        return result
     except Exception as e:
         session.rollback()
         # Log error e
@@ -569,10 +612,21 @@ def handle_fold(user_id: int, table_id: int, hand_id: int):
         # For actions like fold/check/call/bet/raise, the primary responsibility for commit lies with the action handler.
         game_flow_result = _check_betting_round_completion(hand_id, user_id, session)
         session.commit() # Commit changes from this function and potentially from _check_betting_round_completion
-        return {
+
+        result = {
             "message": f"User {user_id} folded successfully in hand {hand_id}.",
             "game_flow": game_flow_result
         }
+        # Emit state update
+        table_room = f"poker_table_{table_id}"
+        # hand_id is directly available
+        updated_state_data = get_table_state(table_id, hand_id=hand_id, user_id=None) # user_id=None for broadcast
+        if socketio and 'error' not in updated_state_data: # Ensure socketio is available and state is valid
+            socketio.emit('poker_table_update', updated_state_data, room=table_room)
+        elif 'error' in updated_state_data:
+            current_app.logger.error(f"Error getting table state for poker_table_{table_id} after fold: {updated_state_data.get('error')}")
+
+        return result
     except Exception as e:
         session.rollback()
         current_app.logger.error(f"Error during fold action for user {user_id} in hand {hand_id}: {e}")

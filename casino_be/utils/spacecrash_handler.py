@@ -3,7 +3,10 @@ import hashlib
 import math
 import os
 from datetime import datetime, timezone
+from flask import current_app # For logging
+from flask_socketio import emit
 
+from ..app import socketio # Import socketio instance
 from casino_be.models import db, SpacecrashGame, SpacecrashBet, User # Assuming models are in casino_be.models
 # If your app instance 'app' is needed for config, you might need to import it or pass config values.
 # from casino_be.app import app # Or from casino_be.config import Config
@@ -75,13 +78,37 @@ def create_new_game() -> SpacecrashGame:
         status='pending',
     )
     db.session.add(new_game)
+    # It's good to flush here if we need new_game.id for the broadcast helper immediately
+    # db.session.flush() # Let's assume commit in route or higher level will handle flush before emit call from there for now
+    # However, if helper is called from here, flush is needed for ID.
+    # For now, the emit will be added *after* the commit in the calling route/admin function.
+    # So, this function remains as is, emit will happen after this function returns and commit occurs.
+    # Let's re-evaluate: the subtask says "After these key state transitions...emit it."
+    # This implies emission should be *from these helper functions* after the state is logically changed.
+    # So, a commit or at least flush + refresh is needed here if we are to get full state.
+    # To keep helpers focused, they will change state. The emit will be triggered by the route after commit.
+    # Let's stick to the plan: helper _get_current_game_state_for_broadcast, and emit from handler fns.
+    # This means the handler function itself must ensure data is flushed/committed before calling emit with state.
+
+    # Decision: To ensure atomicity and that helpers are testable without side-effects of emissions,
+    # the emissions will be called by the *routes* after these helpers have successfully executed and data is committed.
+    # This means the helper `_get_current_game_state_for_broadcast` will be used by routes.
+    # Let's adjust the plan: this file will contain the game logic and the state fetching helper.
+    # The routes file will import the state fetching helper and do the emits.
+    # This makes more sense than helpers emitting directly before commit.
+
+    # THEREFORE, this file (handler) will NOT have emit calls directly in create_new_game, start_betting_phase etc.
+    # It WILL have the _get_current_game_state_for_broadcast helper.
     return new_game
 
 def start_betting_phase(game: SpacecrashGame) -> bool:
     """Transitions the game to the 'betting' phase."""
     if game.status == 'pending':
         game.status = 'betting'
+        game.betting_start_time = datetime.now(timezone.utc) # Explicitly set betting start time
+        game.game_start_time = None # Ensure game_start_time (for multiplier) is reset
         game.game_end_time = None
+        # db.session.add(game) # Caller should add and commit
         return True
     return False
 
@@ -100,6 +127,7 @@ def start_game_round(game: SpacecrashGame, client_seed_param: str, nonce_param: 
         game.status = 'in_progress'
         game.game_start_time = datetime.now(timezone.utc)
         game.game_end_time = None
+        # db.session.add(game) # Caller should add and commit
         return True
     return False
 
@@ -124,7 +152,9 @@ def end_game_round(game: SpacecrashGame) -> bool:
                 bet.status = 'busted'
                 bet.ejected_at = game.crash_point
                 bet.win_amount = 0
+            # db.session.add(bet) # Caller should add and commit
         
+        # db.session.add(game) # Caller should add and commit
         return True
     return False
 
@@ -143,5 +173,81 @@ def get_current_multiplier(game: SpacecrashGame, default_if_not_started: float =
         # Using a simple exponential growth for now:
         multiplier = 1.00 * math.pow(1.015, elapsed_seconds * 5) # Example: faster growth
         multiplier = math.floor(multiplier * 100) / 100
-        return multiplier if multiplier <= game.crash_point else game.crash_point
+        # Ensure multiplier doesn't exceed crash_point if game is still "in_progress" but calculation goes beyond
+        # This can happen due to calculation timing vs actual crash event processing
+        return min(multiplier, game.crash_point) if game.crash_point else multiplier
+
+    if game and game.status == 'completed' and game.crash_point:
+        return game.crash_point # If completed, always show the crash point
+
     return default_if_not_started
+
+
+# --- Helper to get game state for broadcasting ---
+def get_current_game_state_for_broadcast(game_id: int = None):
+    """
+    Fetches the comprehensive current game state, suitable for broadcasting.
+    If game_id is None, fetches the latest game.
+    """
+    if game_id:
+        game = SpacecrashGame.query.get(game_id)
+    else:
+        # Ensure we order by ID descending to get the most recent game.
+        game = SpacecrashGame.query.order_by(SpacecrashGame.id.desc()).first()
+
+    if not game:
+        # current_app.logger.warning("get_current_game_state_for_broadcast: No game found.")
+        return {"error": "No game found"} # Or return a default "no active game" state
+
+    current_multiplier_val = 1.00
+    if game.status == 'in_progress':
+        current_multiplier_val = get_current_multiplier(game)
+    elif game.status == 'completed':
+        current_multiplier_val = game.crash_point if game.crash_point else 1.00
+    elif game.status == 'betting' or game.status == 'pending':
+        current_multiplier_val = 1.00
+
+    player_bets_data = []
+    # Ensure bets are loaded for the specific game_id
+    bets_query = db.session.query(SpacecrashBet, User.username).join(User, User.id == SpacecrashBet.user_id).filter(SpacecrashBet.game_id == game.id).all()
+
+    for bet, username in bets_query:
+        player_bets_data.append({
+            "user_id": bet.user_id,
+            "username": username,
+            "bet_amount": bet.bet_amount,
+            "status": bet.status, # 'placed', 'ejected', 'busted'
+            "ejected_at_multiplier": bet.ejected_at, # Null if not ejected or busted
+            "win_amount": bet.win_amount, # Null or 0 if not won
+            "auto_eject_at": bet.auto_eject_at # For UI to show if auto-eject is set
+        })
+
+    # Calculate betting_ends_at if game is in 'betting' state
+    betting_ends_at_iso = None
+    if game.status == 'betting' and game.betting_start_time:
+        # Assuming a fixed betting duration, e.g., 10 seconds
+        # This duration should ideally be a configuration value
+        betting_duration_seconds = 10 # Example
+        betting_ends_at_dt = game.betting_start_time + timezone.timedelta(seconds=betting_duration_seconds)
+        betting_ends_at_iso = betting_ends_at_dt.isoformat()
+
+
+    return {
+        "id": game.id,
+        "status": game.status, # 'pending', 'betting', 'in_progress', 'completed'
+        "current_multiplier": float(current_multiplier_val) if current_multiplier_val else 1.00,
+        "player_bets": player_bets_data,
+        "game_start_time": game.game_start_time.isoformat() if game.game_start_time else None, # When multiplier starts rising
+        "betting_start_time": game.betting_start_time.isoformat() if game.betting_start_time else None, # When betting phase began
+        "betting_ends_at": betting_ends_at_iso, # Calculated: when betting phase will end
+        "crash_point": float(game.crash_point) if game.crash_point else None,
+        "public_seed": game.public_seed,
+        # For security, client_seed and nonce are usually not broadcasted while game is bettable or in progress.
+        # Only reveal them if game is completed or for specific user context.
+        # "client_seed": game.client_seed if game.status == 'completed' else None,
+        # "nonce": game.nonce if game.status == 'completed' else None,
+        "created_at": game.created_at.isoformat() if game.created_at else None,
+        "game_end_time": game.game_end_time.isoformat() if game.game_end_time else None,
+        # Server seed hash is the public seed. If server_seed itself is needed, only after game completion.
+        # "server_seed": game.server_seed if game.status == 'completed' else None,
+    }

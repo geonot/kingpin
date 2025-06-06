@@ -98,6 +98,7 @@
 <script setup>
 import { ref, shallowRef, onMounted, onUnmounted, computed, watch } from 'vue';
 import api from '@/services/api'; // Assuming you have an api service module
+import { socket, connectSocket } from '../../services/socketService.js';
 import Phaser from 'phaser';
 import SpacecrashBootScene from '@/phaser/scenes/SpacecrashBootScene';
 import SpacecrashPreloadScene from '@/phaser/scenes/SpacecrashPreloadScene';
@@ -252,7 +253,8 @@ async function handlePlaceBet() {
       // For now, let's assume placing a bet when game is 'betting' implies user is ready.
       // The actual 'START_GAME' signal to Phaser should ideally come when the game *status* changes to 'in_progress'.
       // The fetchCurrentGame() polling will handle emitting START_GAME to Phaser when status changes.
-      await fetchCurrentGame(); // Refresh game state, which will then trigger Phaser via watchers or direct emit.
+      // await fetchCurrentGame(); // Refresh game state, which will then trigger Phaser via watchers or direct emit.
+      // WebSocket update will now handle refreshing the state.
       
     } else {
       betError.value = response.data.status_message || 'Failed to place bet.';
@@ -287,7 +289,8 @@ async function handleEject() {
         isInGame.value = false; // User is out (busted)
       }
     }
-    await fetchCurrentGame(); // Refresh game state
+    // await fetchCurrentGame(); // Refresh game state
+    // WebSocket update will now handle refreshing the state.
     // TODO: Refresh user balance from store if not handled by fetchCurrentGame implicitly
     // const authStore = useStore(); authStore.dispatch('fetchUser');
   } catch (error) {
@@ -303,23 +306,66 @@ async function handleEject() {
 }
 
 // --- Lifecycle Hooks & Watchers ---
-let gameUpdateInterval;
+// let gameUpdateInterval; // Removed
 
 onMounted(() => {
+  connectSocket(); // Establish WebSocket connection
+
   // Initial fetch
   fetchCurrentGame();
   fetchGameHistory();
 
-  // Poll for game updates
-  gameUpdateInterval = setInterval(() => {
-    if (game.value) { // Only poll if Phaser instance exists
-      fetchCurrentGame();
-      // Fetch history less frequently or only when game is not active
-      if (!isGameInProgress.value && !isBettingPhase.value) {
-        fetchGameHistory();
+  // Poll for game updates - REMOVED
+  // gameUpdateInterval = setInterval(() => {
+  //   if (game.value) { // Only poll if Phaser instance exists
+  //     fetchCurrentGame();
+  //     // Fetch history less frequently or only when game is not active
+  //     if (!isGameInProgress.value && !isBettingPhase.value) {
+  //       fetchGameHistory();
+  //     }
+  //   }
+  // }, 2500); // Adjusted polling interval
+
+  socket.on('spacecrash_update', (data) => {
+    console.log('Received spacecrash_update:', data);
+    if (data && data.id && data.status) { // Check for essential data properties
+      const oldGameStatus = currentGame.value?.status;
+      currentGame.value = data; // Update the main game state object
+
+      // Handle Phaser updates based on the new game state
+      if (game.value && game.value.scene && game.value.scene.isActive('SpacecrashGameScene')) {
+          game.value.registry.events.emit('updateGameStatus', data); // General update for Phaser scene
+
+          if (data.status === 'in_progress' && oldGameStatus !== 'in_progress') {
+              console.log("Vue (WS): Game status to in_progress. Emitting START_GAME to Phaser.");
+              game.value.registry.events.emit('START_GAME', { gameData: data });
+          } else if (data.status === 'completed' && oldGameStatus === 'in_progress') {
+              console.log("Vue (WS): Game status to completed. Emitting CRASH_AT to Phaser.");
+              game.value.registry.events.emit('CRASH_AT', { crashPoint: data.crash_point, gameData: data });
+          } else if (data.status === 'betting' && oldGameStatus !== 'betting') {
+              console.log("Vue (WS): Game status to betting. Emitting RESET_GAME_VIEW to Phaser.");
+              game.value.registry.events.emit('RESET_GAME_VIEW');
+          }
       }
+
+      // Update local currentMultiplier for display if needed (though Phaser might handle visuals)
+      if (data.status === 'in_progress' && data.current_multiplier) {
+        currentMultiplier.value = data.current_multiplier; // Should be 1.0 at start
+      } else if (data.status === 'completed' && data.crash_point) {
+        currentMultiplier.value = data.crash_point;
+      } else if (data.status === 'betting') {
+        currentMultiplier.value = 1.0;
+      }
+
+      // Refresh game history if the new game state indicates a game just completed
+      if (data.status === 'completed' && oldGameStatus === 'in_progress') {
+          fetchGameHistory(); // Refresh history when a game completes
+      }
+    } else {
+      console.warn('Received incomplete spacecrash_update data:', data);
     }
-  }, 2500); // Adjusted polling interval
+  });
+
   const config = {
     type: Phaser.AUTO,
     parent: 'spacecrash-game-container',
@@ -369,11 +415,13 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  clearInterval(gameUpdateInterval);
+  // clearInterval(gameUpdateInterval); // Polling removed
+  socket.off('spacecrash_update');
+
   if (game.value) {
     // Clean up Phaser-to-Vue event listeners
     if (game.value.registry) {
-        game.value.registry.events.off('PLAYER_EJECT', handleEject, this);
+        game.value.registry.events.off('PLAYER_EJECT', handleEject, this); // 'this' context might be problematic here, ensure handleEject is stable if passed this way
         game.value.registry.events.off('PHASER_GAME_OVER');
     }
     game.value.destroy(true);

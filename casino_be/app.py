@@ -8,6 +8,7 @@ from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token, jwt_required,
     get_jwt_identity, get_jti, current_user
 )
+from flask_socketio import SocketIO, emit
 from datetime import datetime, timedelta, timezone
 import logging
 from pythonjsonlogger import jsonlogger
@@ -52,6 +53,7 @@ from http import HTTPStatus
 # --- App Initialization ---
 app = Flask(__name__)
 app.config.from_object(Config)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 if not app.debug:
     # Configure JSON logging for production
@@ -75,7 +77,6 @@ def add_request_id():
 app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
 limiter = Limiter(
     app=app,
-    key_func=get_remote_address,
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"],
     # storage_uri will be set via app.config later if needed
@@ -127,6 +128,21 @@ def add_security_headers(response):
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
 
+# --- SocketIO Event Handlers ---
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+    emit('response', {'data': 'Connected to backend WebSocket!'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
+
+@socketio.on('test_event')
+def handle_test_event(json):
+    print('received json: ' + str(json))
+    emit('response', {'data': 'Test event received!', 'payload': json})
+
 # --- Blueprint Imports ---
 from .routes.auth import auth_bp
 from .routes.user import user_bp
@@ -166,3 +182,13 @@ app.register_blueprint(spacecrash_bp)
 app.register_blueprint(meta_game_bp)
 app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
 
+if __name__ == '__main__':
+    # Note: The original app.run command might have specific parameters (host, port, debug, use_reloader)
+    # These should be preserved. Assuming standard Flask development server parameters for now.
+    # The subtask mentions allow_unsafe_werkzeug=True if debug else False
+    debug = app.config.get('DEBUG', False)
+    host = app.config.get('HOST', '127.0.0.1')
+    port = app.config.get('PORT', 5000)
+    use_reloader = app.config.get('USE_RELOADER', True) if debug else False # Common practice for dev
+
+    socketio.run(app, host=host, port=port, debug=debug, use_reloader=use_reloader, allow_unsafe_werkzeug=True if debug else False)

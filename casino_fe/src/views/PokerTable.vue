@@ -91,12 +91,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import apiClient from '@/services/apiClient'; // Assuming apiClient is configured
+import { socket, connectSocket, disconnectSocket } from '@/services/socketService'; // Added disconnectSocket for completeness if desired later
 
 const route = useRoute();
 const id = ref(route.params.id); // Table ID from route params
+const currentSocketRoomTableId = ref(null); // To track the current room joined
 
 const tableState = ref(null);
 const loading = ref(true);
@@ -265,14 +267,78 @@ onMounted(() => {
   //   if (tableState.value && tableState.value.current_hand_id && !isCurrentTurn(loggedInUserId.value) && !actionInProgress.value) {
   //     fetchTableState(id.value);
   //   }
+  // setInterval(() => {
+  //   if (tableState.value && tableState.value.current_hand_id && !isCurrentTurn(loggedInUserId.value) && !actionInProgress.value) {
+  //     fetchTableState(id.value);
+  //   }
   // }, 5000); // Poll if hand active, not your turn, and no action in progress
+  // Removed setInterval polling
+
+  connectSocket();
+
+  if (id.value) {
+    socket.emit('join_poker_table_room', { table_id: parseInt(id.value, 10) });
+    currentSocketRoomTableId.value = parseInt(id.value, 10);
+  }
+
+  socket.on('poker_table_update', (data) => {
+    console.log('Received poker_table_update:', data);
+    // The backend poker_helper.get_table_state directly returns the state object, not nested under 'table_state' key.
+    // However, the backend socket emit in poker.py for join_poker_table_room also directly emits the state.
+    // So, we should check if data itself is the state or if it's nested.
+    // Based on current backend (poker_helper.py emits and poker.py emits get_table_state result),
+    // the data IS the table state.
+    if (data && !data.error) { // Assuming data is the tableState object itself
+      tableState.value = data;
+      loading.value = false; // Stop loading if it was active
+      error.value = null; // Clear previous errors on successful update
+    } else if (data && data.error) { // Handle potential error messages from backend emits
+      console.error('Error in poker_table_update:', data.error);
+      // Optionally set a specific error ref for socket errors if needed
+      // error.value = { message: `WebSocket update error: ${data.error}` };
+    }
+  });
+
+  socket.on('response', (data) => {
+      console.log('Socket server response:', data);
+      // This is a general listener, could be for connection ack or other generic messages
+  });
+
 });
 
-watch(() => route.params.id, (newId) => {
-  if (newId) {
-    id.value = newId;
-    fetchTableState(newId);
+watch(() => route.params.id, (newRouteIdStr) => {
+  const newRouteId = newRouteIdStr ? parseInt(newRouteIdStr, 10) : null;
+  const oldRouteId = currentSocketRoomTableId.value;
+
+  if (newRouteId !== oldRouteId) {
+    if (oldRouteId !== null) {
+      socket.emit('leave_poker_table_room', { table_id: oldRouteId });
+      console.log(`Emitted leave_poker_table_room for table ${oldRouteId}`);
+    }
+
+    id.value = newRouteIdStr; // Update the main id ref for the component
+
+    if (newRouteId !== null) {
+      fetchTableState(newRouteIdStr); // Fetch initial state via HTTP
+      socket.emit('join_poker_table_room', { table_id: newRouteId });
+      console.log(`Emitted join_poker_table_room for table ${newRouteId}`);
+      currentSocketRoomTableId.value = newRouteId;
+    } else {
+      tableState.value = null; // Clear table state if navigating away from a specific table
+      currentSocketRoomTableId.value = null;
+    }
   }
+});
+
+onUnmounted(() => {
+  if (currentSocketRoomTableId.value !== null) {
+    socket.emit('leave_poker_table_room', { table_id: currentSocketRoomTableId.value });
+    console.log(`Emitted leave_poker_table_room for table ${currentSocketRoomTableId.value} on unmount.`);
+  }
+  socket.off('poker_table_update');
+  socket.off('response');
+  // Optional: disconnectSocket(); // if socket connection is per-component or managed globally
+  // For now, as per prompt, leaving connection management simple (global connect, explicit disconnect not here)
 });
 
 </script>

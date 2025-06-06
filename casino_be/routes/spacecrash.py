@@ -8,7 +8,9 @@ from ..schemas import (
     SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema
 )
 from ..utils import spacecrash_handler
-from ..app import limiter # Assuming limiter can be imported directly
+from ..app import limiter, socketio # Assuming limiter can be imported directly
+from flask_socketio import emit
+from ..utils.spacecrash_handler import get_current_game_state_for_broadcast # Import the helper
 from ..routes.admin import is_admin # Import is_admin helper
 
 spacecrash_bp = Blueprint('spacecrash', __name__, url_prefix='/api/spacecrash')
@@ -48,6 +50,15 @@ def spacecrash_place_bet():
         db.session.commit()
 
         current_app.logger.info(f"User {user.id} placed Spacecrash bet {new_bet.id} for {bet_amount} on game {current_game.id}")
+
+        # Emit spacecrash_update after successful bet
+        game_state_data = get_current_game_state_for_broadcast(current_game.id)
+        if 'error' not in game_state_data:
+            socketio.emit('spacecrash_update', game_state_data)
+            current_app.logger.info(f"Emitted spacecrash_update for game {current_game.id} after bet by {user.id}")
+        else:
+            current_app.logger.error(f"Failed to get game state for broadcast after bet: {game_state_data.get('error')}")
+
         return jsonify({'status': True, 'status_message': 'Bet placed successfully.', 'bet': SpacecrashPlayerBetSchema().dump(new_bet)}), 201
     except Exception as e:
         db.session.rollback()
@@ -104,6 +115,18 @@ def spacecrash_eject_bet():
         db.session.rollback()
         current_app.logger.error(f"Error ejecting Spacecrash bet for user {user.id}: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to eject bet due to an internal error.'}), 500
+    finally: # Ensure emit happens even if try block returns early, but after commit/rollback
+        if active_bet and active_bet.game_id: # Check if active_bet and its game_id are valid
+            # We need to ensure the state is fresh if a commit happened or reflect rolled-back state.
+            # If an error occurred and rolled back, the state in DB is pre-eject.
+            # If successful, state reflects the eject.
+            # Re-fetch game_state_data regardless of success/failure of commit to reflect DB state.
+            game_state_data = get_current_game_state_for_broadcast(active_bet.game_id)
+            if 'error' not in game_state_data:
+                socketio.emit('spacecrash_update', game_state_data)
+                current_app.logger.info(f"Emitted spacecrash_update for game {active_bet.game_id} after eject attempt by {user.id}")
+            else:
+                current_app.logger.error(f"Failed to get game state for broadcast after eject: {game_state_data.get('error')}")
 
 @spacecrash_bp.route('/current_game', methods=['GET'])
 def spacecrash_current_game_state():
@@ -212,9 +235,21 @@ def spacecrash_admin_next_phase():
         if success:
             db.session.commit() # Commit changes made by handlers
             current_app.logger.info(f"Admin {current_user.id} transitioned Spacecrash game {game.id} from {original_status} to {target_phase}.")
+
+            # Emit spacecrash_update after successful phase transition
+            game_state_data = get_current_game_state_for_broadcast(game.id)
+            if 'error' not in game_state_data:
+                socketio.emit('spacecrash_update', game_state_data)
+                current_app.logger.info(f"Emitted spacecrash_update for game {game.id} after admin transition to {target_phase}")
+            else:
+                current_app.logger.error(f"Failed to get game state for broadcast after admin transition: {game_state_data.get('error')}")
+
             return jsonify({'status': True, 'status_message': message, 'game_state': SpacecrashGameSchema().dump(game)}), 200
         else:
             # No rollback here as handlers should manage their own partial commits or full rollbacks on failure.
+            # However, if we are here, it means 'success' was false, so no commit happened for game state change by handler.
+            # We should still emit the current (likely unchanged) state if needed, or rely on client to re-fetch.
+            # For now, only emitting on definite success.
             return jsonify({'status': False, 'status_message': message, 'current_status': original_status}), 400
     except Exception as e:
         db.session.rollback() # Catch-all rollback
