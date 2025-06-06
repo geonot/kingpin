@@ -172,9 +172,8 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             bet_amount_sats, # This is the total bet for the spin
             cfg_wild_symbol_id,
             cfg_scatter_symbol_id,
-            # Payouts from config, which might include cluster pays or specific scatter match rules
-            game_config.get('game', {}).get('payouts', []),
-            cfg_min_symbols_to_match # Pass this to calculate_win
+            # game_config.get('game', {}).get('payouts', []), # This general payouts list is no longer passed directly
+            cfg_min_symbols_to_match # Pass this to calculate_win for cluster/match-N logic
             # current_spin_multiplier is handled outside calculate_win now
         )
 
@@ -226,7 +225,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
                     bet_amount_sats, # Base bet amount for calculating wins
                     cfg_wild_symbol_id,
                     cfg_scatter_symbol_id,
-                    game_config.get('game', {}).get('payouts', []),
+                    # game_config.get('game', {}).get('payouts', []), # This general payouts list is no longer passed directly
                     cfg_min_symbols_to_match
                 )
 
@@ -434,30 +433,29 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
         raise ValueError("No spinable symbols found. Check slot DB symbol configuration against gameConfig.json.")
 
     # --- Weighting ---
-    # Attempt to get weights from config_symbols_map if they exist, e.g. symbol_obj.get('weight', 1.0)
-    # For now, using uniform weights.
-    # TODO: Implement configurable symbol weighting based on `gameConfig.json` (e.g., a 'weight' property in each symbol definition)
-
+    # Weights are retrieved from each symbol's 'weight' property in gameConfig.json.
     weights = []
     symbols_for_choice = []
 
     for s_id in spinable_symbol_ids:
         symbol_config = config_symbols_map.get(s_id)
         if symbol_config:
-            # Example: use a 'spawn_weight' or 'reel_weight' from config if available
-            # weight = symbol_config.get('reel_weight', 1.0)
-            # For now, assume equal weight for simplicity, but favor non-special symbols slightly more in a real scenario.
-            # This current simple weighting does not consider reel strips or advanced slot math.
-            is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
-            is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
-
-            if is_wild:
-                weights.append(symbol_config.get('weight', 0.5)) # Default example weight
-            elif is_scatter:
-                weights.append(symbol_config.get('weight', 0.4)) # Default example weight
+            raw_weight = symbol_config.get('weight')
+            current_weight = 1.0  # Default weight
+            if isinstance(raw_weight, (int, float)) and raw_weight > 0:
+                current_weight = float(raw_weight)
             else:
-                weights.append(symbol_config.get('weight', 1.0)) # Default example weight
+                # Log a warning here in a real application if weight is missing or invalid for a symbol
+                # print(f"Warning: Symbol ID {s_id} has missing or invalid weight '{raw_weight}'. Defaulting to 1.0.")
+                pass # Using default weight 1.0
+
+            weights.append(current_weight)
             symbols_for_choice.append(s_id)
+        else:
+            # This case should ideally not be reached if spinable_symbol_ids are derived correctly from config_symbols_map keys
+            # Log a warning: Symbol ID {s_id} not found in config_symbols_map, skipping for weighted choice.
+            pass
+
 
     total_weight = sum(weights)
     if total_weight == 0 or not symbols_for_choice: # Prevent division by zero or empty choices
@@ -492,17 +490,20 @@ def get_symbol_payout(symbol_id, count, config_symbols_map, is_scatter=False):
     """
     Gets the payout multiplier for a given symbol ID and count from the config.
     `config_symbols_map` is the map of symbol objects from gameConfig.json.
-    If `is_scatter` is true, it looks for 'payouts'; otherwise, 'value_multipliers'.
+    If `is_scatter` is true, it looks for 'scatter_payouts' from the symbol's config;
+    otherwise, it looks for 'value_multipliers' for payline wins.
     """
     symbol_config = config_symbols_map.get(symbol_id)
     if not symbol_config:
         return 0.0
 
     if is_scatter:
-        # Scatter payouts are typically direct multipliers of total bet
-        payout_map = symbol_config.get('payouts', {}) # e.g., {"3": 5, "4": 15, "5": 50}
+        # Scatter payouts: uses 'scatter_payouts' from the symbol's configuration.
+        # These are typically direct multipliers of the total bet.
+        payout_map = symbol_config.get('scatter_payouts', {}) # e.g., {"3": 5, "4": 15, "5": 50}
     else:
-        # Payline symbol multipliers are for bet_per_line
+        # Payline symbol multipliers: uses 'value_multipliers' from the symbol's configuration.
+        # These are typically multipliers for the bet_per_line.
         payout_map = symbol_config.get('value_multipliers', {}) # e.g., {"3": 10, "4": 50, "5": 200}
 
     # `count` must be a string for dict lookup as per example gameConfig
@@ -518,15 +519,14 @@ def get_symbol_payout(symbol_id, count, config_symbols_map, is_scatter=False):
         return 0.0
 
 
-def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wild_symbol_id, scatter_symbol_id): # Removed current_spin_multiplier
+def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wild_symbol_id, scatter_symbol_id, min_symbols_to_match): # Removed current_spin_multiplier and general config_payouts
     """Calculates total win amount and identifies winning lines using config.
     `config_paylines` is game_config.game.layout.paylines
-    `config_symbols_map` is game_config.game.symbols (mapped by id)
+    `config_symbols_map` is game_config.game.symbols (mapped by id), used for symbol properties and payouts.
     `total_bet_sats` is the total amount bet for the entire spin.
     `wild_symbol_id` is the internal ID from config.
     `scatter_symbol_id` is the internal ID from config.
-    `config_payouts` is the general "payouts" list from game_config, potentially for match-N logic.
-    `min_symbols_to_match` is for match-N or cluster logic.
+    `min_symbols_to_match` (from game_config.game.min_symbols_to_match) is for "Match N" or cluster logic.
     """
     total_win_sats = 0
     winning_lines_data = [] # Store detailed info about each win
@@ -686,42 +686,58 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
     # For now, this placeholder indicates where it would go.
 
     # --- "Match N" / Cluster Pays Logic ---
+    # This logic assumes "anywhere on grid" for clusters, and wilds contribute to any cluster they can help form.
     if min_symbols_to_match is not None and min_symbols_to_match > 0:
         symbol_counts = {}
-        symbol_positions_map = {} # Stores list of positions for each symbol_id
+        symbol_positions_map = {} # Stores list of positions for each symbol_id (excluding wilds initially)
 
+        # Count literal symbols and their positions (excluding wilds for base count)
         for r, row_data in enumerate(grid):
-            for c, symbol_id in enumerate(row_data):
-                if symbol_id is None: continue # Skip empty or already cleared spots
+            for c, s_id_in_cell in enumerate(row_data):
+                if s_id_in_cell is None: continue
 
-                # Exclude scatter from general cluster matching if it has its own dedicated logic
-                # Or, allow scatter to also form clusters if desired by game design.
-                # For now, let's assume scatters are handled separately unless explicitly part of cluster rules.
-                # if symbol_id == scatter_symbol_id: continue
+                # For cluster base counts, we only consider non-wild, non-scatter symbols here.
+                # Wilds are counted separately and added to effective counts.
+                # Scatters are typically handled by their own independent payout logic.
+                if s_id_in_cell != wild_symbol_id and s_id_in_cell != scatter_symbol_id:
+                    symbol_counts[s_id_in_cell] = symbol_counts.get(s_id_in_cell, 0) + 1
+                    if s_id_in_cell not in symbol_positions_map:
+                        symbol_positions_map[s_id_in_cell] = []
+                    symbol_positions_map[s_id_in_cell].append([r, c])
 
-                symbol_counts[symbol_id] = symbol_counts.get(symbol_id, 0) + 1
-                if symbol_id not in symbol_positions_map:
-                    symbol_positions_map[symbol_id] = []
-                symbol_positions_map[symbol_id].append([r, c])
+        # Count total wilds on the grid and their positions
+        num_wilds_on_grid = 0
+        wild_positions_on_grid = []
+        if wild_symbol_id is not None:
+            for r_idx, row_data in enumerate(grid):
+                for c_idx, s_id_in_cell in enumerate(row_data):
+                    if s_id_in_cell == wild_symbol_id:
+                        num_wilds_on_grid += 1
+                        wild_positions_on_grid.append([r_idx, c_idx])
 
-        for symbol_id, count in symbol_counts.items():
-            if count >= min_symbols_to_match:
-                # This symbol forms a "match N" win.
-                # Find its payout from `config_payouts`.
+        for symbol_id, literal_symbol_count in symbol_counts.items():
+            # Wilds do not form their own cluster type; they assist other symbols.
+            # Scatter symbols are handled by their dedicated scatter win logic, not cluster logic here.
+            if symbol_id == wild_symbol_id or symbol_id == scatter_symbol_id: # Should already be excluded by map population
+                continue
+
+            effective_count = literal_symbol_count + num_wilds_on_grid
+
+            if effective_count >= min_symbols_to_match:
+                # This symbol forms a "match N" win with the help of wilds.
                 # `config_payouts` is a list of dicts. We need to find the relevant one.
                 # Example structure for a cluster payout entry in `config_payouts`:
                 # { "type": "cluster", "symbol_id": <ID>, "matches": <N>, "multiplier": <X_per_symbol_or_fixed> }
                 # Or payouts might be within the symbol definition in `config_symbols_map`
-                # e.g. config_symbols_map[symbol_id].get('cluster_payouts', {}).get(str(count))
+                # e.g. config_symbols_map[symbol_id].get('cluster_payouts', {}).get(str(effective_count))
 
                 payout_value_for_cluster = 0
-                # Attempt 1: Look in symbol's own config for cluster payouts
                 symbol_config_data = config_symbols_map.get(symbol_id, {})
-                cluster_payout_rules = symbol_config_data.get('cluster_payouts') # e.g. {"8": 100, "9": 150}
+                cluster_payout_rules = symbol_config_data.get('cluster_payouts', {}) # e.g. {"8": 100, "9": 150}
+
                 if cluster_payout_rules:
-                    payout_value_for_cluster = cluster_payout_rules.get(str(count), 0.0)
-                    # If payout_value_for_cluster is per-symbol, multiply by count. If fixed, use as is.
-                    # Assume for now it's a fixed multiplier for that count for simplicity.
+                    # The key in cluster_payouts is the string representation of the effective_count.
+                    payout_value_for_cluster = cluster_payout_rules.get(str(effective_count), 0.0)
 
                 # Attempt 2: Fallback or alternative - search generic `config_payouts` list
                 # This is less direct. The gameConfig structure needs to be clear.
@@ -735,28 +751,33 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
 
                 if payout_value_for_cluster > 0:
                     # Cluster win amount calculation.
-                    # This could be bet_amount * multiplier, or bet_per_unit * count * multiplier etc.
-                    # Let's assume it's similar to scatter: total_bet_sats * cluster_multiplier
-                    # Or, if the game design implies a "bet per symbol" or "bet per block" concept,
-                    # the `total_bet_sats` might need to be divided or used differently.
-                    # For now, using `total_bet_sats * payout_value_for_cluster` for simplicity.
-                    # This part is highly dependent on game design for cluster pays.
+                    # Cluster win calculation: total_bet_sats * payout_value_for_cluster.
+                    # This assumes the payout_value_for_cluster is a direct multiplier of the total bet for that cluster.
                     cluster_win_sats_this_group = int(total_bet_sats * payout_value_for_cluster)
 
                     if cluster_win_sats_this_group > 0:
                         total_win_sats += cluster_win_sats_this_group
-                        winning_coords_for_this_cluster = symbol_positions_map[symbol_id]
+
+                        # Combine positions of the literal symbols and all wild symbols
+                        current_symbol_positions = symbol_positions_map.get(symbol_id, [])
+                        combined_positions_set = set()
+                        for pos in current_symbol_positions:
+                            combined_positions_set.add(tuple(pos))
+                        for wild_pos in wild_positions_on_grid:
+                            combined_positions_set.add(tuple(wild_pos))
+
+                        winning_coords_for_this_cluster = [list(pos) for pos in combined_positions_set]
 
                         winning_lines_data.append({
-                            "line_id": f"cluster_{symbol_id}_{count}", # Unique ID for this win type
-                            "symbol_id": symbol_id,
-                            "count": count,
+                            "line_id": f"cluster_{symbol_id}_{effective_count}", # Unique ID for this win type
+                            "symbol_id": symbol_id, # The base symbol that formed the cluster
+                            "count": effective_count, # Effective count including wilds
                             "positions": winning_coords_for_this_cluster,
                             "win_amount_sats": cluster_win_sats_this_group,
                             "type": "cluster"
                         })
-                        for pos in winning_coords_for_this_cluster:
-                            all_winning_symbol_coords.add(tuple(pos))
+                        for pos_tuple in combined_positions_set: # Add all contributing positions to all_winning_symbol_coords
+                            all_winning_symbol_coords.add(pos_tuple)
 
     return {
         "total_win_sats": total_win_sats, # Raw total, multiplier applied in main handle_spin
@@ -822,11 +843,14 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
                 for s_id in spinable_symbol_ids:
                     symbol_config = config_symbols_map.get(s_id)
                     if symbol_config:
-                        is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
-                        is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
-                        if is_wild: weights.append(symbol_config.get('weight', 0.5))
-                        elif is_scatter: weights.append(symbol_config.get('weight', 0.4)) # Scatters might appear less often in cascades
-                        else: weights.append(symbol_config.get('weight', 1.0))
+                        raw_weight = symbol_config.get('weight')
+                        current_weight = 1.0 # Default weight
+                        if isinstance(raw_weight, (int, float)) and raw_weight > 0:
+                            current_weight = float(raw_weight)
+                        else:
+                            # Log warning for missing/invalid weight in cascade
+                            pass
+                        weights.append(current_weight)
                         symbols_for_choice.append(s_id)
 
                 total_weight = sum(weights)
@@ -854,11 +878,14 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
         for s_id in spinable_symbol_ids:
             symbol_config = config_symbols_map.get(s_id)
             if symbol_config:
-                is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
-                is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
-                if is_wild: weights.append(symbol_config.get('weight', 0.5))
-                elif is_scatter: weights.append(symbol_config.get('weight', 0.4))
-                else: weights.append(symbol_config.get('weight', 1.0))
+                raw_weight = symbol_config.get('weight')
+                current_weight = 1.0 # Default weight
+                if isinstance(raw_weight, (int, float)) and raw_weight > 0:
+                    current_weight = float(raw_weight)
+                else:
+                    # Log warning for missing/invalid weight in cascade
+                    pass
+                weights.append(current_weight)
                 symbols_for_choice.append(s_id)
 
         total_weight = sum(weights)
