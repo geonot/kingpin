@@ -25,6 +25,9 @@ class Config:
     # Set FLASK_DEBUG to 'True' or '1' for development.
     DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
 
+    # Testing mode - can be used to disable features like rate limiting in tests
+    TESTING = os.getenv('FLASK_TESTING', 'False').lower() in ('true', '1', 't')
+
     # Satoshi Conversion Factor (1 BTC = 100,000,000 Satoshis)
     SATOSHI_FACTOR = 100_000_000
 
