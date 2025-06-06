@@ -123,11 +123,21 @@ def generate_multiway_spin_grid(
     for s_id in spinable_symbol_ids:
         symbol_config = config_symbols_map.get(s_id)
         if symbol_config:
-            # Using 'weight' from symbol config, default to 1.0
-            # Special handling for wild/scatter weights can be added if needed,
-            # but current spin_handler logic applies a generic 'weight' property.
-            weights.append(float(symbol_config.get('weight', 1.0))) # Ensure weight is float
+            raw_weight = symbol_config.get('weight')
+            current_weight = 1.0  # Default weight
+            if isinstance(raw_weight, (int, float)) and raw_weight > 0:
+                current_weight = float(raw_weight)
+            else:
+                # Log a warning here in a real application if weight is missing or invalid for a symbol
+                # current_app.logger.warning(f"Symbol ID {s_id} in multiway slot has missing or invalid weight '{raw_weight}'. Defaulting to 1.0.")
+                pass # Using default weight 1.0
+
+            weights.append(current_weight)
             symbols_for_choice.append(s_id)
+        else:
+            # This case should ideally not be reached if spinable_symbol_ids are derived correctly.
+            # current_app.logger.warning(f"Symbol ID {s_id} not found in config_symbols_map for multiway slot, skipping for weighted choice.")
+            pass
 
     total_weight = sum(weights)
     if total_weight == 0 or not symbols_for_choice:
@@ -283,10 +293,12 @@ def calculate_multiway_win(
                     break # Symbol (or its wild substitute) not found, way broken
 
             if num_reels_matched >= min_match_for_ways_win:
-                payout_config_for_symbol = config_symbols_map.get(base_symbol_id, {}).get('payouts', {}).get('ways', {})
+                # Fetch "ways" payouts from the symbol's 'ways_payouts' dictionary.
+                # The key in 'ways_payouts' should be the string representation of num_reels_matched.
+                payout_config_for_symbol = config_symbols_map.get(base_symbol_id, {}).get('ways_payouts', {})
                 if not payout_config_for_symbol and base_symbol_id == wild_symbol_config_id: # Check if wild has its own ways payout
-                     payout_config_for_symbol = config_symbols_map.get(wild_symbol_config_id, {}).get('payouts', {}).get('ways', {})
-
+                     # Wild symbol specific ways payouts.
+                     payout_config_for_symbol = config_symbols_map.get(wild_symbol_config_id, {}).get('ways_payouts', {})
 
                 payout_multiplier = float(payout_config_for_symbol.get(str(num_reels_matched), 0.0))
 
@@ -333,10 +345,10 @@ def calculate_multiway_win(
                     scatter_positions_on_grid.append([r_idx, p_idx])
 
     if scatter_count_on_grid > 0:
-        # Scatter payouts are typically defined in gameConfig under the symbol's properties
-        # e.g. config_symbols_map[scatter_id]['payouts']['scatter'] = {"3": 5, "4": 10, "5": 25}
+        # Scatter payouts are fetched from the scatter symbol's 'scatter_payouts' dictionary.
+        # The key in 'scatter_payouts' should be the string representation of scatter_count_on_grid.
         # These multipliers are usually for the *total bet*.
-        scatter_payout_rules = config_symbols_map.get(scatter_symbol_config_id, {}).get('payouts', {}).get('scatter', {})
+        scatter_payout_rules = config_symbols_map.get(scatter_symbol_config_id, {}).get('scatter_payouts', {})
         scatter_payout_multiplier = float(scatter_payout_rules.get(str(scatter_count_on_grid), 0.0))
 
         if scatter_payout_multiplier > 0:

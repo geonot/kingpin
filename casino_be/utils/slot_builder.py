@@ -133,53 +133,56 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
 
     config_symbols_list = []
     for s_detail in symbol_config_details:
-        symbol_data = {
+        symbol_obj = {
             "id": s_detail['id'], # This is the symbol_internal_id
             "icon": asset_dir_for_config + s_detail['file'], # Path like /theme_name/sprite_0.png
-            "value": symbol_values_config.get(s_detail['id']),
-            "name": s_detail['name']
+            "value": symbol_values_config.get(s_detail['id']), # Base value, might be None for non-paying
+            "name": s_detail['name'],
+            "is_wild": s_detail['id'] == 11, # Assuming ID 11 is Wild
+            "is_scatter": s_detail['id'] == 9, # Assuming ID 9 is Scatter
+            "is_bonus": s_detail['id'] == 10, # Assuming ID 10 is Bonus
+            # Default weights assigned based on typical symbol roles/values
+            "weight": 1.0 # Default, will be overridden below
         }
-        if min_symbols_to_match_arg is not None and min_symbols_to_match_arg > 0:
-            if s_detail['id'] in [1, 2, 3]: # Low-value
-                symbol_data["cluster_payouts"] = {
-                    str(min_symbols_to_match_arg): 0.5,
-                    str(min_symbols_to_match_arg + 1): 1.0
-                }
-            elif s_detail['id'] in [4, 5, 6]: # Mid-value
-                symbol_data["cluster_payouts"] = {
-                    str(min_symbols_to_match_arg): 1.0,
-                    str(min_symbols_to_match_arg + 1): 2.0
-                }
-            elif s_detail['id'] in [7, 8]: # High-value
-                symbol_data["cluster_payouts"] = {
-                    str(min_symbols_to_match_arg): 2.0,
-                    str(min_symbols_to_match_arg + 1): 4.0
-                }
-            else: # Scatter, Bonus, Wild
-                symbol_data["cluster_payouts"] = {}
-        else:
-            symbol_data["cluster_payouts"] = {} # Or omit if not needed when min_symbols_to_match is not set
 
-        config_symbols_list.append(symbol_data)
+        # Assign specific default weights based on symbol ID conventions
+        symbol_id = s_detail['id']
+        if 1 <= symbol_id <= 3: # Low-value
+            symbol_obj['weight'] = 10.0
+        elif 4 <= symbol_id <= 6: # Medium-value
+            symbol_obj['weight'] = 5.0
+        elif 7 <= symbol_id <= 8: # High-value
+            symbol_obj['weight'] = 2.0
+        elif symbol_id == 9: # Scatter
+            symbol_obj['weight'] = 1.0
+        elif symbol_id == 10: # Bonus
+            symbol_obj['weight'] = 1.0
+        elif symbol_id == 11: # Wild
+            symbol_obj['weight'] = 1.5
+        # Ensure all symbols have a weight, even if it's a generic default already set
 
-    # Define Payouts for gameConfig.json
-    payouts_list = []
-    for s_detail in symbol_config_details:
-        s_id = s_detail['id']
-        s_value_for_payout = symbol_values_config.get(s_id)
+        s_value_for_payout = symbol_values_config.get(s_detail['id'])
 
-        if s_id == 9: # Scatter (ID 9)
-            payouts_list.extend([
-                {"symbol_id": s_id, "matches": 3, "multiplier": 5}, # Fixed multipliers for scatter
-                {"symbol_id": s_id, "matches": 4, "multiplier": 15},
-                {"symbol_id": s_id, "matches": 5, "multiplier": 50}
-            ])
-        elif s_value_for_payout is not None: # Other paying symbols (IDs 1-8)
-            payouts_list.extend([
-                {"symbol_id": s_id, "matches": 3, "multiplier": s_value_for_payout * 1},
-                {"symbol_id": s_id, "matches": 4, "multiplier": s_value_for_payout * 3},
-                {"symbol_id": s_id, "matches": 5, "multiplier": s_value_for_payout * 5}
-            ])
+        # Add value_multipliers for payable symbols (IDs 1-8 by convention)
+        if s_value_for_payout is not None and not symbol_obj['is_wild'] and not symbol_obj['is_scatter'] and not symbol_obj['is_bonus']:
+            symbol_obj['value_multipliers'] = {
+                "3": s_value_for_payout * 1,
+                "4": s_value_for_payout * 3,
+                "5": s_value_for_payout * 5
+            }
+
+        # Add scatter_payouts for scatter symbol (ID 9 by convention)
+        if symbol_obj['is_scatter']:
+            symbol_obj['scatter_payouts'] = {
+                "3": 5,
+                "4": 15,
+                "5": 50
+            }
+
+        # Wild and Bonus symbols typically don't have value_multipliers or scatter_payouts
+        # cluster_payouts are deferred for this subtask.
+
+        config_symbols_list.append(symbol_obj)
 
     # Base structure for gameConfig.json (can be loaded from a template file too)
     game_config_dict = {
@@ -202,7 +205,7 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
                 {"id": 4, "coords": [[2,0],[1,1],[0,2],[1,3],[2,4]]},
                 # Can add more default paylines if desired
             ],
-            "payouts": payouts_list,
+            # "payouts": payouts_list, # Removed top-level payouts array
             "ui": { # Simplified UI section, can be expanded from a template
                 "buttons": {
                     "spin": { "icon": asset_dir_for_config + "spin.png"},

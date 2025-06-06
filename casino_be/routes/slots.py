@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from ..models import db, User, GameSession, Slot
+from ..models import db, User, GameSession, Slot, SlotBet # SlotBet imported
 from ..schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
 from ..utils.spin_handler import handle_spin
 from ..utils.multiway_helper import handle_multiway_spin
@@ -42,6 +42,18 @@ def spin():
     slot = Slot.query.get(game_session.slot_id)
     if not slot:
          return jsonify({'status': False, 'status_message': 'Slot not found for session.'}), 500
+
+    # --- Bet Amount Validation against SlotBet ---
+    allowed_bets_query = SlotBet.query.filter_by(slot_id=slot.id).all()
+    if not allowed_bets_query:
+        current_app.logger.warning(f"No SlotBet entries configured for slot {slot.id} (name: {slot.name}). Spin denied for user {user.id}.")
+        return jsonify({'status': False, 'status_message': 'No valid bet amounts configured for this slot.'}), 400
+
+    allowed_bet_values = [b.bet_amount for b in allowed_bets_query]
+    if bet_amount_sats not in allowed_bet_values:
+        current_app.logger.warning(f"Invalid bet amount {bet_amount_sats} for slot {slot.id} by user {user.id}. Allowed: {allowed_bet_values}")
+        return jsonify({'status': False, 'status_message': f'Invalid bet amount for this slot. Allowed bets are: {sorted(list(set(allowed_bet_values)))} satoshis.'}), 400
+    # --- End Bet Amount Validation ---
 
     if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0):
         return jsonify({'status': False, 'status_message': 'Insufficient balance'}), 400
