@@ -1,0 +1,27 @@
+{
+    "game": {
+        "slot_id": 999, "name": "Test Slot 1", "short_name": "test_slot1",
+        "layout": {"rows": 3, "columns": 3},
+        "symbol_count": 3, "symbol_wild": 3, "symbol_scatter": 2, "symbol_bonus": null,
+        "symbols": [
+                        {"id": 1, "name": "Cherry", "value": 10, "value_multipliers": {"3": 10}, "cluster_payouts": {}},
+                        {"id": 2, "name": "ScatterS", "value": 0, "payouts": {"3": 5}, "cluster_payouts": {}},
+                        {"id": 3, "name": "WildW", "value": 0, "value_multipliers": {"3": 100}, "cluster_payouts": {}}
+        ],
+        "paylines": [
+            {"id": 0, "coords": [[0,0],[0,1],[0,2]]}
+        ],
+        "payouts": [
+            {"symbol_id": 1, "matches": 3, "multiplier": 10},
+            {"symbol_id": 3, "matches": 3, "multiplier": 100}
+        ],
+        "reel_strips": [
+            [1,1,1,2,3], [1,1,1,2,3], [1,1,1,2,3]
+        ],
+        "is_cascading": false,
+        "rtp": 95.0,
+        "bonus_features": {
+            "free_spins": {"trigger_symbol_id": 2, "trigger_count": 3, "spins_awarded": 5, "multiplier": 2.0}
+        }
+    }
+}

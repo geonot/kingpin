@@ -154,13 +154,16 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         # slot.symbols still provides the available symbols from DB.
         # We'll use cfg_symbols_map for properties like multipliers, is_wild, is_scatter
         # The generate_spin_grid function might need to be aware of symbol IDs from config
+        cfg_reel_strips = game_config.get('game', {}).get('reel_strips') # Get reel_strips
+
         spin_result_grid = generate_spin_grid(
             cfg_rows,
             cfg_columns,
             slot.symbols, # List of SlotSymbol ORM objects
-            cfg_wild_symbol_id,
-            cfg_scatter_symbol_id,
-            cfg_symbols_map # Pass the config symbols map for weighting or other properties
+            cfg_wild_symbol_id, # Ensure this is cfg_wild_symbol_id from game_config.get('game',{}).get('symbol_wild')
+            cfg_scatter_symbol_id, # Ensure this is cfg_scatter_symbol_id from game_config.get('game',{}).get('symbol_scatter')
+            cfg_symbols_map, # Pass the config symbols map for weighting or other properties
+            cfg_reel_strips # Pass the loaded reel_strips
         )
 
         # --- Calculate Wins ---
@@ -404,81 +407,77 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         raise RuntimeError(f"An unexpected error occurred during the spin: {str(e)}") # Use str(e) for cleaner message
 
 
-def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter_symbol_config_id, config_symbols_map):
-    """
-    Generates a grid of symbol internal IDs based on weighted probabilities.
-    Symbols list contains SlotSymbol objects.
-    """
-    """
-    Generates a grid of symbol IDs.
-    Uses symbol IDs from `config_symbols_map` (which are the internal IDs).
-    Weighting can be complex; for now, use simple random choice or weights from config if available.
-    `db_symbols` (SlotSymbol ORM objects) are used to get the list of possible symbol_internal_ids for this slot.
-    `config_symbols_map` is a dictionary from gameConfig.json: { <symbol_id_int>: {props...} }
-    """
-    if not db_symbols: # Should come from slot.symbols
-        # Fallback to a simple grid if no symbols are defined for the slot in DB.
+def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter_symbol_config_id, config_symbols_map, reel_strips=None):
+    if not db_symbols:
         # This indicates a setup issue.
-        return [[config_symbols_map.keys()[0] if config_symbols_map else 1 for _ in range(columns)] for _ in range(rows)]
+        # Fallback to a simple grid if no symbols are defined for the slot in DB.
+        s_ids = list(config_symbols_map.keys())
+        return [[s_ids[0] if s_ids else 1 for _ in range(columns)] for _ in range(rows)]
 
-    # Get all symbol internal IDs that are actually configured for this slot via the SlotSymbol table
-    # These are the `symbol_internal_id` values.
     valid_symbol_ids_for_slot = [s.symbol_internal_id for s in db_symbols]
-
-    # Filter these further: only include symbols that also exist in the gameConfig.json's symbol list.
-    # This ensures we only spin symbols that have defined properties (like multipliers, etc.)
     spinable_symbol_ids = [sid for sid in valid_symbol_ids_for_slot if sid in config_symbols_map]
 
     if not spinable_symbol_ids:
-        # This is a critical configuration error: Slot has symbols in DB, but they don't map to gameConfig.json
         raise ValueError("No spinable symbols found. Check slot DB symbol configuration against gameConfig.json.")
 
-    # --- Weighting ---
-    # Attempt to get weights from config_symbols_map if they exist, e.g. symbol_obj.get('weight', 1.0)
-    # For now, using uniform weights.
-    # TODO: Implement configurable symbol weighting based on `gameConfig.json` (e.g., a 'weight' property in each symbol definition)
-
-    weights = []
-    symbols_for_choice = []
-
-    for s_id in spinable_symbol_ids:
-        symbol_config = config_symbols_map.get(s_id)
-        if symbol_config:
-            # Example: use a 'spawn_weight' or 'reel_weight' from config if available
-            # weight = symbol_config.get('reel_weight', 1.0)
-            # For now, assume equal weight for simplicity, but favor non-special symbols slightly more in a real scenario.
-            # This current simple weighting does not consider reel strips or advanced slot math.
-            is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
-            is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
-
-            if is_wild:
-                weights.append(symbol_config.get('weight', 0.5)) # Default example weight
-            elif is_scatter:
-                weights.append(symbol_config.get('weight', 0.4)) # Default example weight
-            else:
-                weights.append(symbol_config.get('weight', 1.0)) # Default example weight
-            symbols_for_choice.append(s_id)
-
-    total_weight = sum(weights)
-    if total_weight == 0 or not symbols_for_choice: # Prevent division by zero or empty choices
-         if not symbols_for_choice: # if symbols_for_choice is empty, fall back to spinable_symbol_ids with uniform weight
-             if not spinable_symbol_ids: # Should have been caught earlier
-                  raise ValueError("Cannot generate spin grid: No symbols available for choice and no spinable_symbol_ids.")
-             symbols_for_choice = spinable_symbol_ids
-             weights = [1.0] * len(symbols_for_choice)
-             total_weight = float(len(symbols_for_choice))
-         else: # weights were all zero, distribute uniformly
-             weights = [1.0 / len(symbols_for_choice) for _ in symbols_for_choice]
-    else:
-        weights = [w / total_weight for w in weights]
-
-
-    grid = []
+    grid = [[0 for _ in range(columns)] for _ in range(rows)]
     secure_random = secrets.SystemRandom()
-    for r in range(rows):
-        row_symbols = secure_random.choices(symbols_for_choice, weights=weights, k=columns)
-        grid.append(row_symbols)
-    return grid
+
+    if reel_strips and isinstance(reel_strips, list) and len(reel_strips) == columns:
+        print("INFO: Generating grid using reel_strips.") # For debugging
+        for c in range(columns):
+            strip = reel_strips[c]
+            if not strip or not isinstance(strip, list) or not all(isinstance(sid, int) for sid in strip): # ensure all elements in strip are integers
+                print(f"Warning: Invalid or empty reel strip for column {c}. Falling back to random symbols for this column.")
+                if not spinable_symbol_ids: raise ValueError(f"No spinable symbols for fallback on column {c}.")
+                for r_idx in range(rows):
+                    grid[r_idx][c] = secure_random.choice(spinable_symbol_ids)
+                continue # Move to the next column
+
+            start_index = secure_random.randint(0, len(strip) - 1)
+            for r_idx in range(rows):
+                grid[r_idx][c] = strip[(start_index + r_idx) % len(strip)]
+        return grid
+    else:
+        if reel_strips is not None: # It was provided but invalid
+             print("Warning: reel_strips configuration is invalid, does not match column count, or contains non-integer symbol IDs. Falling back to basic weighted random symbol generation.")
+        else:
+             print("Warning: reel_strips not found in gameConfig. Falling back to basic weighted random symbol generation.")
+
+        # Fallback to existing (or improved basic weighted) logic
+        weights = []
+        symbols_for_choice = []
+
+        for s_id in spinable_symbol_ids:
+            symbol_config = config_symbols_map.get(s_id)
+            if symbol_config: # Should always be true if s_id is from spinable_symbol_ids
+                # Example: use a 'spawn_weight' or 'reel_weight' from config if available
+                # For now, assume equal weight for simplicity, but favor non-special symbols slightly more.
+                is_wild = symbol_config.get('is_wild', False) or s_id == wild_symbol_config_id
+                is_scatter = symbol_config.get('is_scatter', False) or s_id == scatter_symbol_config_id
+
+                # Default weights if not specified in symbol_config (as 'weight' key)
+                default_weight = 1.0
+                if is_wild: default_weight = 0.5
+                elif is_scatter: default_weight = 0.4
+
+                weights.append(symbol_config.get('weight', default_weight))
+                symbols_for_choice.append(s_id)
+
+        if not symbols_for_choice: # Should be caught by spinable_symbol_ids check earlier
+             raise ValueError("Cannot generate spin grid: No symbols available for choice in fallback.")
+
+        total_weight = sum(weights)
+        if total_weight == 0 : # Prevent division by zero if all weights are zero
+            # Fallback to uniform distribution if all weights are zero
+            weights = [1.0 / len(symbols_for_choice)] * len(symbols_for_choice)
+        else:
+            weights = [w / total_weight for w in weights]
+
+        for r_idx in range(rows):
+            row_symbols = secure_random.choices(symbols_for_choice, weights=weights, k=columns)
+            grid[r_idx] = row_symbols # Assign directly to the row
+        return grid
 
 
 # Removed define_paylines - it will come from game_config.layout.paylines
@@ -506,7 +505,9 @@ def get_symbol_payout(symbol_id, count, config_symbols_map, is_scatter=False):
         payout_map = symbol_config.get('value_multipliers', {}) # e.g., {"3": 10, "4": 50, "5": 200}
 
     # `count` must be a string for dict lookup as per example gameConfig
-    multiplier = payout_map.get(str(count), 0.0)
+    # Defensive: ensure keys in payout_map are strings if they were somehow loaded as int
+    payout_map_str_keys = {str(k): v for k, v in payout_map.items()}
+    multiplier = payout_map_str_keys.get(str(count), 0.0)
 
     # Ensure multiplier is float or int
     try:
@@ -518,7 +519,7 @@ def get_symbol_payout(symbol_id, count, config_symbols_map, is_scatter=False):
         return 0.0
 
 
-def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wild_symbol_id, scatter_symbol_id): # Removed current_spin_multiplier
+def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wild_symbol_id, scatter_symbol_id, config_payouts=None, min_symbols_to_match=None): # Added config_payouts and min_symbols_to_match
     """Calculates total win amount and identifies winning lines using config.
     `config_paylines` is game_config.game.layout.paylines
     `config_symbols_map` is game_config.game.symbols (mapped by id)
@@ -528,6 +529,7 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
     `config_payouts` is the general "payouts" list from game_config, potentially for match-N logic.
     `min_symbols_to_match` is for match-N or cluster logic.
     """
+    # print(f"DEBUG_TEST_HANDLER: calculate_win called with total_bet_sats={total_bet_sats}") # Debug
     total_win_sats = 0
     winning_lines_data = [] # Store detailed info about each win
     all_winning_symbol_coords = set() # Using a set to store unique [r,c] tuples for removal
@@ -545,10 +547,11 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
         # It's possible that total_bet_sats is not perfectly divisible.
         # Game design should specify how this is handled (e.g. user bets per line, or total bet must be multiple of lines)
         # For now, we assume total_bet_sats is what's wagered, and bet_per_line is derived.
+    # print(f"DEBUG_TEST_HANDLER: num_active_paylines={num_active_paylines}, bet_per_line_sats={bet_per_line_sats}") # Debug
 
     for payline_config in config_paylines:
         payline_id = payline_config.get("id", "unknown_line")
-        payline_positions = payline_config.get("positions", []) # List of [row, col]
+        payline_positions = payline_config.get("coords", []) # List of [row, col] #FIX: Changed "positions" to "coords"
 
         line_symbols_on_grid = [] # Actual symbol IDs on this payline from the spin grid
         actual_positions_on_line = [] # Coordinates of these symbols
@@ -621,6 +624,7 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
         # Get payout for the matched sequence
         # The minimum match count is implicitly handled by what's defined in value_multipliers (e.g. no "1" or "2")
         payout_multiplier = get_symbol_payout(match_symbol_id, consecutive_count, config_symbols_map, is_scatter=False)
+        # print(f"DEBUG_TEST_HANDLER: Payline {payline_id}, Symbol {match_symbol_id}, Count {consecutive_count}, PayoutMultiplier {payout_multiplier}") # Debug
 
         if payout_multiplier > 0:
             # Line win = bet_per_line * symbol_multiplier
@@ -744,6 +748,7 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
                     cluster_win_sats_this_group = int(total_bet_sats * payout_value_for_cluster)
 
                     if cluster_win_sats_this_group > 0:
+                        print(f"DEBUG: Cluster win for symbol {symbol_id} count {count} with multiplier {payout_value_for_cluster}. Win: {cluster_win_sats_this_group}")
                         total_win_sats += cluster_win_sats_this_group
                         winning_coords_for_this_cluster = symbol_positions_map[symbol_id]
 
@@ -885,6 +890,10 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
 
 
 def check_bonus_trigger(grid, scatter_symbol_id, config_bonus_features):
+    # print(f"DEBUG_TEST_HANDLER: check_bonus_trigger called.")
+    # print(f"DEBUG_TEST_HANDLER: grid received: {grid}")
+    # print(f"DEBUG_TEST_HANDLER: scatter_symbol_id param: {scatter_symbol_id}")
+    # print(f"DEBUG_TEST_HANDLER: config_bonus_features param: {config_bonus_features}")
     """
     Checks if conditions are met to trigger a bonus round based on gameConfig.json.
     `config_bonus_features` is game_config.game.bonus_features.
@@ -906,12 +915,17 @@ def check_bonus_trigger(grid, scatter_symbol_id, config_bonus_features):
         return {'triggered': False}
 
     scatter_count = 0
-    for row in grid:
-        for symbol_id_in_cell in row:
+    for r_idx, row in enumerate(grid):
+        for c_idx, symbol_id_in_cell in enumerate(row):
             if symbol_id_in_cell == scatter_symbol_id: # Use the passed scatter_symbol_id from game root
                 scatter_count += 1
+                # print(f"DEBUG_TEST_HANDLER: Found scatter {scatter_symbol_id} at row {r_idx}, cell {c_idx}. Current scatter_count: {scatter_count}")
 
-    if scatter_count >= min_scatter_to_trigger:
+    # Condition: the symbol counted (scatter_symbol_id arg) must be the trigger_symbol_id from this bonus config,
+    # and the count must meet the minimum.
+    # print(f"DEBUG_TEST_HANDLER: Final scatter_count: {scatter_count}, min_scatter_to_trigger: {min_scatter_to_trigger if free_spins_config else 'N/A'}") # Added before return
+    if trigger_sym_id is not None and scatter_symbol_id == trigger_sym_id and scatter_count >= min_scatter_to_trigger:
+        # print(f"DEBUG_TEST_HANDLER: Returning: {{'triggered': True, ...}}") # Added before return
         return {
             'triggered': True,
             'type': 'free_spins', # Or derive from config key
@@ -920,5 +934,5 @@ def check_bonus_trigger(grid, scatter_symbol_id, config_bonus_features):
             # Add other bonus parameters if needed
         }
 
+    # print(f"DEBUG_TEST_HANDLER: Returning: {{'triggered': False}}") # Added before return
     return {'triggered': False}
-

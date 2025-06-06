@@ -133,12 +133,34 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
 
     config_symbols_list = []
     for s_detail in symbol_config_details:
-        config_symbols_list.append({
+        symbol_data = {
             "id": s_detail['id'], # This is the symbol_internal_id
             "icon": asset_dir_for_config + s_detail['file'], # Path like /theme_name/sprite_0.png
             "value": symbol_values_config.get(s_detail['id']),
             "name": s_detail['name']
-        })
+        }
+        if min_symbols_to_match_arg is not None and min_symbols_to_match_arg > 0:
+            if s_detail['id'] in [1, 2, 3]: # Low-value
+                symbol_data["cluster_payouts"] = {
+                    str(min_symbols_to_match_arg): 0.5,
+                    str(min_symbols_to_match_arg + 1): 1.0
+                }
+            elif s_detail['id'] in [4, 5, 6]: # Mid-value
+                symbol_data["cluster_payouts"] = {
+                    str(min_symbols_to_match_arg): 1.0,
+                    str(min_symbols_to_match_arg + 1): 2.0
+                }
+            elif s_detail['id'] in [7, 8]: # High-value
+                symbol_data["cluster_payouts"] = {
+                    str(min_symbols_to_match_arg): 2.0,
+                    str(min_symbols_to_match_arg + 1): 4.0
+                }
+            else: # Scatter, Bonus, Wild
+                symbol_data["cluster_payouts"] = {}
+        else:
+            symbol_data["cluster_payouts"] = {} # Or omit if not needed when min_symbols_to_match is not set
+
+        config_symbols_list.append(symbol_data)
 
     # Define Payouts for gameConfig.json
     payouts_list = []
@@ -196,6 +218,13 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
             "bonus": {"triggerSymbolId": 10, "triggerCount": 3, "spinsAwarded": 10, "multiplier": 2.0},
             "sound": { "spin": "/assets/sounds/spin.wav" }, # Simplified, use generic sounds
             "settings": {"betOptions": [10, 20, 50, 100, 200, 500]},
+            "reel_strips": [
+                [1,2,3,4,5,6,7,8,9,10,11, 1,2,3,1,4,5,1,2,3,4,5,6,7,8], # Reel 1 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 1,2,3,6,7,8,1,2,3,4,5,6,7,8], # Reel 2 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 1,2,4,5,9,10,1,2,3,4,5,6,7,8],# Reel 3 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 1,3,6,7,11,1,2,3,4,5,6,7,8],  # Reel 4 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 2,4,5,8,9,1,2,3,4,5,6,7,8]   # Reel 5 (25 symbols)
+            ],
             # Cascading features
             "is_cascading": is_cascading_arg,
             "cascade_type": cascade_type_arg if is_cascading_arg else None,
