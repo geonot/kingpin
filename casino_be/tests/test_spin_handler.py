@@ -3,10 +3,10 @@ from unittest.mock import patch, MagicMock, call
 import secrets # To mock choices if needed
 import json # Added for json.dumps in helper
 
-from casino_be.app import create_app, db
+from casino_be.app import app, db
 from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction
 from casino_be.utils.spin_handler import handle_spin # Target function
-from casino_be.utils.slot_builder import SLOT_CONFIG_BASE_PATH # To see where load_game_config looks
+# from casino_be.utils.slot_builder import SLOT_CONFIG_BASE_PATH # To see where load_game_config looks - Removed as it does not exist
 
 # Default configuration values that can be overridden by specific tests
 BASE_GAME_CONFIG = {
@@ -39,7 +39,8 @@ BASE_GAME_CONFIG = {
 
 class TestSpinHandler(unittest.TestCase):
     def setUp(self):
-        self.app = create_app(config_name='testing')
+        self.app = app
+        # self.app.config.update(TESTING=True) # Ensure testing config if not already set by env vars
         self.app_context = self.app.app_context()
         self.app_context.push()
         db.create_all()
@@ -54,6 +55,8 @@ class TestSpinHandler(unittest.TestCase):
             short_name="test_slot1", # Must match what load_game_config expects
             num_rows=3,
             num_columns=5,
+            num_symbols=11, # Added default based on typical config
+            asset_directory="/test_assets/", # Added missing non-nullable field
             is_active=True,
             rtp=95.0,
             volatility="Medium",

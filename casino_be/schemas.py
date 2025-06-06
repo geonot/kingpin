@@ -42,7 +42,7 @@ class UserSchema(SQLAlchemyAutoSchema):
         model = User
         load_instance = True
         sqla_session = db.session
-        exclude = ("password", "deposit_wallet_private_key") # Exclude sensitive fields
+        exclude = ("password",) # Exclude sensitive fields. deposit_wallet_private_key is not a model field.
 
     id = auto_field(dump_only=True)
     username = auto_field()
@@ -63,7 +63,7 @@ class UserSchema(SQLAlchemyAutoSchema):
 class AdminUserSchema(UserSchema):
      # Schema for admin viewing user details (includes potentially more info)
     class Meta(UserSchema.Meta):
-        exclude = ("password", "deposit_wallet_private_key") # Still exclude sensitive fields
+        exclude = ("password",) # Still exclude sensitive fields. deposit_wallet_private_key is not a model field.
 
     # Include relationships explicitly if needed
     transactions = fields.Nested('TransactionSchema', many=True, dump_only=True)
@@ -556,9 +556,9 @@ class BaccaratHandSchema(SQLAlchemyAutoSchema):
 
 class PlaceBaccaratBetSchema(Schema):
     table_id = fields.Int(required=True, validate=Range(min=1))
-    bet_on_player = fields.Int(required=False, missing=0, validate=Range(min=0))
-    bet_on_banker = fields.Int(required=False, missing=0, validate=Range(min=0))
-    bet_on_tie = fields.Int(required=False, missing=0, validate=Range(min=0))
+    bet_on_player = fields.Int(required=False, load_default=0, validate=Range(min=0))
+    bet_on_banker = fields.Int(required=False, load_default=0, validate=Range(min=0))
+    bet_on_tie = fields.Int(required=False, load_default=0, validate=Range(min=0))
 
     @validates_schema
     def validate_bets(self, data, **kwargs):

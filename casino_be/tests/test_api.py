@@ -66,7 +66,7 @@ class BaseTestCase(unittest.TestCase):
             db.session.refresh(user)
         return user
 
-    def _create_bonus_code(self, code_id="TESTCODE", type="deposit", subtype="percentage", amount=10.0, amount_sats=None, wagering_multiplier=30, uses_remaining=100, is_active=True):
+    def _create_bonus_code(self, code_id="TESTCODE", type="deposit", subtype="percentage", amount=10.0, amount_sats=None, uses_remaining=100, is_active=True, **kwargs): # Added **kwargs to accept extra params
         with self.app.app_context():
             bonus_code = BonusCode(
                 code_id=code_id,
@@ -74,7 +74,6 @@ class BaseTestCase(unittest.TestCase):
                 subtype=subtype,
                 amount=amount,
                 amount_sats=amount_sats,
-                wagering_requirement_multiplier=wagering_multiplier,
                 uses_remaining=uses_remaining,
                 is_active=is_active,
                 expires_at=datetime.now(timezone.utc) + timedelta(days=30)
@@ -237,6 +236,9 @@ class GameApiTests(BaseTestCase):
                 num_rows=rows,
                 num_columns=reels,
                 num_symbols=4, # Example, adjust if needed
+                    asset_directory="/test_assets/", # Added asset_directory
+                    rtp=95.0, # Added rtp
+                    volatility="medium", # Added volatility as it's also likely required
                 # wild_symbol_id, scatter_symbol_id can be set later if needed
             )
             db.session.add(slot)

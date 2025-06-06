@@ -1,10 +1,17 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from casino_be.utils.poker_helper import _validate_bet, _calculate_pot_limit_raise_sizes
 from casino_be.models import PokerPlayerState, PokerTable # Only need these, not full db setup
+from casino_be.app import app # Import the app instance
 
 class TestCalculatePotLimitRaiseSizes(unittest.TestCase):
+    def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
+
+    def tearDown(self):
+        self.app_context.pop()
 
     def test_basic_pot_limit_raise_scenario(self):
         # Player stack: 1000, Player invested this street: 50 (call previous bet)
@@ -101,10 +108,15 @@ class TestCalculatePotLimitRaiseSizes(unittest.TestCase):
 
 class TestValidateBet(unittest.TestCase):
     def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
         self.mock_player_state = MagicMock(spec=PokerPlayerState)
         self.mock_poker_table = MagicMock(spec=PokerTable)
         self.mock_poker_table.big_blind = 20
         self.mock_poker_table.small_blind = 10
+
+    def tearDown(self):
+        self.app_context.pop()
 
     # No Limit Tests
     def test_nl_valid_opening_bet(self):

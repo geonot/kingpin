@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 import json
 import secrets # To mock choices if needed for future cascade tests in multiway
 
-from casino_be.app import create_app, db
+from casino_be.app import app, db
 from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction
 from casino_be.utils.multiway_helper import handle_multiway_spin # Target function
 
@@ -46,7 +46,8 @@ BASE_MULTIWAY_GAME_CONFIG = {
 
 class TestMultiwaySpinHandler(unittest.TestCase):
     def setUp(self):
-        self.app = create_app(config_name='testing')
+        self.app = app
+        # self.app.config.update(TESTING=True) # Ensure testing config if not already set by env vars
         self.app_context = self.app.app_context()
         self.app_context.push()
         db.create_all()
@@ -61,6 +62,8 @@ class TestMultiwaySpinHandler(unittest.TestCase):
             short_name="test_multiway1",
             num_rows=3, # Max rows
             num_columns=5, # Num reels
+            num_symbols=11, # Added default based on config
+            asset_directory="/test_assets/", # Added missing non-nullable field
             is_active=True,
             rtp=95.0,
             volatility="High",
@@ -68,6 +71,17 @@ class TestMultiwaySpinHandler(unittest.TestCase):
             reel_configurations={"possible_counts_per_reel": [[3],[3],[3],[3],[3]]} # Default, can be overridden
         )
         db.session.add(self.slot)
+        # Create SlotSymbol instances based on BASE_MULTIWAY_GAME_CONFIG
+        for symbol_data in BASE_MULTIWAY_GAME_CONFIG['game']['symbols']:
+            slot_symbol = SlotSymbol(
+                slot_id=self.slot.id,
+                symbol_internal_id=symbol_data['id'],
+                name=symbol_data['name'],
+                img_link=symbol_data['asset'], # Assuming 'asset' is the img_link
+                value_multiplier=0.0, # Default, as payouts are in ways_payouts/scatter_payouts
+                data=symbol_data # Store whole symbol config in data if needed
+            )
+            db.session.add(slot_symbol)
         db.session.commit()
 
         self.game_session = GameSession(user_id=self.user.id, slot_id=self.slot.id, game_type='slot')
