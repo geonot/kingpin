@@ -17,372 +17,197 @@
         "id": 1,
         "icon": "/ancient_pyramids/sprite_0.png",
         "value": 1.0,
-        "name": "Low Symbol 1"
+        "name": "Low Symbol 1",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 1.0,
+          "4": 3.0,
+          "5": 5.0
+        },
+        "weight": 10.0
       },
       {
         "id": 2,
         "icon": "/ancient_pyramids/sprite_1.png",
         "value": 1.5,
-        "name": "Low Symbol 2"
+        "name": "Low Symbol 2",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 1.5,
+          "4": 4.5,
+          "5": 7.5
+        },
+        "weight": 10.0
       },
       {
         "id": 3,
         "icon": "/ancient_pyramids/sprite_2.png",
         "value": 2.0,
-        "name": "Low Symbol 3"
+        "name": "Low Symbol 3",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 2.0,
+          "4": 6.0,
+          "5": 10.0
+        },
+        "weight": 10.0
       },
       {
         "id": 4,
         "icon": "/ancient_pyramids/sprite_3.png",
         "value": 3.0,
-        "name": "Mid Symbol 1"
+        "name": "Mid Symbol 1",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 3.0,
+          "4": 9.0,
+          "5": 15.0
+        },
+        "weight": 5.0
       },
       {
         "id": 5,
         "icon": "/ancient_pyramids/sprite_4.png",
         "value": 4.0,
-        "name": "Mid Symbol 2"
+        "name": "Mid Symbol 2",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 4.0,
+          "4": 12.0,
+          "5": 20.0
+        },
+        "weight": 5.0
       },
       {
         "id": 6,
         "icon": "/ancient_pyramids/sprite_5.png",
         "value": 5.0,
-        "name": "Mid Symbol 3"
+        "name": "Mid Symbol 3",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 5.0,
+          "4": 15.0,
+          "5": 25.0
+        },
+        "weight": 5.0
       },
       {
         "id": 7,
         "icon": "/ancient_pyramids/sprite_6.png",
         "value": 10.0,
-        "name": "High Symbol 1"
+        "name": "High Symbol 1",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 10.0,
+          "4": 30.0,
+          "5": 50.0
+        },
+        "weight": 2.0
       },
       {
         "id": 8,
         "icon": "/ancient_pyramids/sprite_7.png",
         "value": 20.0,
-        "name": "High Symbol 2"
+        "name": "High Symbol 2",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "value_multipliers": {
+          "3": 20.0,
+          "4": 60.0,
+          "5": 100.0
+        },
+        "weight": 2.0
       },
       {
         "id": 9,
         "icon": "/ancient_pyramids/sprite_8.png",
         "value": null,
-        "name": "Scatter"
+        "name": "Scatter",
+        "is_wild": false,
+        "is_scatter": true,
+        "is_bonus": false,
+        "scatter_payouts": {
+          "3": 5,
+          "4": 15,
+          "5": 50
+        },
+        "weight": 1.0
       },
       {
         "id": 10,
         "icon": "/ancient_pyramids/sprite_9.png",
         "value": null,
-        "name": "Bonus"
+        "name": "Bonus",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": true,
+        "weight": 1.0
       },
       {
         "id": 11,
         "icon": "/ancient_pyramids/sprite_10.png",
         "value": null,
-        "name": "Wild"
+        "name": "Wild",
+        "is_wild": true,
+        "is_scatter": false,
+        "is_bonus": false,
+        "weight": 1.5
       }
     ],
     "paylines": [
       {
         "id": 0,
-        "coords": [
-          [
-            0,
-            0
-          ],
-          [
-            0,
-            1
-          ],
-          [
-            0,
-            2
-          ],
-          [
-            0,
-            3
-          ],
-          [
-            0,
-            4
-          ]
-        ]
+        "coords": [[0,0],[0,1],[0,2],[0,3],[0,4]]
       },
       {
         "id": 1,
-        "coords": [
-          [
-            1,
-            0
-          ],
-          [
-            1,
-            1
-          ],
-          [
-            1,
-            2
-          ],
-          [
-            1,
-            3
-          ],
-          [
-            1,
-            4
-          ]
-        ]
+        "coords": [[1,0],[1,1],[1,2],[1,3],[1,4]]
       },
       {
         "id": 2,
-        "coords": [
-          [
-            2,
-            0
-          ],
-          [
-            2,
-            1
-          ],
-          [
-            2,
-            2
-          ],
-          [
-            2,
-            3
-          ],
-          [
-            2,
-            4
-          ]
-        ]
+        "coords": [[2,0],[2,1],[2,2],[2,3],[2,4]]
       },
       {
         "id": 3,
-        "coords": [
-          [
-            0,
-            0
-          ],
-          [
-            1,
-            1
-          ],
-          [
-            2,
-            2
-          ],
-          [
-            1,
-            3
-          ],
-          [
-            0,
-            4
-          ]
-        ]
+        "coords": [[0,0],[1,1],[2,2],[1,3],[0,4]]
       },
       {
         "id": 4,
-        "coords": [
-          [
-            2,
-            0
-          ],
-          [
-            1,
-            1
-          ],
-          [
-            0,
-            2
-          ],
-          [
-            1,
-            3
-          ],
-          [
-            2,
-            4
-          ]
-        ]
-      }
-    ],
-    "payouts": [
-      {
-        "symbol_id": 1,
-        "matches": 3,
-        "multiplier": 1.0
-      },
-      {
-        "symbol_id": 1,
-        "matches": 4,
-        "multiplier": 3.0
-      },
-      {
-        "symbol_id": 1,
-        "matches": 5,
-        "multiplier": 5.0
-      },
-      {
-        "symbol_id": 2,
-        "matches": 3,
-        "multiplier": 1.5
-      },
-      {
-        "symbol_id": 2,
-        "matches": 4,
-        "multiplier": 4.5
-      },
-      {
-        "symbol_id": 2,
-        "matches": 5,
-        "multiplier": 7.5
-      },
-      {
-        "symbol_id": 3,
-        "matches": 3,
-        "multiplier": 2.0
-      },
-      {
-        "symbol_id": 3,
-        "matches": 4,
-        "multiplier": 6.0
-      },
-      {
-        "symbol_id": 3,
-        "matches": 5,
-        "multiplier": 10.0
-      },
-      {
-        "symbol_id": 4,
-        "matches": 3,
-        "multiplier": 3.0
-      },
-      {
-        "symbol_id": 4,
-        "matches": 4,
-        "multiplier": 9.0
-      },
-      {
-        "symbol_id": 4,
-        "matches": 5,
-        "multiplier": 15.0
-      },
-      {
-        "symbol_id": 5,
-        "matches": 3,
-        "multiplier": 4.0
-      },
-      {
-        "symbol_id": 5,
-        "matches": 4,
-        "multiplier": 12.0
-      },
-      {
-        "symbol_id": 5,
-        "matches": 5,
-        "multiplier": 20.0
-      },
-      {
-        "symbol_id": 6,
-        "matches": 3,
-        "multiplier": 5.0
-      },
-      {
-        "symbol_id": 6,
-        "matches": 4,
-        "multiplier": 15.0
-      },
-      {
-        "symbol_id": 6,
-        "matches": 5,
-        "multiplier": 25.0
-      },
-      {
-        "symbol_id": 7,
-        "matches": 3,
-        "multiplier": 10.0
-      },
-      {
-        "symbol_id": 7,
-        "matches": 4,
-        "multiplier": 30.0
-      },
-      {
-        "symbol_id": 7,
-        "matches": 5,
-        "multiplier": 50.0
-      },
-      {
-        "symbol_id": 8,
-        "matches": 3,
-        "multiplier": 20.0
-      },
-      {
-        "symbol_id": 8,
-        "matches": 4,
-        "multiplier": 60.0
-      },
-      {
-        "symbol_id": 8,
-        "matches": 5,
-        "multiplier": 100.0
-      },
-      {
-        "symbol_id": 9,
-        "matches": 3,
-        "multiplier": 5
-      },
-      {
-        "symbol_id": 9,
-        "matches": 4,
-        "multiplier": 15
-      },
-      {
-        "symbol_id": 9,
-        "matches": 5,
-        "multiplier": 50
+        "coords": [[2,0],[1,1],[0,2],[1,3],[2,4]]
       }
     ],
     "ui": {
       "buttons": {
-        "spin": {
-          "icon": "/ancient_pyramids/spin.png"
-        },
-        "autoSpin": {
-          "icon": "/ancient_pyramids/autospin.png"
-        },
-        "turbo": {
-          "icon": "/ancient_pyramids/turbo.png"
-        },
-        "settings": {
-          "icon": "/assets/ui/settings.png"
-        }
+        "spin": {"icon": "/ancient_pyramids/spin.png"},
+        "autoSpin": {"icon": "/ancient_pyramids/autospin.png"},
+        "turbo": {"icon": "/ancient_pyramids/turbo.png"},
+        "settings": {"icon": "/assets/ui/settings.png"}
       }
     },
     "reel": {
-      "symbolSize": {
-        "width": 100,
-        "height": 100
-      },
-      "position": {
-        "x": 150,
-        "y": 100
-      }
+      "symbolSize": {"width": 100, "height": 100},
+      "position": {"x": 150, "y": 100}
     },
-    "background": {
-      "image": "/ancient_pyramids/bg.png"
-    },
-    "bonus_background": {
-      "image": "/ancient_pyramids/bbg.png"
-    },
+    "background": {"image": "/ancient_pyramids/bg.png"},
+    "bonus_background": {"image": "/ancient_pyramids/bbg.png"},
     "animations": {
-      "spin": {
-        "duration": 800
-      },
-      "winLine": {
-        "duration": 500
-      }
+      "spin": {"duration": 800},
+      "winLine": {"duration": 500}
     },
     "bonus": {
       "triggerSymbolId": 10,
@@ -390,18 +215,9 @@
       "spinsAwarded": 10,
       "multiplier": 2.0
     },
-    "sound": {
-      "spin": "/assets/sounds/spin.wav"
-    },
+    "sound": {"spin": "/assets/sounds/spin.wav"},
     "settings": {
-      "betOptions": [
-        10,
-        20,
-        50,
-        100,
-        200,
-        500
-      ]
+      "betOptions": [10, 20, 50, 100, 200, 500]
     }
   }
 }

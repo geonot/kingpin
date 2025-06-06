@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock, call
 import secrets # To mock choices if needed
+import json # Added for json.dumps in helper
 
 from casino_be.app import create_app, db
 from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction
@@ -457,6 +458,228 @@ class TestSpinHandler(unittest.TestCase):
         self.assertEqual(slot_spin_record.current_multiplier_level, expected_multiplier_level)
         self.assertEqual(slot_spin_record.spin_result, initial_grid_multi)
 
+
+    # ---- New Cluster Pays with Wilds Tests ----
+
+    def helper_configure_cluster_game(self, min_match, cluster_payouts_sym1, cluster_payouts_sym2=None,
+                                      is_cascading=False, cascade_type=None, win_multipliers=None):
+        """Helper to configure game for cluster tests."""
+        symbols = [
+            {"id": 1, "name": "SymbolA", "asset": "symA.png", "cluster_payouts": cluster_payouts_sym1, "weight": 10.0},
+            {"id": 2, "name": "SymbolB", "asset": "symB.png", "cluster_payouts": cluster_payouts_sym2 if cluster_payouts_sym2 else {}, "weight": 20.0},
+            {"id": 3, "name": "SymbolC", "asset": "symC.png", "weight": 30.0}, # Non-cluster symbol for variety
+            {"id": 4, "name": "Scatter", "asset": "scatter.png", "scatter_payouts": {"3": 5}, "weight": 5.0}, # SCATTER_SYMBOL_ID
+            {"id": 5, "name": "Wild", "asset": "wild.png", "weight": 3.0} # WILD_SYMBOL_ID
+        ]
+
+        current_config = {
+            "game": {
+                "slot_id": self.slot.id,
+                "name": "Cluster Test Slot",
+                "short_name": self.slot.short_name,
+                "layout": {"rows": 3, "columns": 5}, # Adjust if tests need different grid sizes
+                "symbols": symbols,
+                "paylines": [], # Focus on cluster wins
+                "wild_symbol_id": 5,
+                "scatter_symbol_id": 4,
+                "min_symbols_to_match": min_match,
+                "is_cascading": is_cascading,
+                "cascade_type": cascade_type if is_cascading else None,
+                "win_multipliers": win_multipliers if is_cascading else [],
+                "bonus_features": {},
+                "reel": {"symbolSize": { "width": 100, "height": 100 }}
+            }
+        }
+        self.mock_load_config.return_value = current_config
+        self.slot.is_cascading = is_cascading
+        self.slot.cascade_type = cascade_type
+        self.slot.min_symbols_to_match = min_match
+        # Ensure win_multipliers is stored as a JSON string in the model if that's how it's expected
+        self.slot.win_multipliers = json.dumps(win_multipliers) if win_multipliers else "[]"
+        db.session.commit()
+
+
+    def test_cluster_win_no_wilds_no_cascade(self):
+        min_match = 4
+        payouts_sym1 = {"4": 10.0} # 10x for 4 SymbolA
+        self.helper_configure_cluster_game(min_match=min_match, cluster_payouts_sym1=payouts_sym1)
+
+        # Grid: 4 SymbolA (id=1)
+        test_grid = [
+            [1, 1, 2, 3, 2],
+            [1, 1, 3, 2, 3],
+            [3, 2, 3, 4, 5]
+        ]
+        self.mock_generate_grid.return_value = test_grid
+        bet_amount = 100
+        expected_win = 100 * 10.0 # 1000
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+        self.assertEqual(result['win_amount_sats'], expected_win)
+        self.assertTrue(any(wl['type'] == 'cluster' and wl['symbol_id'] == 1 and wl['count'] == 4 for wl in result['winning_lines']))
+
+    def test_cluster_win_one_wild_no_cascade(self):
+        min_match = 5
+        payouts_sym1 = {"5": 15.0} # 15x for 5 SymbolA
+        self.helper_configure_cluster_game(min_match=min_match, cluster_payouts_sym1=payouts_sym1)
+
+        # Grid: 4 SymbolA (id=1), 1 Wild (id=5)
+        test_grid = [
+            [1, 1, 2, 3, 2],
+            [1, 1, 3, 2, 3],
+            [5, 2, 3, 4, 3] # Wild at (2,0)
+        ]
+        self.mock_generate_grid.return_value = test_grid
+        bet_amount = 100
+        expected_win = 100 * 15.0 # 1500
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+        self.assertEqual(result['win_amount_sats'], expected_win)
+        winning_line_info = next((wl for wl in result['winning_lines'] if wl['type'] == 'cluster' and wl['symbol_id'] == 1), None)
+        self.assertIsNotNone(winning_line_info)
+        self.assertEqual(winning_line_info['count'], 5) # Effective count
+        # Check if wild position is included
+        self.assertTrue(any(pos == [2,0] for pos in winning_line_info['positions']))
+        # Check if SymbolA positions are included
+        self.assertTrue(any(pos == [0,0] for pos in winning_line_info['positions']))
+
+    def test_cluster_win_multiple_wilds_no_cascade(self):
+        min_match = 5
+        payouts_sym1 = {"5": 15.0}
+        self.helper_configure_cluster_game(min_match=min_match, cluster_payouts_sym1=payouts_sym1)
+
+        # Grid: 3 SymbolA (id=1), 2 Wilds (id=5)
+        test_grid = [
+            [1, 1, 2, 3, 5], # Wild at (0,4)
+            [1, 5, 3, 2, 3], # Wild at (1,1)
+            [3, 2, 3, 4, 3]
+        ]
+        self.mock_generate_grid.return_value = test_grid
+        bet_amount = 100
+        expected_win = 100 * 15.0 # 1500
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+        self.assertEqual(result['win_amount_sats'], expected_win)
+        winning_line_info = next((wl for wl in result['winning_lines'] if wl['type'] == 'cluster' and wl['symbol_id'] == 1), None)
+        self.assertIsNotNone(winning_line_info)
+        self.assertEqual(winning_line_info['count'], 5)
+        self.assertTrue(any(pos == [0,4] for pos in winning_line_info['positions']))
+        self.assertTrue(any(pos == [1,1] for pos in winning_line_info['positions']))
+
+    def test_cluster_win_wilds_contribute_to_multiple_types_no_cascade(self):
+        min_match = 5
+        payouts_sym1 = {"5": 10.0} # 10x for 5 SymbolA
+        payouts_sym2 = {"5": 20.0} # 20x for 5 SymbolB
+        self.helper_configure_cluster_game(min_match=min_match, cluster_payouts_sym1=payouts_sym1, cluster_payouts_sym2=payouts_sym2)
+
+        # Grid: 4 SymbolA (id=1), 4 SymbolB (id=2), 1 Wild (id=5)
+        test_grid = [
+            [1, 1, 1, 1, 2],
+            [2, 2, 2, 2, 3],
+            [5, 3, 3, 4, 3] # Wild at (2,0)
+        ]
+        self.mock_generate_grid.return_value = test_grid
+        bet_amount = 100
+        expected_win_sym1 = 100 * 10.0 # 1000
+        expected_win_sym2 = 100 * 20.0 # 2000
+        expected_total_win = expected_win_sym1 + expected_win_sym2 # 3000
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+        self.assertEqual(result['win_amount_sats'], expected_total_win)
+
+        win_for_sym1 = next((wl for wl in result['winning_lines'] if wl['symbol_id'] == 1 and wl['type'] == 'cluster'), None)
+        win_for_sym2 = next((wl for wl in result['winning_lines'] if wl['symbol_id'] == 2 and wl['type'] == 'cluster'), None)
+
+        self.assertIsNotNone(win_for_sym1)
+        self.assertEqual(win_for_sym1['count'], 5)
+        self.assertEqual(win_for_sym1['win_amount_sats'], expected_win_sym1)
+        self.assertTrue(any(pos == [2,0] for pos in win_for_sym1['positions'])) # Wild included
+
+        self.assertIsNotNone(win_for_sym2)
+        self.assertEqual(win_for_sym2['count'], 5)
+        self.assertEqual(win_for_sym2['win_amount_sats'], expected_win_sym2)
+        self.assertTrue(any(pos == [2,0] for pos in win_for_sym2['positions'])) # Wild included
+
+    def test_cluster_no_win_insufficient_symbols_with_wilds(self):
+        min_match = 5
+        payouts_sym1 = {"5": 10.0}
+        self.helper_configure_cluster_game(min_match=min_match, cluster_payouts_sym1=payouts_sym1)
+
+        # Grid: 1 SymbolA (id=1), 3 Wilds (id=5). Total effective = 4. min_match = 5.
+        test_grid = [
+            [1, 5, 2, 3, 5],
+            [3, 5, 3, 2, 3],
+            [4, 2, 3, 4, 3]
+        ]
+        self.mock_generate_grid.return_value = test_grid
+        bet_amount = 100
+        expected_win = 0
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+        self.assertEqual(result['win_amount_sats'], expected_win)
+
+    def test_cluster_win_with_wilds_and_cascade(self):
+        min_match = 4
+        payouts_sym1 = {"4": 10.0} # 10x for 4 SymbolA
+        self.helper_configure_cluster_game(min_match=min_match, cluster_payouts_sym1=payouts_sym1,
+                                           is_cascading=True, cascade_type="fall_from_top", win_multipliers=[2.0])
+
+        # Grid: 3 SymbolA (id=1), 1 Wild (id=5) at (0,0)
+        # Winning symbols are (0,0)W, (0,1)A, (1,0)A, (1,1)A
+        initial_grid = [
+            [5, 1, 2, 3, 4], # Wild, SymbolA
+            [1, 1, 3, 2, 3], # SymbolA, SymbolA
+            [2, 3, 4, 5, 1]
+        ]
+        self.mock_generate_grid.return_value = initial_grid
+
+        # Mock cascade fill: assume 4 new non-winning symbols (e.g., id 3)
+        # This needs to provide enough side_effects for all symbols that are filled.
+        # If 4 symbols are removed, and cascade is fall_from_top, it's complex.
+        # Let's simplify: assume mock_choices is called once per empty cell to be filled from top.
+        # (0,0), (0,1), (1,0), (1,1) are removed.
+        # Col 0: (0,0) removed. (1,0) removed. (2,0) is 2.
+        # After fall: grid[2,0] becomes 2. grid[1,0] needs fill. grid[0,0] needs fill.
+        # Col 1: (0,1) removed. (1,1) removed. (2,1) is 3.
+        # After fall: grid[2,1] becomes 3. grid[1,1] needs fill. grid[0,1] needs fill.
+        # So, 4 fills are needed for the top two rows in cols 0 and 1.
+        self.mock_choices.side_effect = [
+            [[3]], [[3]], # For (0,0), (1,0)
+            [[3]], [[3]]  # For (0,1), (1,1)
+        ]
+
+        bet_amount = 100
+        initial_balance = self.user.balance
+        expected_win_initial = 100 * 10.0 # 1000 (no cascade multiplier on initial win)
+        # Assume no further wins from cascade for simplicity in this test.
+        expected_total_win = expected_win_initial
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+
+        self.assertEqual(result['win_amount_sats'], expected_total_win)
+        self.assertEqual(self.user.balance, initial_balance - bet_amount + expected_total_win)
+
+        winning_line_info = next((wl for wl in result['winning_lines'] if wl['type'] == 'cluster' and wl['symbol_id'] == 1), None)
+        self.assertIsNotNone(winning_line_info)
+        self.assertEqual(winning_line_info['count'], 4) # 3xA + 1xW
+
+        # Check that the SlotSpin record reflects the initial grid and total win
+        slot_spin_record = SlotSpin.query.filter_by(game_session_id=self.game_session.id).first()
+        self.assertIsNotNone(slot_spin_record)
+        self.assertEqual(slot_spin_record.win_amount, expected_total_win)
+        self.assertEqual(slot_spin_record.spin_result, initial_grid) # spin_result should be initial grid
+        self.assertEqual(slot_spin_record.current_multiplier_level, 0) # Since only initial win, no *successful* cascade win.
+
+        # Check transactions
+        transactions = Transaction.query.order_by(Transaction.id.asc()).all()
+        self.assertEqual(len(transactions), 2) # Wager and Win
+        self.assertEqual(transactions[0].amount, -bet_amount)
+        self.assertEqual(transactions[1].amount, expected_total_win)
+
+    # TODO: Add more complex cascade tests involving wilds, e.g.,
+    # - Wilds contribute to an initial cluster, are removed.
+    # - New symbols fall, and remaining/new wilds contribute to a *new* cluster win (possibly different symbol type).
+    # - This would involve more complex mocking of `self.mock_choices.side_effect`.
 
 if __name__ == '__main__':
     unittest.main()
