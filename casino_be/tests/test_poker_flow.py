@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 from casino_be.utils.poker_helper import _check_betting_round_completion, _advance_to_next_street, POKER_ACTION_TIMEOUT_SECONDS
 from casino_be.models import User, PokerTable, PokerHand, PokerPlayerState, Transaction, db # Import db for session spec
+from casino_be.app import app as flask_app # Import the app instance
 
 # Helper to create a mock session
 def create_mock_session():
@@ -17,6 +18,8 @@ def create_mock_session():
 
 class TestAdvanceToNextStreet(unittest.TestCase):
     def setUp(self):
+        self.app_context = flask_app.app_context()
+        self.app_context.push()
         self.mock_db_session = create_mock_session()
         # Patch db.session for all tests in this class that use poker_helper functions
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
@@ -38,32 +41,45 @@ class TestAdvanceToNextStreet(unittest.TestCase):
 
     def tearDown(self):
         self.db_session_patch.stop()
+        self.app_context.pop()
 
     @patch('casino_be.utils.poker_helper.deal_community_cards')
     def test_advance_from_preflop_to_flop(self, mock_deal_community_cards):
-        poker_hand = PokerHand(
-            id=self.hand_id, table_id=self.table_id, board_cards=[], deck_state=["AS", "KS", "QS", "JS", "TS"],
-            status='preflop', hand_history=[], player_street_investments={'some_val': 1}, # Should be cleared
-            current_bet_to_match=100, last_raiser_user_id=self.user_id_1, min_next_raise_amount=100 # Should be reset
+        # This is the PokerHand instance that the test logic will use and expect to be modified.
+        poker_hand_instance_for_test = PokerHand(
+            id=self.hand_id, table_id=self.table_id, board_cards=[], deck_state=["AS", "KS", "QS", "JS", "TS", "9S", "8S"], # Ensure enough cards
+            status='preflop', hand_history=[], player_street_investments={'some_val': 1},
+            current_bet_to_match=100, last_raiser_user_id=self.user_id_1, min_next_raise_amount=100
         )
-        poker_hand.table = self.mock_poker_table # Associate table
-        self.mock_db_session.query(PokerHand).options.return_value.get.return_value = poker_hand
+        poker_hand_instance_for_test.table = self.mock_poker_table
+        self.mock_db_session.query(PokerHand).options.return_value.get.return_value = poker_hand_instance_for_test
 
-        mock_deal_community_cards.return_value = ["AH", "KH", "QH"] # Flop cards
+        # Configure the mock to simulate the side effect of dealing cards
+        flop_cards = ["AH", "KH", "QH"]
+        def deal_cards_side_effect(ph_obj, street_name):
+            if street_name == 'flop':
+                if ph_obj.board_cards is None: ph_obj.board_cards = []
+                ph_obj.board_cards.extend(flop_cards)
+                # Simulate deck reduction if necessary for other assertions, though deck_state is on ph_obj
+                # For this test, the main thing is that board_cards gets populated.
+                # ph_obj.deck_state = ph_obj.deck_state[len(flop_cards):] # Simplified deck reduction
+            return flop_cards # The mock should still return the cards dealt
+
+        mock_deal_community_cards.side_effect = deal_cards_side_effect
 
         result = _advance_to_next_street(self.hand_id, self.mock_db_session_instance)
 
         self.assertEqual(result['status'], 'advanced_to_flop')
-        self.assertEqual(poker_hand.status, 'flop')
-        mock_deal_community_cards.assert_called_once_with(poker_hand, 'flop')
-        self.assertEqual(len(poker_hand.board_cards), 3)
-        self.assertEqual(poker_hand.current_bet_to_match, 0)
-        self.assertEqual(poker_hand.min_next_raise_amount, self.mock_poker_table.big_blind)
-        self.assertIsNone(poker_hand.last_raiser_user_id)
-        self.assertEqual(poker_hand.player_street_investments, {})
-        self.assertIsNotNone(poker_hand.current_turn_user_id) # Should be player left of dealer
+        self.assertEqual(poker_hand_instance_for_test.status, 'flop') # Check the instance used in test
+        mock_deal_community_cards.assert_called_once_with(poker_hand_instance_for_test, 'flop')
+        self.assertEqual(len(poker_hand_instance_for_test.board_cards), 3) # Check the instance used in test
+        self.assertEqual(poker_hand_instance_for_test.current_bet_to_match, 0)
+        self.assertEqual(poker_hand_instance_for_test.min_next_raise_amount, self.mock_poker_table.big_blind)
+        self.assertIsNone(poker_hand_instance_for_test.last_raiser_user_id)
+        self.assertEqual(poker_hand_instance_for_test.player_street_investments, {})
+        self.assertIsNotNone(poker_hand_instance_for_test.current_turn_user_id) # Should be player left of dealer
         # Player 1 is seat 1, Player 2 is seat 2, Player 3 (dealer) is seat 3. Player 1 is first to act.
-        self.assertEqual(poker_hand.current_turn_user_id, self.player_state1.user_id)
+        self.assertEqual(poker_hand_instance_for_test.current_turn_user_id, self.player_state1.user_id)
         self.assertIsNotNone(self.player_state1.time_to_act_ends)
 
 
@@ -85,6 +101,8 @@ class TestAdvanceToNextStreet(unittest.TestCase):
 
 class TestCheckBettingRoundCompletion(unittest.TestCase):
     def setUp(self):
+        self.app_context = flask_app.app_context()
+        self.app_context.push()
         self.mock_db_session = create_mock_session()
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
         self.mock_db_session_instance = self.db_session_patch.start()
@@ -102,7 +120,8 @@ class TestCheckBettingRoundCompletion(unittest.TestCase):
         self.mock_poker_hand = PokerHand(
             id=self.hand_id, table_id=self.table_id, status='flop', pot_size_sats=300,
             current_bet_to_match=100, player_street_investments={}, hand_history=[],
-            last_raiser_user_id=None, current_turn_user_id=self.user_id_1
+            last_raiser_user_id=None, current_turn_user_id=self.user_id_1,
+            deck_state=["AS", "KS", "QS", "JS", "TS", "9S", "8S", "7S", "6S", "5S"] # Initialize deck_state
         )
         self.mock_poker_hand.table = self.mock_poker_table
         self.mock_db_session.query(PokerHand).options.return_value.get.return_value = self.mock_poker_hand
@@ -116,6 +135,7 @@ class TestCheckBettingRoundCompletion(unittest.TestCase):
 
     def tearDown(self):
         self.db_session_patch.stop()
+        self.app_context.pop()
 
     def test_hand_ends_by_folds(self):
         self.p2_state.is_active_in_hand = False # P2 folded

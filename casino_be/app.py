@@ -76,12 +76,16 @@ app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Co
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"],
     # storage_uri will be set via app.config later if needed
 )
 if not app.config.get('RATELIMIT_STORAGE_URI'):
     app.config['RATELIMIT_STORAGE_URI'] = 'memory://' # Default if not in Config
+
+# Disable rate limiting for tests
+if app.config.get("TESTING"):
+    limiter.enabled = False
+
 limiter.init_app(app)
 
 # --- Database Setup ---

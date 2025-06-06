@@ -145,7 +145,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
                 transaction_type='wager', # Ensure this matches model's transaction_type column name
                 details={'slot_name': slot.name, 'session_id': game_session.id}, # Using details field
                 # description=f'Slot wager: {slot.name}', # Old description field
-                game_session_id=game_session.id # Retaining for now, but primary link will be slot_spin_id
+                    # game_session_id removed
             )
             db.session.add(wager_tx)
             # game_session.transactions.append(wager_tx) # Add to session if relationship is set up
@@ -340,8 +340,8 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
                     'initial_win': initial_raw_win_sats,
                     'total_cascade_win_multiplied': total_win_for_entire_spin_sequence - initial_raw_win_sats,
                     'bonus_spin_multiplier_applied': current_spin_multiplier if is_bonus_spin else 1.0
-                },
-                game_session_id=game_session.id
+                    }
+                    # game_session_id removed
             )
             db.session.add(win_tx)
             # game_session.transactions.append(win_tx) # If using relationship for this

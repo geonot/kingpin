@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 # Assuming casino_be.utils.poker_helper and casino_be.models are accessible
 # Adjust imports based on actual project structure if using relative imports from test location
+from casino_be.app import app # Import the Flask app instance
 from casino_be.utils.poker_helper import handle_fold, handle_check, handle_call, handle_bet, handle_raise
 from casino_be.models import User, PokerTable, PokerHand, PokerPlayerState, Transaction, db
 
@@ -20,6 +21,10 @@ def create_mock_session():
 class TestHandleFold(unittest.TestCase):
 
     def setUp(self):
+        self.app_context = app.app_context() # Create app context
+        self.app_context.push() # Push app context
+        db.create_all() # Create tables in in-memory DB
+
         self.mock_db_session = create_mock_session()
         # Patch db.session for all tests in this class that use poker_helper functions
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
@@ -50,6 +55,9 @@ class TestHandleFold(unittest.TestCase):
 
     def tearDown(self):
         self.db_session_patch.stop()
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop() # Pop app context
 
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     def test_handle_fold_success(self, mock_check_betting_completion):
@@ -121,6 +129,10 @@ class TestHandleFold(unittest.TestCase):
 
 class TestHandleCheck(unittest.TestCase):
     def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
+        db.create_all()
+
         self.mock_db_session = create_mock_session()
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
         self.mock_db_session_instance = self.db_session_patch.start()
@@ -150,6 +162,9 @@ class TestHandleCheck(unittest.TestCase):
 
     def tearDown(self):
         self.db_session_patch.stop()
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
 
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     def test_handle_check_success_no_bet_to_match(self, mock_check_betting_completion):
@@ -225,6 +240,10 @@ class TestHandleCheck(unittest.TestCase):
 
 class TestHandleCall(unittest.TestCase):
     def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
+        db.create_all()
+
         self.mock_db_session = create_mock_session()
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
         self.mock_db_session_instance = self.db_session_patch.start()
@@ -261,6 +280,9 @@ class TestHandleCall(unittest.TestCase):
 
     def tearDown(self):
         self.db_session_patch.stop()
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
 
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     @patch('casino_be.utils.poker_helper.Transaction') # Mock the Transaction class
@@ -352,6 +374,10 @@ class TestHandleCall(unittest.TestCase):
 
 class TestHandleBet(unittest.TestCase):
     def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
+        db.create_all()
+
         self.mock_db_session = create_mock_session()
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
         self.mock_db_session_instance = self.db_session_patch.start()
@@ -381,6 +407,9 @@ class TestHandleBet(unittest.TestCase):
 
     def tearDown(self):
         self.db_session_patch.stop()
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
 
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     @patch('casino_be.utils.poker_helper._validate_bet') # Mock _validate_bet
@@ -465,6 +494,10 @@ class TestHandleBet(unittest.TestCase):
 
 class TestHandleRaise(unittest.TestCase):
     def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
+        db.create_all()
+
         self.mock_db_session = create_mock_session()
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
         self.mock_db_session_instance = self.db_session_patch.start()
@@ -494,6 +527,9 @@ class TestHandleRaise(unittest.TestCase):
 
     def tearDown(self):
         self.db_session_patch.stop()
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
 
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     @patch('casino_be.utils.poker_helper._validate_bet') # Mock _validate_bet

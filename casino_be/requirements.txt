@@ -14,3 +14,5 @@ Flask-Limiter==3.5.0 # For rate limiting
 treys==0.1.8
 psycopg2-binary # For PostgreSQL connection
 python-json-logger
+coverage
+pytest-cov

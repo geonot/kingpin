@@ -440,8 +440,7 @@ def handle_multiway_spin(user: User, slot: db.Model, game_session: GameSession, 
                 user_id=user.id,
                 amount=-bet_amount_sats,
                 transaction_type='wager',
-                details={'slot_name': slot.name, 'session_id': game_session.id, 'spin_type': 'multiway'},
-                game_session_id=game_session.id
+                details={'slot_name': slot.name, 'session_id': game_session.id, 'spin_type': 'multiway'}
             )
             db.session.add(wager_tx)
 
@@ -521,8 +520,7 @@ def handle_multiway_spin(user: User, slot: db.Model, game_session: GameSession, 
                 user_id=user.id,
                 amount=win_amount_sats,
                 transaction_type='win',
-                details={'slot_name': slot.name, 'session_id': game_session.id, 'spin_type': 'multiway'},
-                game_session_id=game_session.id
+                details={'slot_name': slot.name, 'session_id': game_session.id, 'spin_type': 'multiway'}
             )
             db.session.add(win_tx)
 

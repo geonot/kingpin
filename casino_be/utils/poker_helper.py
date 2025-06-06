@@ -1832,10 +1832,8 @@ def _advance_to_next_street(hand_id: int, session: Session) -> dict:
               or an error dictionary.
     """
     poker_hand = session.query(PokerHand).options(
-        joinedload(PokerHand.table).joinedload(PokerTable.player_states).joinedload(PokerPlayerState.user), # Load table and all player states
-        joinedload(PokerHand.player_states_in_hand) # Assuming a relationship 'player_states_in_hand' for active players
-                                                   # If not, query PokerPlayerState separately based on hand_id (more complex)
-                                                   # For now, we'll use poker_hand.table.player_states and filter.
+            joinedload(PokerHand.table).joinedload(PokerTable.player_states).joinedload(PokerPlayerState.user) # Load table and all player states
+            # removed: joinedload(PokerHand.player_states_in_hand)
     ).get(hand_id)
 
     if not poker_hand:
@@ -2096,52 +2094,79 @@ def _check_betting_round_completion(hand_id: int, last_actor_user_id: int, sessi
 
     # More precise: players who are active, have chips, and have not yet matched the current_bet
     players_who_must_act = []
-    for ps in active_players_still_in_hand: # Iterate in seat order to be fair
-        is_all_in_for_less = (ps.stack_sats == 0 and player_investments.get(str(ps.user_id), 0) < current_bet)
-        if ps.stack_sats > 0 and player_investments.get(str(ps.user_id), 0) < current_bet and not is_all_in_for_less:
-            players_who_must_act.append(ps)
+    if current_bet > 0: # There is an outstanding bet
+        for ps in active_players_still_in_hand:
+            is_all_in_for_less = (ps.stack_sats == 0 and player_investments.get(str(ps.user_id), 0) < current_bet)
+            if ps.stack_sats > 0 and player_investments.get(str(ps.user_id), 0) < current_bet and not is_all_in_for_less:
+                players_who_must_act.append(ps)
+    else: # current_bet == 0 (checking round, or option to check for BB)
+        if poker_hand.last_raiser_user_id is None: # No bet made yet this street
+            # Players who haven't acted yet (or whose action isn't "final" for a checking round)
+            # This logic aims to keep the round going if players are yet to check.
+            action_closed = True # Assume action is closed until a player is found who must act
+
+            # Determine who would be "first to act" in this round normally to check if action has completed a full circle.
+            # This is a simplified proxy for complex "action closed" logic.
+            # For now, if current_bet is 0 and no raiser, any active player with chips
+            # who isn't the one that just acted is considered to be "pending action".
+            if len(active_players_still_in_hand) > 1 : # Only relevant if multiple players
+                for ps in active_players_still_in_hand:
+                    if ps.user_id == last_actor_user_id:
+                        continue # Skip the player who just acted
+                    if ps.stack_sats > 0 : # Active and has chips
+                        # This player is pending action in a checking round.
+                        players_who_must_act.append(ps)
+                        # No need to break, add all who are pending.
+                        # The "next player to act" logic will pick the correct one.
+
+            # Special case for BB option: If only one player active (must be BB), and they check, round is over.
+            if len(active_players_still_in_hand) == 1 and active_players_still_in_hand[0].user_id == last_actor_user_id:
+                players_who_must_act = [] # BB checked, round is over.
+        # If there was a raise previously, and current_bet is now 0 (should not happen unless side pots settled weirdly),
+        # it implies all bets were matched. players_who_must_act would be empty by default.
 
     round_complete = False
-    if not players_who_must_act: # No one left who needs to call/raise the current bet
-        # This means all active players have either matched the current_bet_to_match or are all-in for less.
-        # Check if the action is closed:
-        # - If no bet was made (everyone checked), round is over.
-        # - If a bet/raise was made, action must return to the last aggressor without them re-raising.
-        # Simplified: If players_who_must_act is empty, assume action is closed for this subtask.
-        # A more robust check would involve tracking who made the last aggressive action and if the turn has passed them.
+    if not players_who_must_act: # No one left who needs to call/raise the current bet or act in a checking round
+        # This means all active players have either matched the current_bet_to_match or are all-in for less,
+        # or all players have checked in a checking round.
         round_complete = True
 
 
     if round_complete:
         # If all bettable players are all-in (or only one is not), proceed to showdown after dealing all cards
-        if len(non_all_in_bettable_players) <=1 and len(active_players_still_in_hand) > 1 :
-             # Advance all remaining streets automatically
+        if len(non_all_in_bettable_players) <= 1 and len(active_players_still_in_hand) > 1:
+            # Advance all remaining streets automatically
+            if poker_hand.board_cards is None: # Ensure board_cards is not None before len()
+                poker_hand.board_cards = []
             while poker_hand.status not in ['showdown', 'completed'] and len(poker_hand.board_cards) < 5:
                 adv_result = _advance_to_next_street(hand_id, session)
                 if "error" in adv_result: return adv_result
                 if adv_result["status"] == "showdown_reached": break
+
             # After all streets, it should be showdown
             if poker_hand.status != 'showdown': poker_hand.status = 'showdown' # Force if not set by advance
 
-            # Clear timer for the current_turn_user_id if it was set (now effectively null as it's all-in showdown)
+            # Clear timer for the current_turn_user_id if it was set
             if poker_hand.current_turn_user_id:
-                 current_turn_player_state = session.query(PokerPlayerState).filter_by(user_id=poker_hand.current_turn_user_id, table_id=poker_hand.table_id).first()
-                 if current_turn_player_state:
-                     current_turn_player_state.time_to_act_ends = None
-                     session.add(current_turn_player_state)
+                current_turn_player_state = session.query(PokerPlayerState).filter_by(user_id=poker_hand.current_turn_user_id, table_id=poker_hand.table_id).first()
+                if current_turn_player_state:
+                    current_turn_player_state.time_to_act_ends = None
+                    session.add(current_turn_player_state)
 
             poker_hand.current_turn_user_id = None # No more turns
             poker_hand.hand_history.append({"action": "all_in_proceed_to_showdown", "timestamp": datetime.now(timezone.utc).isoformat()})
             session.add(poker_hand)
-            return {"status": "all_in_showdown", "hand_id": hand_id} # Or "all_in_runout_pending_cards" if not river yet
+            return {"status": "all_in_showdown", "hand_id": hand_id}
         else: # Normal round completion, advance to next street
             # last_actor_ps timer already cleared at the start of this function.
             # _advance_to_next_street will handle setting the timer for the first player of the new street.
             adv_result = _advance_to_next_street(hand_id, session)
+            if "error" in adv_result: # Check for errors from _advance_to_next_street
+                return adv_result
             return {"status": "round_completed_advancing_street",
-                    "next_street_status": poker_hand.status,
-                    "next_to_act_user_id": poker_hand.current_turn_user_id,
-                    "board_cards": list(poker_hand.board_cards),
+                    "next_street_status": poker_hand.status, # status on poker_hand would have been updated by _advance_to_next_street
+                    "next_to_act_user_id": poker_hand.current_turn_user_id, # also updated by _advance_to_next_street
+                    "board_cards": list(adv_result.get('board_cards', [])), # Use board_cards from adv_result
                     "hand_id": hand_id}
 
     # 3. Determine Next Player to Act
