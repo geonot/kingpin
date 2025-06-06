@@ -221,6 +221,13 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
             "bonus": {"triggerSymbolId": 10, "triggerCount": 3, "spinsAwarded": 10, "multiplier": 2.0},
             "sound": { "spin": "/assets/sounds/spin.wav" }, # Simplified, use generic sounds
             "settings": {"betOptions": [10, 20, 50, 100, 200, 500]},
+            "reel_strips": [
+                [1,2,3,4,5,6,7,8,9,10,11, 1,2,3,1,4,5,1,2,3,4,5,6,7,8], # Reel 1 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 1,2,3,6,7,8,1,2,3,4,5,6,7,8], # Reel 2 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 1,2,4,5,9,10,1,2,3,4,5,6,7,8],# Reel 3 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 1,3,6,7,11,1,2,3,4,5,6,7,8],  # Reel 4 (25 symbols)
+                [1,2,3,4,5,6,7,8,9,10,11, 2,4,5,8,9,1,2,3,4,5,6,7,8]   # Reel 5 (25 symbols)
+            ],
             # Cascading features
             "is_cascading": is_cascading_arg,
             "cascade_type": cascade_type_arg if is_cascading_arg else None,
