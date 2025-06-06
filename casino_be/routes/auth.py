@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, make_response
 from flask_jwt_extended import (
     create_access_token, create_refresh_token, jwt_required,
     get_jwt_identity, get_jti, current_user
@@ -83,10 +83,20 @@ def login():
     refresh_token = create_refresh_token(identity=user)
     user_data = UserSchema().dump(user)
     current_app.logger.info(f"User logged in: {user.username} (ID: {user.id})")
-    return jsonify({
+
+    response_data = {
         'status': True, 'user': user_data,
-        'access_token': access_token, 'refresh_token': refresh_token
-    }), 200
+        'access_token': access_token
+    }
+    response = make_response(jsonify(response_data))
+    response.set_cookie(
+        'refresh_token',
+        value=refresh_token,
+        httponly=True,
+        samesite='Lax',
+        secure=not current_app.debug  # Set secure=True in production
+    )
+    return response, 200
 
 @auth_bp.route('/refresh', methods=['POST'])
 @jwt_required(refresh=True)

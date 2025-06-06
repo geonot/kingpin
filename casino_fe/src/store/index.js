@@ -5,8 +5,8 @@ import apiService from '@/services/api';
 export default createStore({
   state: {
     user: null,
-    userSession: localStorage.getItem('userSession') || null,
-    refreshToken: localStorage.getItem('refreshToken') || null,
+    accessToken: null, // Renamed from userSession, removed localStorage
+    // refreshToken is no longer stored in Vuex state or localStorage
     slots: [],
     slotsLoaded: false,
     currentSlotConfig: null,
@@ -38,26 +38,17 @@ export default createStore({
     setUser(state, userData) {
       state.user = userData;
     },
-    setAuthTokens(state, { accessToken, refreshToken }) {
-      state.userSession = accessToken;
-      state.refreshToken = refreshToken;
-      if (accessToken) {
-        localStorage.setItem('userSession', accessToken);
-      } else {
-        localStorage.removeItem('userSession');
-      }
-      if (refreshToken) {
-        localStorage.setItem('refreshToken', refreshToken);
-      } else {
-        localStorage.removeItem('refreshToken');
-      }
+    setAuthTokens(state, { accessToken }) { // refreshToken parameter removed
+      state.accessToken = accessToken;
+      // localStorage interaction for accessToken removed
+      // localStorage interaction for refreshToken removed
     },
     clearAuth(state) {
       state.user = null;
-      state.userSession = null;
-      state.refreshToken = null;
-      localStorage.removeItem('userSession');
-      localStorage.removeItem('refreshToken');
+      state.accessToken = null;
+      // refreshToken state was already removed
+      // localStorage interaction for userSession (now accessToken) removed
+      // localStorage interaction for refreshToken removed
     },
     setSlots(state, slots) {
       state.slots = slots;
@@ -126,8 +117,9 @@ export default createStore({
       try {
         const response = await apiService.register(payload); // Use apiService
         const data = response.data;
-        if (data.status && data.access_token && data.refresh_token) {
-          dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token, refreshToken: data.refresh_token });
+        // refreshToken from response is no longer handled here, HttpOnly cookie set by backend
+        if (data.status && data.access_token) {
+          dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token });
         }
         return data;
       } catch (error) {
@@ -142,8 +134,9 @@ export default createStore({
       try {
         const response = await apiService.login(payload); // Use apiService
         const data = response.data;
-        if (data.status && data.access_token && data.refresh_token) {
-          dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token, refreshToken: data.refresh_token });
+        // refreshToken from response is no longer handled here, HttpOnly cookie set by backend
+        if (data.status && data.access_token) {
+          dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token });
         }
         return data;
       } catch (error) {
@@ -159,70 +152,65 @@ export default createStore({
         commit('stopGlobalLoading');
       }
     },
-    async setAuthTokensAndFetchUser({ commit, dispatch }, { accessToken, refreshToken }) {
-        commit('setAuthTokens', { accessToken, refreshToken });
+    async setAuthTokensAndFetchUser({ commit, dispatch }, { accessToken }) { // refreshToken parameter removed
+        commit('setAuthTokens', { accessToken }); // refreshToken parameter removed
         if (accessToken) {
             await dispatch('fetchUserProfile');
         }
     },
-    async refreshToken({ commit, state, dispatch }) {
-      if (!state.refreshToken) {
-        // No await dispatch('logout') here as it might cause loops if logout also fails.
-        // The interceptor in api.js will call logout if refresh fails.
-        // This action is primarily called by the interceptor.
-        commit('clearAuth'); // Clear auth state immediately
-        return { status: false, status_message: "No refresh token available." };
-      }
+    async refreshToken({ commit, dispatch }) { // state parameter removed as refreshToken is not in state
+      // The refresh token is an HttpOnly cookie, so the browser will send it automatically.
+      // This action now primarily serves to call the backend endpoint and handle the response.
       try {
-        // apiService.refreshToken expects the token value and returns the axios response
-        const response = await apiService.refreshToken(state.refreshToken);
+        const response = await apiService.refreshToken(); // No need to pass token from frontend
         const data = response.data;
         if (data.status && data.access_token) {
-          commit('setAuthTokens', { accessToken: data.access_token, refreshToken: state.refreshToken });
-          // The interceptor in api.js will use this new token to retry the original request.
-          // We also need to update the Authorization header for subsequent requests made by the apiClient in api.js
-          // This is handled by the interceptor setting the new token in apiClient's defaults or by re-initializing.
-          // For now, the request interceptor in api.js should pick up the new token from store/localStorage.
+          // refreshToken is not passed to setAuthTokens anymore as it's not stored in Vuex
+          commit('setAuthTokens', { accessToken: data.access_token });
           return { status: true, access_token: data.access_token };
         } else {
-          // Refresh failed, logout will be dispatched by the interceptor in api.js
-          // However, if this action is called directly, we should ensure logout.
-          await dispatch('logout'); // Ensure local state is cleared
+          await dispatch('logout');
           return { status: false, status_message: data.status_message || "Session refresh failed." };
         }
       } catch (error) {
         console.error("Token Refresh Action Error:", error.response?.data || error.message);
-        // Logout will be dispatched by the interceptor in api.js
-        await dispatch('logout'); // Ensure local state is cleared
+        await dispatch('logout');
         return { status: false, status_message: "Session expired. Please log in again." };
       }
     },
-    async logout({ commit, state }) {
-      const currentRefreshToken = state.refreshToken; // Store before clearing auth
-      commit('clearAuth'); // Clear local tokens and user state immediately
+    async logout({ commit }) { // state parameter removed
+      // currentRefreshToken is no longer available in Vuex state.
+      // The backend's /logout2 endpoint (if still used) would need to rely on the cookie.
+      // Or, the /logout endpoint on the backend should also invalidate the refresh token cookie.
+      // For simplicity, we'll assume /logout handles access token and /logout2 (called via cookie) handles refresh.
+      commit('clearAuth'); // Clear local access token and user state immediately
 
       try {
-        // Invalidate access token on backend (if it was still valid)
-        // This call will use the (now cleared) token from localStorage if interceptor adds it,
-        // or no token if interceptor doesn't find one. Backend should handle this gracefully.
-        await apiService.logout(); // No specific error handling needed for this call's failure here
+        await apiService.logout(); // Invalidates access token via API
 
-        // Invalidate refresh token on backend
-        if (currentRefreshToken) {
-          // Use a temporary direct axios call for logout2 to avoid interceptor complexities
-          // and to ensure the correct refresh token is sent.
-          const tempApiClient = axios.create({ baseURL: '/api' });
-          await tempApiClient.post('/logout2', {}, { headers: { Authorization: `Bearer ${currentRefreshToken}` } });
-        }
+        // To invalidate the HttpOnly refresh token, the backend /logout or a dedicated
+        // /logout_refresh endpoint should clear the cookie.
+        // If we still want to call /logout2, it needs to be a GET or POST that backend handles
+        // by reading the refresh token from the cookie and blacklisting it.
+        // For now, we'll rely on the backend to clear the cookie upon /logout or /logout2 if called.
+        // The direct axios call to /logout2 is removed as we don't store refresh token.
+        // The browser will send the cookie for /logout2 if that endpoint is called by apiService.
+        // Assuming apiService.logout2() exists if needed, or backend /logout handles cookie.
+        // Let's assume for now apiService.logout also triggers backend to clear refresh cookie,
+        // or a separate call is made by apiService if needed.
+
+        // If /logout2 is still meant to be called to invalidate the refresh token,
+        // and it's a separate endpoint that relies on the cookie being sent:
+        // await apiService.logout2(); // This would rely on withCredentials: true
+
         return { status: true, status_message: "Logged out successfully." };
       } catch (error) {
         console.warn("Server Logout Error during logout action:", error.response?.data || error.message);
-        // Even if server logout fails, user is logged out locally.
         return { status: true, status_message: "Logged out locally. Server session might have issues clearing." };
       }
     },
-    async loadSession({ dispatch, commit, state }) { // Added state
-      const accessToken = state.userSession; // Check state first, then localStorage
+    async loadSession({ dispatch, commit, state }) {
+      const accessToken = state.accessToken; // Check state for accessToken
       if (accessToken) {
         commit('startGlobalLoading');
         try {
@@ -554,7 +542,7 @@ export default createStore({
     }
   },
   getters: {
-    isAuthenticated: (state) => !!state.userSession,
+    isAuthenticated: (state) => !!state.accessToken, // Changed from userSession
     currentUser: (state) => state.user,
     isAdmin: (state) => state.user?.is_admin === true,
     getSlots: (state) => state.slots,

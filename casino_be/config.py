@@ -18,7 +18,9 @@ class Config:
 
     # Rate Limiter Storage URI
     # For production, set e.g., RATELIMIT_STORAGE_URI='redis://localhost:6379/0'
-    RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
+    # Changed from memory:// to redis://localhost:6379/0.
+    # It's recommended to use a persistent Redis instance in production.
+    RATELIMIT_STORAGE_URI = 'redis://localhost:6379/0'
 
     # Flask Debug Mode
     # For production, ensure FLASK_DEBUG is not set or set to 'False'.

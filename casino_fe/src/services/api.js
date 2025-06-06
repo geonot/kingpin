@@ -9,23 +9,15 @@ export function injectStore(_store) {
 const apiClient = axios.create({
   baseURL: '/api', // Assuming backend is served on the same domain or proxied to /api
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true, // Ensure cookies (like HttpOnly refresh token) are sent
 });
 
 apiClient.interceptors.request.use(config => {
-  // Try to get token from store first, then localStorage as a fallback
   let token = null;
-  if (store && store.state && store.state.userSession) { // Corrected path to token
-    token = store.state.userSession;
-  } else {
-    // Fallback to localStorage if store or token in store is not available
-    const userSessionFromLocalStorage = localStorage.getItem('userSession');
-    if (userSessionFromLocalStorage) {
-      // Note: The current api.js stores the raw token string in localStorage, not a JSON object.
-      // If it were an object like { accessToken: '...' }, parsing would be needed.
-      // Based on store/index.js, userSession is the token itself.
-      token = userSessionFromLocalStorage;
-    }
+  if (store && store.state && store.state.accessToken) { // Changed to accessToken
+    token = store.state.accessToken;
   }
+  // Removed localStorage fallback for access token
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -39,37 +31,31 @@ apiClient.interceptors.response.use(response => response, async error => {
     originalRequest._retry = true;
     console.log('Attempting to refresh token due to 401 error');
     try {
-      // Check if refreshToken action exists (now global)
+      // Check if refreshToken action exists
       if (store && store._actions['refreshToken']) {
-        const refreshData = await store.dispatch('refreshToken');
+        const refreshData = await store.dispatch('refreshToken'); // Vuex action refreshToken
         if (refreshData && refreshData.access_token) {
-          // Update Authorization header for the original request
-          // Also update the token in the store via mutation if not already done by refreshToken action
-          if (store.state.userSession !== refreshData.access_token) {
-             store.commit('setAuthTokens', { accessToken: refreshData.access_token, refreshToken: store.state.refreshToken });
-          }
+          // Vuex action 'refreshToken' should have updated store.state.accessToken via 'setAuthTokens'
+          // The request interceptor will pick up the new accessToken for the retried request.
           originalRequest.headers.Authorization = `Bearer ${refreshData.access_token}`;
           return apiClient(originalRequest); // Retry original request
         } else {
-          console.log('Refresh token did not return new access token, attempting logout.');
-          if (store && store._actions['logout']) { // Check if logout action exists
-            await store.dispatch('logout');
-          }
-          return Promise.reject(error);
+          console.log('Refresh token Vuex action did not return new access token, or failed. Logout should have been dispatched by refreshToken action.');
+          // store.dispatch('logout') should have been called by the refreshToken action if it failed.
+          return Promise.reject(error); // Reject, as refresh failed.
         }
       } else {
-         console.error('refreshToken action does not exist in the store. Attempting direct logout.');
-         if (store && store._actions['logout']) { // Check if logout action exists
+         console.error('refreshToken action does not exist in the store. Cannot refresh token.');
+         // If no refresh action, logout or handle error appropriately.
+         if (store && store._actions['logout']) {
             await store.dispatch('logout');
          }
          return Promise.reject(error);
       }
     } catch (refreshError) {
-      console.error('Error during token refresh, attempting logout:', refreshError);
-      if (store && store._actions['logout']) { // Check if logout action exists
-        await store.dispatch('logout');
-      }
-      return Promise.reject(refreshError);
+      console.error('Error during token refresh dispatch, or subsequent error. Logout should have been dispatched.', refreshError);
+      // store.dispatch('logout') should have been called by the refreshToken action if it failed.
+      return Promise.reject(refreshError); // Reject, as refresh process failed.
     }
   }
   return Promise.reject(error);
@@ -84,19 +70,18 @@ export default {
   },
   logout() {
     // This logout is for invalidating the access token on the backend.
-    // The Vuex action will handle clearing local storage and state.
+    // The Vuex action will handle clearing local state.
     return apiClient.post('/logout');
+    // If backend needs to invalidate HttpOnly refresh token, it can do so here,
+    // or a separate logout2 call can be made from Vuex store if necessary.
   },
-  refreshToken(refreshTokenValue) {
-    // Use a temporary client for refresh to avoid interceptor loop if refresh itself fails with 401
-    // and to ensure the correct refresh token is sent.
-    const refreshApiClient = axios.create({
-        baseURL: '/api',
-        headers: { 'Content-Type': 'application/json' },
-    });
-    return refreshApiClient.post('/refresh', {}, { // Sending empty body for refresh
-      headers: { Authorization: `Bearer ${refreshTokenValue}` }
-    });
+  refreshToken() {
+    // The HttpOnly refresh_token cookie is sent automatically by the browser with withCredentials: true.
+    // The backend @jwt_required(refresh=True) decorator will use it.
+    // No need to send token in body or headers from frontend for this specific call.
+    // The main request interceptor might still add an Authorization header with the *access* token,
+    // but the backend's refresh logic should ignore it and use the cookie.
+    return apiClient.post('/refresh', {}); // Sending empty body for refresh
   },
   fetchUserProfile() {
     return apiClient.get('/me'); // Assuming '/me' is the endpoint for user profile
