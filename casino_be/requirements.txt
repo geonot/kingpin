@@ -16,3 +16,4 @@ psycopg2-binary # For PostgreSQL connection
 python-json-logger
 coverage
 pytest-cov
+treys
