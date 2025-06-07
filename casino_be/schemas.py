@@ -491,7 +491,7 @@ class BaccaratTableSchema(SQLAlchemyAutoSchema):
     min_bet = auto_field()
     max_bet = auto_field()
     max_tie_bet = auto_field()
-    commission_rate = auto_field() # Numeric type, Marshmallow handles Decimal
+    commission_rate = fields.Float() # Explicitly serialize Decimal as Float
     is_active = auto_field(dump_only=True)
     created_at = auto_field(dump_only=True)
     updated_at = auto_field(dump_only=True)

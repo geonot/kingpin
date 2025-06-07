@@ -6,8 +6,17 @@ from casino_be.utils.plinko_helper import (
     STAKE_CONFIG,
     PAYOUT_MULTIPLIERS
 )
+from casino_be.app import app # Add this import
 
 class TestPlinkoHelper(unittest.TestCase):
+
+    def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
+
+    def tearDown(self):
+        if self.app_context:
+            self.app_context.pop()
 
     def test_get_stake_options(self):
         options = get_stake_options()

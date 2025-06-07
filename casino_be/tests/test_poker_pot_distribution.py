@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from casino_be.utils.poker_helper import _distribute_pot
 from casino_be.models import User, PokerTable, PokerHand, PokerPlayerState, Transaction, db
+from casino_be.app import app # Added app import
 
 # Helper to create a mock session (can be shared or defined per test file)
 def create_mock_session():
@@ -18,6 +19,13 @@ def create_mock_session():
 class TestDistributePot(unittest.TestCase):
 
     def setUp(self):
+        self.app = app
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+        # db.create_all() # If needed for non-mocked DB interactions
+        self._configure_mocks()
+
+    def _configure_mocks(self): # Renamed original setUp
         self.mock_db_session = create_mock_session()
         self.db_session_patch = patch('casino_be.utils.poker_helper.db.session', self.mock_db_session)
         self.mock_db_session_instance = self.db_session_patch.start()
@@ -30,13 +38,33 @@ class TestDistributePot(unittest.TestCase):
             rake_percentage=Decimal("0.05"), # 5% rake
             max_rake_sats=300 # Max rake of 300 satoshis
         )
-        self.mock_db_session.query(PokerTable).get.return_value = self.mock_poker_table
 
-        # Mock users that will be returned by session.query(User).get(id)
+        # Configure query to return specific mocks for PokerTable and User
+        def query_side_effect(model_class):
+            query_mock = MagicMock()
+            if model_class == PokerTable:
+                def get_poker_table(table_id_arg):
+                    if table_id_arg == self.table_id:
+                        return self.mock_poker_table
+                    return None # Should not happen in these tests if table_id is consistent
+                query_mock.get.side_effect = get_poker_table
+            elif model_class == User:
+                query_mock.get.side_effect = self.mock_query_user_get
+            else:
+                # Fallback for other models to behave as per create_mock_session's defaults
+                query_mock.get.return_value = None
+                query_mock.filter_by.return_value.first.return_value = None
+            return query_mock
+
+        self.mock_db_session.query.side_effect = query_side_effect
+
         self.mock_users = {}
 
     def tearDown(self):
         self.db_session_patch.stop()
+        if self.app_context:
+            self.app_context.pop()
+        # db.drop_all() # If db.create_all() was used
 
     def _setup_player(self, user_id, username, stack, total_invested, hole_cards):
         user = User(id=user_id, username=username)
@@ -71,6 +99,7 @@ class TestDistributePot(unittest.TestCase):
             id=self.hand_id, table_id=self.table_id, pot_size_sats=400, board_cards=["2D", "3D", "4D", "5S", "6S"],
             player_street_investments={}, winners=[] # Ensure winners is empty list initially
         )
+        poker_hand.table = self.mock_poker_table # Explicitly set the table relationship
 
         # Mocking User query within _distribute_pot if winner_user_obj is fetched again.
         # It's better if player_state_obj.user is already loaded.
@@ -112,6 +141,7 @@ class TestDistributePot(unittest.TestCase):
         player2 = self._setup_player(user_id=2, username="Bob", stack=1000, total_invested=200, hole_cards=["AD", "KD"])
         showdown_players = [player1, player2]
         poker_hand = PokerHand(id=self.hand_id, table_id=self.table_id, pot_size_sats=400, board_cards=["2S", "3H", "4C", "5S", "6D"], winners=[])
+        poker_hand.table = self.mock_poker_table # Explicitly set the table relationship
 
         self.mock_db_session.query(User).get.side_effect = self.mock_query_user_get
 
@@ -157,6 +187,7 @@ class TestDistributePot(unittest.TestCase):
         showdown_players = [player1, player2, player3]
 
         poker_hand = PokerHand(id=self.hand_id, table_id=self.table_id, pot_size_sats=500, board_cards=["2H", "3H", "4H", "5D", "7D"], winners=[])
+        poker_hand.table = self.mock_poker_table # Explicitly set the table relationship
         self.mock_db_session.query(User).get.side_effect = self.mock_query_user_get
 
         # P1 wins main pot. P2 wins side pot against P3.

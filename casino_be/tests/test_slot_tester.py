@@ -59,7 +59,7 @@ class TestSlotTester(unittest.TestCase):
         win_info = calculate_win(
             grid, config_paylines, config_symbols_map, total_bet_sats,
             wild_symbol_id, scatter_symbol_id,
-            game_data.get('payouts', []), game_data.get('min_symbols_to_match')
+            game_data.get('min_symbols_to_match')
         )
 
         self.assertEqual(win_info['total_win_sats'], 300, "Payline win calculation is incorrect.")
@@ -86,7 +86,7 @@ class TestSlotTester(unittest.TestCase):
         win_info = calculate_win(
             grid, config_paylines, config_symbols_map, total_bet_sats,
             wild_symbol_id, scatter_symbol_id,
-            game_data.get('payouts', []), game_data.get('min_symbols_to_match')
+            game_data.get('min_symbols_to_match')
         )
 
         self.assertEqual(win_info['total_win_sats'], 500, "Scatter win calculation is incorrect.")

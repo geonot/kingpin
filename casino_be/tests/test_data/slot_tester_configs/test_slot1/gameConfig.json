@@ -5,7 +5,7 @@
         "symbol_count": 3, "symbol_wild": 3, "symbol_scatter": 2, "symbol_bonus": null,
         "symbols": [
                         {"id": 1, "name": "Cherry", "value": 10, "value_multipliers": {"3": 10}, "cluster_payouts": {}},
-                        {"id": 2, "name": "ScatterS", "value": 0, "payouts": {"3": 5}, "cluster_payouts": {}},
+                        {"id": 2, "name": "ScatterS", "value": 0, "scatter_payouts": {"3": 5.0}, "cluster_payouts": {}},
                         {"id": 3, "name": "WildW", "value": 0, "value_multipliers": {"3": 100}, "cluster_payouts": {}}
         ],
         "paylines": [

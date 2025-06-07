@@ -132,7 +132,9 @@ def play_baccarat_hand(player_bet_amount, banker_bet_amount, tie_bet_amount, num
 
     player_cards = []
     banker_cards = []
-    player_third_card = None # Store the value of player's third card if drawn
+    player_third_card_value = None # Value of player's third card if drawn
+    player_drew_third = False      # Did player draw a third card?
+    banker_drew_third = False      # Did banker draw a third card?
 
     # Initial Deal (Player, Banker, Player, Banker)
     try:
@@ -148,6 +150,8 @@ def play_baccarat_hand(player_bet_amount, banker_bet_amount, tie_bet_amount, num
     banker_score = _calculate_baccarat_hand_value(banker_cards)
 
     outcome = None
+    # player_drew_third initialized earlier
+    # player_third_card_value initialized earlier
 
     # Natural Win Check
     if player_score >= 8 or banker_score >= 8:
@@ -159,7 +163,7 @@ def play_baccarat_hand(player_bet_amount, banker_bet_amount, tie_bet_amount, num
             outcome = "banker_win"
     else:
         # Player's Third Card Rule
-        player_drew_third = False
+        # player_drew_third is already initialized to False
         if player_score <= 5:
             try:
                 card = _deal_card(deck)
@@ -175,7 +179,7 @@ def play_baccarat_hand(player_bet_amount, banker_bet_amount, tie_bet_amount, num
 
 
         # Banker's Third Card Rule
-        banker_drew_third = False
+        # banker_drew_third is already initialized to False
         if not player_drew_third: # Player stood pat (2 cards)
             if banker_score <= 5:
                 try:

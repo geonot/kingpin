@@ -1048,7 +1048,7 @@ def handle_raise(user_id: int, table_id: int, hand_id: int, amount: int):
     poker_hand.pot_size_sats = (poker_hand.pot_size_sats or 0) + actual_amount_added_to_pot
 
     # The new minimum increment for the *next* raise is the size of this raise.
-    poker_hand.min_next_raise_amount = final_player_investment_this_street - previous_bet_to_match
+    poker_hand.min_next_raise_amount = final_player_investment_this_street - previous_bet_to_match_on_table
     poker_hand.current_bet_to_match = final_player_investment_this_street
     poker_hand.last_raiser_user_id = user_id
 

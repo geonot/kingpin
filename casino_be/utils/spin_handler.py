@@ -13,21 +13,46 @@ from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserB
 
 
 # Base path for slot configurations
-SLOT_CONFIG_BASE_PATH = "public/slots" # Adjust if your structure is different, e.g., "casino_be/static/slots"
+# SLOT_CONFIG_BASE_PATH = "public/slots" # Old relative path
 
 def load_game_config(slot_short_name):
     """Loads the game configuration JSON file for a given slot."""
-    # Construct path like "public/slots/slot1/gameConfig.json"
-    config_path = os.path.join(SLOT_CONFIG_BASE_PATH, slot_short_name, "gameConfig.json")
-    if not os.path.exists(config_path):
-        # Fallback: try checking if slot_short_name is a direct path or stored in slot.asset_directory
-        # This part depends on how slot.asset_directory is structured.
-        # For now, assume slot_short_name is the directory name under SLOT_CONFIG_BASE_PATH
-        raise FileNotFoundError(f"Game configuration not found for slot '{slot_short_name}' at {config_path}")
+    # Construct path relative to the 'casino_be' package directory
+    # __file__ is casino_be/utils/spin_handler.py
+    # Go up two levels to casino_be, then to public/slots
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'public', 'slots'))
+    file_path = os.path.join(base_dir, slot_short_name, "gameConfig.json") # Renamed for clarity
 
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    return config
+    # Attempt to load from primary path first
+    print(f"Attempting to load game config from: {file_path}") # Added for subtask
+
+    if not os.path.exists(file_path):
+        # Fallback to casino_fe path
+        alt_base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'casino_fe', 'public', 'slots'))
+        alt_file_path = os.path.join(alt_base_dir, slot_short_name, "gameConfig.json")
+        print(f"Primary path not found. Attempting fallback: {alt_file_path}") # Added for subtask
+        if os.path.exists(alt_file_path):
+            file_path = alt_file_path
+        else:
+            # If neither exists, raise FileNotFoundError with the primary path as expectation
+            raise FileNotFoundError(f"Configuration file not found for slot '{slot_short_name}' at {file_path} (also checked {alt_file_path})")
+
+    try:
+        with open(file_path, 'r') as f:
+            config = json.load(f)
+        # print(f"Successfully loaded config for {slot_short_name}") # For subtask
+        return config
+    except FileNotFoundError: # Should be caught by os.path.exists checks above, but good practice
+        # Use current_app.logger if available and this function is part of a Flask app context
+        # For now, direct print or re-raise. Assuming Flask context might not be available here directly.
+        print(f"Game config file not found at {file_path}") # Changed to print for now
+        raise FileNotFoundError(f"Configuration file not found for slot '{slot_short_name}' at {file_path}")
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error for {file_path}: {e.msg} at line {e.lineno} col {e.colno}") # Changed to print
+        raise ValueError(f"Invalid JSON in {file_path}: {e.msg} (line {e.lineno}, col {e.colno})")
+    except Exception as e:
+        print(f"Unexpected error loading game config for {slot_short_name} from {file_path}: {str(e)}") # Changed to print
+        raise RuntimeError(f"Could not load game config for slot '{slot_short_name}': {str(e)}")
 
 def handle_spin(user, slot, game_session, bet_amount_sats):
     """
@@ -490,6 +515,8 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
         else:
             weights = [w / total_weight for w in weights]
 
+        grid = [[None for _ in range(columns)] for _ in range(rows)] # Initialize grid
+        secure_random = secrets.SystemRandom()
         for r_idx in range(rows):
             row_symbols = secure_random.choices(symbols_for_choice, weights=weights, k=columns)
             grid[r_idx] = row_symbols # Assign directly to the row
@@ -570,7 +597,7 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
 
     for payline_config in config_paylines:
         payline_id = payline_config.get("id", "unknown_line")
-        payline_positions = payline_config.get("coords", []) # List of [row, col] #FIX: Changed "positions" to "coords"
+        payline_positions = payline_config.get("coords", [])
 
         line_symbols_on_grid = [] # Actual symbol IDs on this payline from the spin grid
         actual_positions_on_line = [] # Coordinates of these symbols
@@ -644,6 +671,7 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
         # The minimum match count is implicitly handled by what's defined in value_multipliers (e.g. no "1" or "2")
         payout_multiplier = get_symbol_payout(match_symbol_id, consecutive_count, config_symbols_map, is_scatter=False)
         # print(f"DEBUG_TEST_HANDLER: Payline {payline_id}, Symbol {match_symbol_id}, Count {consecutive_count}, PayoutMultiplier {payout_multiplier}") # Debug
+
 
         if payout_multiplier > 0:
             # Line win = bet_per_line * symbol_multiplier
@@ -779,7 +807,6 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
                     cluster_win_sats_this_group = int(total_bet_sats * payout_value_for_cluster)
 
                     if cluster_win_sats_this_group > 0:
-                        print(f"DEBUG: Cluster win for symbol {symbol_id} count {count} with multiplier {payout_value_for_cluster}. Win: {cluster_win_sats_this_group}")
                         total_win_sats += cluster_win_sats_this_group
 
                         # Combine positions of the literal symbols and all wild symbols
@@ -884,10 +911,10 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
                 else:
                     weights = [w / total_weight for w in weights]
 
-                secure_random = secrets.SystemRandom()
+                secure_random_instance = secrets.SystemRandom()
                 for r_fill in range(empty_slots_in_col):
                     if symbols_for_choice: # Ensure there are symbols to choose from
-                        new_grid[r_fill][c] = secure_random.choices(symbols_for_choice, weights=weights, k=1)[0]
+                        new_grid[r_fill][c] = secure_random_instance.choices(symbols_for_choice, weights=weights, k=1)[0]
                     else: # Fallback if no symbols somehow (should be caught earlier)
                         new_grid[r_fill][c] = spinable_symbol_ids[0] if spinable_symbol_ids else 0 # Default to 0 or first available
 
@@ -919,10 +946,10 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
         else:
             weights = [w / total_weight for w in weights]
 
-        secure_random = secrets.SystemRandom()
+        secure_random_instance = secrets.SystemRandom()
         for r, c in winning_coords_to_clear: # Iterate through the specific empty slots
             if symbols_for_choice:
-                new_grid[r][c] = secure_random.choices(symbols_for_choice, weights=weights, k=1)[0]
+                new_grid[r][c] = secure_random_instance.choices(symbols_for_choice, weights=weights, k=1)[0]
             else:
                 new_grid[r][c] = spinable_symbol_ids[0] if spinable_symbol_ids else 0
     else:
