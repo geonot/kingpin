@@ -164,7 +164,7 @@ class TestBaccaratHelper(unittest.TestCase):
     def test_banker_third_card_rules(self, mock_deal_card):
         # Scenario 1: Player stands (score 6 or 7). Banker draws if score 0-5.
         # Player: H6, HK (6) -> Stands.
-        # Banker: H2, H3 (5) -> Banker Draws. Banker draws H1 (1). Banker total 6.
+        # Banker: H2, H3 (5) -> Banker Draws. Banker draws HA (Ace, value 1). Banker total 6.
         # Outcome: Tie
         mock_deal_card.side_effect = ["H6", "H2", "HK", "H3", "HA"] # P: H6,HK (6) -> stands. B: H2,H3 (5) -> draws HA (6)
         result = baccarat_helper.play_baccarat_hand(Decimal(0), Decimal(0), Decimal(10)) # Bet on Tie
@@ -179,9 +179,9 @@ class TestBaccaratHelper(unittest.TestCase):
 
         # Scenario 2: Player draws. Banker score 3, Player's 3rd card NOT 8. Banker draws.
         # Player: HA, H2 (3) -> Draws H4 (value 4). Player total 7.
-        # Banker: H1, H2 (3) -> Player's 3rd card is 4 (not 8). Banker draws. Banker draws H1 (1). Banker total 4.
+        # Banker: CA, C2 (3) -> Player's 3rd card is 4 (not 8). Banker draws. Banker draws HA (1). Banker total 4.
         # Outcome: Player wins.
-        mock_deal_card.side_effect = ["HA", "H1", "H2", "H2", "H4", "HA"] # P:HA,H2 (3) dr H4 (7). B:H1,H2 (3) dr HA (4)
+        mock_deal_card.side_effect = ["HA", "CA", "H2", "C2", "H4", "HA"] # P:HA,H2 (3) dr H4 (7). B:CA,C2 (3) dr HA (4)
         result = baccarat_helper.play_baccarat_hand(Decimal(10), Decimal(0), Decimal(0))
         self.assertEqual(result["outcome"], "player_win")
         self.assertEqual(result["player_score"], 7)
@@ -208,9 +208,9 @@ class TestBaccaratHelper(unittest.TestCase):
     @patch('casino_be.utils.baccarat_helper._deal_card')
     def test_banker_stands_player_draws_third_card_8(self, mock_deal_card):
         # Player: HA, H2 (3) -> Draws H8 (value 8). Player total 1.
-        # Banker: H1, H2 (3) -> Player's 3rd card is 8. Banker stands. Banker total 3.
+        # Banker: CA, C2 (3) -> Player's 3rd card is 8. Banker stands. Banker total 3.
         # Outcome: Banker wins.
-        mock_deal_card.side_effect = ["HA", "H1", "H2", "H2", "H8"] # P:HA,H2 (3) dr H8 (1). B:H1,H2 (3) stands.
+        mock_deal_card.side_effect = ["HA", "CA", "H2", "C2", "H8"] # P:HA,H2 (3) dr H8 (1). B:CA,C2 (3) stands.
         result = baccarat_helper.play_baccarat_hand(Decimal(0), Decimal(10), Decimal(0))
         self.assertEqual(result["outcome"], "banker_win")
         self.assertEqual(result["player_score"], 1)

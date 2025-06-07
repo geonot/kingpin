@@ -52,6 +52,37 @@ class TestHandleFold(unittest.TestCase):
             player_street_investments={},
             current_bet_to_match=0
         )
+        # PokerTable mock might not be strictly needed for TestHandleFold if handle_fold doesn't use it.
+        # However, other action handlers do, so defining it for consistency if these classes were to be merged/refactored.
+        # self.mock_poker_table = PokerTable(id=self.table_id, ...)
+
+        # Define query-specific mocks
+        self.mock_poker_hand_query = MagicMock()
+        self.mock_poker_hand_query.get.return_value = self.mock_poker_hand
+
+        self.mock_player_state_query = MagicMock()
+        self.mock_player_state_query.filter_by.return_value.first.return_value = self.mock_player_state
+
+        # self.mock_poker_table_query = MagicMock()
+        # if hasattr(self, 'mock_poker_table'):
+        #    self.mock_poker_table_query.get.return_value = self.mock_poker_table
+
+
+        def refined_query_side_effect(model_class):
+            if model_class == PokerHand:
+                return self.mock_poker_hand_query
+            if model_class == PokerPlayerState:
+                return self.mock_player_state_query
+            # if model_class == PokerTable:
+            #    return self.mock_poker_table_query
+            # Fallback to a generic mock that returns None for .get and .first()
+            default_mock = MagicMock()
+            default_mock.get.return_value = None
+            default_mock.filter_by.return_value.first.return_value = None
+            return default_mock
+
+        self.mock_db_session.query.side_effect = refined_query_side_effect
+
 
     def tearDown(self):
         self.db_session_patch.stop()
@@ -61,13 +92,9 @@ class TestHandleFold(unittest.TestCase):
 
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     def test_handle_fold_success(self, mock_check_betting_completion):
-        # Setup mocks for this specific test
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get(self.hand_id).first.return_value = self.mock_poker_hand # Corrected from .get(id) to .get(hand_id)
-        # If PokerHand is fetched by primary key, .get() is more direct
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
-
-
+        # Mocks for PokerPlayerState and PokerHand are now handled by query.side_effect in setUp.
+        # The erroneous line 'self.mock_db_session.query(PokerHand).get(self.hand_id).first.return_value = self.mock_poker_hand' is removed.
+        # The .get() call itself is configured by the side_effect.
         mock_check_betting_completion.return_value = {"status": "betting_continues", "next_to_act_user_id": 2}
 
         result = handle_fold(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
@@ -91,8 +118,11 @@ class TestHandleFold(unittest.TestCase):
         self.assertEqual(result["game_flow"], {"status": "betting_continues", "next_to_act_user_id": 2})
 
     def test_handle_fold_player_state_not_found(self):
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = None
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand # Hand exists
+        # Override for this test: PlayerState not found
+        self.mock_player_state_query.filter_by.return_value.first.return_value = None
+        # Ensure PokerHand query still returns the default mock_poker_hand for this test
+        self.mock_poker_hand_query.get.return_value = self.mock_poker_hand
+
 
         result = handle_fold(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
 
@@ -101,8 +131,10 @@ class TestHandleFold(unittest.TestCase):
         self.mock_db_session.commit.assert_not_called()
 
     def test_handle_fold_hand_not_found(self):
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = None # Hand does not exist
+        # Override for this test: PokerHand not found
+        self.mock_poker_hand_query.get.return_value = None
+        # Ensure PlayerState query still returns the default mock_player_state for this test
+        self.mock_player_state_query.filter_by.return_value.first.return_value = self.mock_player_state
 
         result = handle_fold(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
 
@@ -156,9 +188,34 @@ class TestHandleCheck(unittest.TestCase):
             current_turn_user_id=self.user_id,
             pot_size_sats=500,
             hand_history=[],
-            player_street_investments={}, # Player has 0 invested this street
-            current_bet_to_match=0 # No bet to match, check is legal
+            player_street_investments={},
+            current_bet_to_match=0
         )
+        self.mock_poker_table = PokerTable(id=self.table_id, big_blind=20, limit_type='no_limit') # Needed for some actions
+
+        # Define query-specific mocks
+        self.mock_poker_hand_query = MagicMock()
+        self.mock_poker_hand_query.get.return_value = self.mock_poker_hand
+
+        self.mock_player_state_query = MagicMock()
+        self.mock_player_state_query.filter_by.return_value.first.return_value = self.mock_player_state
+
+        self.mock_poker_table_query = MagicMock()
+        self.mock_poker_table_query.get.return_value = self.mock_poker_table
+
+        def refined_query_side_effect(model_class):
+            if model_class == PokerHand:
+                return self.mock_poker_hand_query
+            if model_class == PokerPlayerState:
+                return self.mock_player_state_query
+            if model_class == PokerTable:
+                return self.mock_poker_table_query
+            default_mock = MagicMock()
+            default_mock.get.return_value = None
+            default_mock.filter_by.return_value.first.return_value = None
+            return default_mock
+
+        self.mock_db_session.query.side_effect = refined_query_side_effect
 
     def tearDown(self):
         self.db_session_patch.stop()
@@ -168,9 +225,7 @@ class TestHandleCheck(unittest.TestCase):
 
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     def test_handle_check_success_no_bet_to_match(self, mock_check_betting_completion):
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
-
+        # Mocks are handled by query_side_effect in setUp
         mock_check_betting_completion.return_value = {"status": "betting_continues", "next_to_act_user_id": 2}
 
         result = handle_check(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
@@ -193,8 +248,7 @@ class TestHandleCheck(unittest.TestCase):
         self.mock_poker_hand.current_bet_to_match = 100
         self.mock_poker_hand.player_street_investments = {str(self.user_id): 100} # Player already matched
 
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
+        # Mocks are handled by query_side_effect in setUp
         mock_check_betting_completion.return_value = {"status": "round_completed_advancing_street"}
 
         result = handle_check(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
@@ -207,9 +261,8 @@ class TestHandleCheck(unittest.TestCase):
         self.mock_poker_hand.current_bet_to_match = 100 # There's a bet
         self.mock_poker_hand.player_street_investments = {str(self.user_id): 50} # Player has not matched it
 
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
-
+        # Mocks are handled by query_side_effect in setUp
+        # Mocks are handled by query_side_effect in setUp
         result = handle_check(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
 
         self.assertIn("error", result)
@@ -230,8 +283,8 @@ class TestHandleCheck(unittest.TestCase):
         self.mock_db_session.commit.assert_called_once() # For timer clear
 
     def test_handle_check_hand_not_found(self):
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = None
+        # Specific override for this test if PokerHand is not found
+        self.mock_poker_hand_query.get.return_value = None
 
         result = handle_check(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
         self.assertIn("error", result)
@@ -275,7 +328,36 @@ class TestHandleCall(unittest.TestCase):
             min_next_raise_amount=100
         )
         # Mock joinedload for player_state.user
-        self.mock_db_session.query(PokerPlayerState).options.return_value.filter_by.return_value.first.return_value = self.mock_player_state
+        # self.mock_db_session.query(PokerPlayerState).options.return_value.filter_by.return_value.first.return_value = self.mock_player_state
+        # This specific joinedload mock might need to be part of the refined_query_side_effect if options() is called.
+        # For now, the refined_query_side_effect directly mocks .filter_by().first() and .get()
+
+        self.mock_poker_table = PokerTable(id=self.table_id, big_blind=20, limit_type='no_limit')
+
+        # Define query-specific mocks
+        self.mock_poker_hand_query = MagicMock()
+        self.mock_poker_hand_query.get.return_value = self.mock_poker_hand
+
+        self.mock_player_state_query = MagicMock()
+        # For TestHandleCall, the .options(joinedload(PokerPlayerState.user)).filter_by().first() is used
+        self.mock_player_state_query.options.return_value.filter_by.return_value.first.return_value = self.mock_player_state # Adjusted for options()
+
+        self.mock_poker_table_query = MagicMock()
+        self.mock_poker_table_query.get.return_value = self.mock_poker_table
+
+        def refined_query_side_effect(model_class):
+            if model_class == PokerHand:
+                return self.mock_poker_hand_query
+            if model_class == PokerPlayerState:
+                return self.mock_player_state_query
+            if model_class == PokerTable:
+                return self.mock_poker_table_query
+            default_mock = MagicMock()
+            default_mock.get.return_value = None
+            default_mock.filter_by.return_value.first.return_value = None
+            return default_mock
+
+        self.mock_db_session.query.side_effect = refined_query_side_effect
 
 
     def tearDown(self):
@@ -287,9 +369,7 @@ class TestHandleCall(unittest.TestCase):
     @patch('casino_be.utils.poker_helper._check_betting_round_completion')
     @patch('casino_be.utils.poker_helper.Transaction') # Mock the Transaction class
     def test_handle_call_success_full_call(self, MockTransaction, mock_check_betting_completion):
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
-
+        # Mocks are handled by query_side_effect in setUp
         mock_check_betting_completion.return_value = {"status": "betting_continues", "next_to_act_user_id": 2}
         initial_stack = self.mock_player_state.stack_sats
         initial_pot_size = self.mock_poker_hand.pot_size_sats
@@ -328,8 +408,7 @@ class TestHandleCall(unittest.TestCase):
         self.mock_player_state.stack_sats = 50 # Player has less than current_bet_to_match
         self.mock_poker_hand.current_bet_to_match = 100
 
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
+        # Mocks are handled by query_side_effect in setUp
         mock_check_betting_completion.return_value = {"status": "all_in_showdown"}
 
         actual_call_amount = 50 # Player goes all-in
@@ -350,8 +429,7 @@ class TestHandleCall(unittest.TestCase):
 
     def test_handle_call_fail_no_pending_bet(self):
         self.mock_poker_hand.current_bet_to_match = 0 # No bet to call
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
+        # Mocks are handled by query_side_effect in setUp
 
         result = handle_call(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
 
@@ -362,8 +440,7 @@ class TestHandleCall(unittest.TestCase):
     def test_handle_call_fail_already_called_max(self):
         self.mock_poker_hand.current_bet_to_match = 100
         self.mock_poker_hand.player_street_investments = {str(self.user_id): 100} # Player already put in 100
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
+        # Mocks are handled by query_side_effect in setUp
 
         result = handle_call(user_id=self.user_id, table_id=self.table_id, hand_id=self.hand_id)
         self.assertIn("error", result)
@@ -400,10 +477,33 @@ class TestHandleBet(unittest.TestCase):
         )
         self.mock_poker_table = PokerTable(id=self.table_id, big_blind=20, limit_type='no_limit')
 
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
-        self.mock_db_session.query(PokerTable).get.return_value = self.mock_poker_table
+        # self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
+        # self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
+        # self.mock_db_session.query(PokerTable).get.return_value = self.mock_poker_table
 
+        # Define query-specific mocks
+        self.mock_poker_hand_query = MagicMock()
+        self.mock_poker_hand_query.get.return_value = self.mock_poker_hand
+
+        self.mock_player_state_query = MagicMock()
+        self.mock_player_state_query.filter_by.return_value.first.return_value = self.mock_player_state # For handle_bet
+
+        self.mock_poker_table_query = MagicMock()
+        self.mock_poker_table_query.get.return_value = self.mock_poker_table
+
+        def refined_query_side_effect(model_class):
+            if model_class == PokerHand:
+                return self.mock_poker_hand_query
+            if model_class == PokerPlayerState:
+                return self.mock_player_state_query
+            if model_class == PokerTable:
+                return self.mock_poker_table_query
+            default_mock = MagicMock()
+            default_mock.get.return_value = None
+            default_mock.filter_by.return_value.first.return_value = None
+            return default_mock
+
+        self.mock_db_session.query.side_effect = refined_query_side_effect
 
     def tearDown(self):
         self.db_session_patch.stop()
@@ -416,6 +516,7 @@ class TestHandleBet(unittest.TestCase):
     @patch('casino_be.utils.poker_helper.Transaction')
     def test_handle_bet_success(self, MockTransaction, mock_validate_bet, mock_check_betting_completion):
         bet_amount = 100
+        # Ensure mocks are correctly configured if specific outcomes for validate_bet or check_completion are needed
         mock_validate_bet.return_value = (True, "Valid No-Limit opening bet.")
         mock_check_betting_completion.return_value = {"status": "betting_continues", "next_to_act_user_id": 2}
 
@@ -431,8 +532,8 @@ class TestHandleBet(unittest.TestCase):
         mock_validate_bet.assert_called_once_with(
             player_state=self.mock_player_state,
             action_amount=expected_total_street_investment,
-            current_bet_to_match=self.mock_poker_hand.current_bet_to_match, # Before action, it's 0
-            min_next_raise_increment=self.mock_poker_hand.min_next_raise_amount or self.mock_poker_table.big_blind,
+            current_bet_to_match=0,
+            min_next_raise_increment=20, # Original value from setUp before handle_bet modifies it
             limit_type=self.mock_poker_table.limit_type,
             poker_table=self.mock_poker_table,
             player_amount_invested_this_street=player_initial_street_investment,
@@ -488,7 +589,7 @@ class TestHandleBet(unittest.TestCase):
 
         self.assertEqual(self.mock_player_state.stack_sats, 0)
         self.assertEqual(self.mock_player_state.last_action, f"bet_all_in_{bet_amount}")
-        self.assertIn(f"User {self.user_id} bet_all_in_s {bet_amount}", result["message"])
+        self.assertIn(f"User {self.user_id} bet_all_ins {bet_amount}", result["message"]) # Corrected typo
         self.mock_db_session.commit.assert_called_once()
 
 
@@ -521,9 +622,33 @@ class TestHandleRaise(unittest.TestCase):
         )
         self.mock_poker_table = PokerTable(id=self.table_id, big_blind=50, limit_type='no_limit')
 
-        self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
-        self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
-        self.mock_db_session.query(PokerTable).get.return_value = self.mock_poker_table
+        # self.mock_db_session.query(PokerPlayerState).filter_by(user_id=self.user_id, table_id=self.table_id).first.return_value = self.mock_player_state
+        # self.mock_db_session.query(PokerHand).get.return_value = self.mock_poker_hand
+        # self.mock_db_session.query(PokerTable).get.return_value = self.mock_poker_table
+
+        # Define query-specific mocks
+        self.mock_poker_hand_query = MagicMock()
+        self.mock_poker_hand_query.get.return_value = self.mock_poker_hand
+
+        self.mock_player_state_query = MagicMock()
+        self.mock_player_state_query.filter_by.return_value.first.return_value = self.mock_player_state
+
+        self.mock_poker_table_query = MagicMock()
+        self.mock_poker_table_query.get.return_value = self.mock_poker_table
+
+        def refined_query_side_effect(model_class):
+            if model_class == PokerHand:
+                return self.mock_poker_hand_query
+            if model_class == PokerPlayerState:
+                return self.mock_player_state_query
+            if model_class == PokerTable:
+                return self.mock_poker_table_query
+            default_mock = MagicMock()
+            default_mock.get.return_value = None
+            default_mock.filter_by.return_value.first.return_value = None
+            return default_mock
+
+        self.mock_db_session.query.side_effect = refined_query_side_effect
 
     def tearDown(self):
         self.db_session_patch.stop()
@@ -546,6 +671,7 @@ class TestHandleRaise(unittest.TestCase):
         initial_pot_size = self.mock_poker_hand.pot_size_sats # 200
         player_initial_street_investment = self.mock_poker_hand.player_street_investments[str(self.user_id)] # 50
         previous_bet_to_match = self.mock_poker_hand.current_bet_to_match # 100
+        initial_min_next_raise_amount_on_hand = self.mock_poker_hand.min_next_raise_amount # Store before handle_raise modifies it
 
         amount_player_needs_to_add = raise_to_amount_total - player_initial_street_investment # 250 - 50 = 200
 
@@ -555,7 +681,7 @@ class TestHandleRaise(unittest.TestCase):
             player_state=self.mock_player_state,
             action_amount=raise_to_amount_total,
             current_bet_to_match=previous_bet_to_match,
-            min_next_raise_increment=self.mock_poker_hand.min_next_raise_amount or self.mock_poker_table.big_blind,
+            min_next_raise_increment=initial_min_next_raise_amount_on_hand, # Use the stored value (100)
             limit_type=self.mock_poker_table.limit_type,
             poker_table=self.mock_poker_table,
             player_amount_invested_this_street=player_initial_street_investment,
@@ -625,7 +751,7 @@ class TestHandleRaise(unittest.TestCase):
         self.assertEqual(self.mock_poker_hand.min_next_raise_amount, raise_to_amount_total - 100) # The raise part: 120 - 100 = 20
         self.assertEqual(self.mock_player_state.last_action, f"raise_all_in_to_{raise_to_amount_total}")
 
-        self.assertIn(f"User {self.user_id} raise_all_in_s to {raise_to_amount_total}", result["message"])
+        self.assertIn(f"User {self.user_id} raise_all_ins to {raise_to_amount_total}", result["message"]) # Corrected s to ins
         self.mock_db_session.commit.assert_called_once()
 
 

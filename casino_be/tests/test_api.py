@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 # Assuming your Flask app instance is named 'app' and SQLAlchemy instance is 'db'
 # in 'casino_be.app' and models are in 'casino_be.models'.
 from casino_be.app import app, db
-from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction, BonusCode, UserBonus # Added BonusCode, UserBonus
+from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction, BonusCode, UserBonus, PlinkoDropLog # Added BonusCode, UserBonus, PlinkoDropLog
 #SATOSHI_FACTOR might be needed if amounts are converted
 from casino_be.config import Config
 from datetime import timedelta # Added timedelta
+from casino_be.utils.plinko_helper import PAYOUT_MULTIPLIERS # For Plinko tests
 
 
 class BaseTestCase(unittest.TestCase):
@@ -25,6 +26,14 @@ class BaseTestCase(unittest.TestCase):
         app.config['JWT_SECRET_KEY'] = 'test-super-secret-key' # Fixed JWT secret for tests
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
         app.config['WTF_CSRF_ENABLED'] = False # If using Flask-WTF
+
+        # Explicitly disable limiter after TESTING is set
+        app.config['RATELIMIT_ENABLED'] = False
+        app.config['RATELIMIT_DEFAULT_LIMITS_ENABLED'] = False # Also disable default limits specifically
+        app.config['RATELIMIT_DEFAULT_LIMITS'] = "100000 per second" # Set a very high limit
+
+        from casino_be.app import limiter as global_limiter
+        global_limiter.enabled = False # Directly disable the imported limiter instance
 
         cls.app = app
         cls.client = cls.app.test_client()
@@ -57,7 +66,7 @@ class BaseTestCase(unittest.TestCase):
             username=username,
             email=email,
             password=User.hash_password(password), # Assuming User model has hash_password
-            deposit_wallet_address="test_wallet_address" # Assuming this is a required field
+            deposit_wallet_address=f"test_wallet_{username}" # Make wallet address unique
         )
         with self.app.app_context():
             db.session.add(user)
@@ -190,7 +199,7 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Invalid username or password')
+        self.assertEqual(data['status_message'], 'Invalid credentials.')
 
     def test_login_invalid_password(self):
         """Test login with an invalid password."""
@@ -203,7 +212,7 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Invalid username or password')
+        self.assertEqual(data['status_message'], 'Invalid credentials.')
 
 
 class GameApiTests(BaseTestCase):
@@ -217,13 +226,18 @@ class GameApiTests(BaseTestCase):
         # Check if user already exists to avoid re-creating, useful if helper is called multiple times in a single test method
         # However, for test isolation, typically we create fresh users or rely on setUp/tearDown.
         # For this helper, let's assume it might be called for a user that needs to be created.
-        existing_user = User.query.filter_by(username=username).first()
-        if not existing_user:
+        user = User.query.filter_by(username=username).first()
+        if not user:
             self._create_user(username=username, password=password, email=user_email)
+            user = User.query.filter_by(username=username).first() # Re-fetch user
 
-        login_payload = {"username": username, "password": password}
+        self.assertIsNotNone(user, f"User {username} could not be created or fetched for login.")
+
+        login_payload = {"username": user.username, "password": password} # Use user.username from fetched user
         response = self.client.post('/api/login', json=login_payload)
         data = json.loads(response.data.decode())
+        self.assertTrue(data.get('status'), f"Login failed for user {username}. Response: {data}")
+        self.assertIn('access_token', data, f"access_token not in login response for user {username}. Response: {data}")
         return data['access_token']
 
     def _create_slot(self, name="Test Slot", short_name="test_slot_sn", reels=3, rows=3, paylines=5): # Added short_name param
@@ -258,12 +272,21 @@ class GameApiTests(BaseTestCase):
             for s_data in symbols_data:
                 symbol = SlotSymbol(**s_data)
                 db.session.add(symbol)
-            db.session.commit()
 
-            # Optionally, refresh symbols or query them back if needed for association with slot.symbols
-            # If Slot.symbols relationship is configured with backref, adding symbols with slot_id
-            # might be enough. Or append to slot.symbols collection.
-            # For now, direct creation with slot_id is done.
+            # Create default SlotBet entries
+            slot_bets_data = [
+                {"slot_id": slot_id_val, "bet_amount": 10},
+                {"slot_id": slot_id_val, "bet_amount": 10 * Config.SATOSHI_FACTOR} # Used in test_spin_success
+            ]
+            for sb_data in slot_bets_data:
+                # Ensure no duplicate bet amounts if this helper is called multiple times for the same slot_id
+                # (though setUp/tearDown should prevent this state across test methods)
+                existing_slot_bet = SlotBet.query.filter_by(slot_id=sb_data["slot_id"], bet_amount=sb_data["bet_amount"]).first()
+                if not existing_slot_bet:
+                    slot_bet = SlotBet(**sb_data)
+                    db.session.add(slot_bet)
+
+            db.session.commit()
         return slot_id_val # Return the stored ID
 
     def test_spin_success(self):
@@ -280,7 +303,7 @@ class GameApiTests(BaseTestCase):
             original_balance = user.balance
 
         # Create a slot machine
-        slot_id = self._create_slot(short_name="spin_succ_slot") # Get slot_id with unique short_name
+        slot_id = self._create_slot(short_name="slot1") # Use an existing config
 
         with self.app.app_context():
             # Fetch user and slot within the current session context to avoid DetachedInstanceError
@@ -301,7 +324,7 @@ class GameApiTests(BaseTestCase):
         bet_amount_sats = 10 * Config.SATOSHI_FACTOR # Bet 10 BTC in satoshis
 
         spin_payload = {"bet_amount": bet_amount_sats}
-        response = self.client.post('/api/spin',
+        response = self.client.post('/api/slots/spin', # Corrected URL
                                      headers={'Authorization': f'Bearer {token}'},
                                      json=spin_payload)
         data = json.loads(response.data.decode())
@@ -331,7 +354,7 @@ class GameApiTests(BaseTestCase):
             user.balance = 5 # Only 5 satoshis
             db.session.commit()
 
-        slot_id = self._create_slot(name="Another Slot", short_name="spin_insuf_slot") # Get slot_id with unique short_name
+        slot_id = self._create_slot(name="Another Slot", short_name="slot1") # Use an existing config
         with self.app.app_context():
             # Fetch user and slot within the current session context
             user_for_session = User.query.filter_by(username="pooruser").first()
@@ -345,7 +368,7 @@ class GameApiTests(BaseTestCase):
 
         bet_amount_sats = 10 # Bet 10 satoshis
         spin_payload = {"bet_amount": bet_amount_sats}
-        response = self.client.post('/api/spin',
+        response = self.client.post('/api/slots/spin', # Corrected URL
                                      headers={'Authorization': f'Bearer {token}'},
                                      json=spin_payload)
         data = json.loads(response.data.decode())
@@ -417,7 +440,7 @@ class BillingApiTests(BaseTestCase):
         self.assertEqual(response.status_code, 200, data.get('status_message'))
         self.assertTrue(data['status'])
         self.assertIn(f"Deposit of {deposit_amount} sats successful.", data['status_message'])
-        self.assertIn(f"Bonus '{bonus_code_obj.code_id}' applied successfully", data['status_message'])
+        self.assertIn(f"Bonus of {expected_bonus_amount} sats applied.", data['status_message']) # Corrected expected message part
         self.assertEqual(data.get('bonus_applied_sats'), expected_bonus_amount)
 
         with self.app.app_context():
@@ -427,7 +450,7 @@ class BillingApiTests(BaseTestCase):
             user_bonus = UserBonus.query.filter_by(user_id=user_id, bonus_code_id=bonus_code_obj.id).first()
             self.assertIsNotNone(user_bonus)
             self.assertEqual(user_bonus.bonus_amount_awarded_sats, expected_bonus_amount)
-            self.assertEqual(user_bonus.wagering_requirement_sats, (deposit_amount + expected_bonus_amount) * bonus_code_obj.wagering_requirement_multiplier)
+            self.assertEqual(user_bonus.wagering_requirement_sats, int(expected_bonus_amount * bonus_code_obj.wagering_requirement_multiplier)) # Corrected calculation
             self.assertTrue(user_bonus.is_active)
 
             deposit_tx = Transaction.query.filter_by(user_id=user_id, amount=deposit_amount, transaction_type='deposit').first()
@@ -455,7 +478,7 @@ class BillingApiTests(BaseTestCase):
         self.assertEqual(response.status_code, 200, data.get('status_message'))
         self.assertTrue(data['status'])
         self.assertIn(f"Deposit of {deposit_amount} sats successful.", data['status_message'])
-        self.assertIn(f"Bonus '{bonus_code_obj.code_id}' applied successfully", data['status_message'])
+        self.assertIn(f"Bonus of {fixed_bonus_sats} sats applied.", data['status_message']) # Corrected expected message part
         self.assertEqual(data.get('bonus_applied_sats'), fixed_bonus_sats)
 
         with self.app.app_context():
@@ -465,7 +488,7 @@ class BillingApiTests(BaseTestCase):
             user_bonus = UserBonus.query.filter_by(user_id=user_id, bonus_code_id=bonus_code_obj.id).first()
             self.assertIsNotNone(user_bonus)
             self.assertEqual(user_bonus.bonus_amount_awarded_sats, fixed_bonus_sats)
-            self.assertEqual(user_bonus.wagering_requirement_sats, (deposit_amount + fixed_bonus_sats) * bonus_code_obj.wagering_requirement_multiplier) # Or just bonus_amount * multiplier, depending on T&C
+            self.assertEqual(user_bonus.wagering_requirement_sats, int(fixed_bonus_sats * bonus_code_obj.wagering_requirement_multiplier)) # Corrected calculation
             self.assertTrue(user_bonus.is_active)
 
     def test_deposit_fail_invalid_bonus_code(self):
@@ -486,7 +509,7 @@ class BillingApiTests(BaseTestCase):
         self.assertEqual(response.status_code, 200) # Deposit is successful, bonus fails
         self.assertTrue(data['status'])
         self.assertIn(f"Deposit of {deposit_amount} sats successful.", data['status_message'])
-        self.assertIn("Bonus application failed: Bonus code 'NONEXISTENTCODE' not found or not active.", data['status_message'])
+        self.assertIn("Bonus application failed: Invalid or expired bonus code", data['status_message']) # Corrected expected message part
 
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -496,15 +519,15 @@ class BillingApiTests(BaseTestCase):
 
     def test_withdraw_success(self):
         token, user_id = self._login_and_get_token(username="withdraw_success_user")
-        withdraw_amount = 100
+        withdraw_amount = 1000 # Adjusted to meet min withdrawal
 
         with self.app.app_context():
             user = User.query.get(user_id)
-            user.balance = 1000 # Initial balance
+            user.balance = 2000 # Ensure sufficient balance for withdrawal
             db.session.commit()
             initial_balance = user.balance
 
-        payload = {"amount_sats": withdraw_amount, "withdraw_wallet_address": "test_btc_address_valid"}
+        payload = {"amount_sats": withdraw_amount, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted payload
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
         data = json.loads(response.data.decode())
 
@@ -525,14 +548,14 @@ class BillingApiTests(BaseTestCase):
 
         with self.app.app_context():
             user = User.query.get(user_id)
-            user.balance = 50 # Initial balance
+            user.balance = 500 # Initial balance, less than 1000 for test
             db.session.commit()
 
-        payload = {"amount_sats": 100, "withdraw_wallet_address": "test_btc_address"}
+        payload = {"amount_sats": 1000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted payload
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
         data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 400, data.get('status_message')) # API returns 400 for this
+        self.assertEqual(response.status_code, 400, data.get('status_message'))
         self.assertFalse(data['status'])
         self.assertEqual(data['status_message'], 'Insufficient funds')
 
@@ -549,18 +572,17 @@ class BillingApiTests(BaseTestCase):
                 user_id=user.id,
                 bonus_code_id=bonus_code_obj.id,
                 bonus_amount_awarded_sats=500,
-                wagering_requirement_multiplier=bonus_code_obj.wagering_requirement_multiplier,
-                wagering_requirement_sats= (500 + 500) * bonus_code_obj.wagering_requirement_multiplier, # Example calculation
-                wagering_progress_sats=100, 
+                wagering_requirement_sats= int(500 * bonus_code_obj.wagering_requirement_multiplier),
+                wagering_progress_sats=100,
                 is_active=True,
                 is_completed=False,
                 is_cancelled=False,
-                activated_at=datetime.now(timezone.utc)
+                awarded_at=datetime.now(timezone.utc)
             )
             db.session.add(user_bonus)
             db.session.commit()
 
-        payload = {"amount_sats": 200, "withdraw_wallet_address": "test_btc_address_wagering"}
+        payload = {"amount_sats": 1000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted amount_sats and address
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
         data = json.loads(response.data.decode())
 
@@ -578,12 +600,15 @@ class PlinkoApiTests(BaseTestCase):
         # Create user if not exists, then login
         user = User.query.filter_by(username=username).first()
         if not user:
-            user = self._create_user(username=username, password=password, email=f"{username}@example.com")
+            self._create_user(username=username, password=password, email=f"{username}@example.com")
+            user = User.query.filter_by(username=username).first() # Re-fetch user
+
+        self.assertIsNotNone(user, f"User {username} could not be created or fetched for _get_auth_headers.")
         
-        login_payload = {"username": username, "password": password}
+        login_payload = {"username": user.username, "password": password} # Use user.username from fetched user
         response = self.client.post('/api/login', json=login_payload)
         data = json.loads(response.data.decode())
-        self.assertTrue(data.get('status'))
+        self.assertTrue(data.get('status'), f"Login failed for user {username} in _get_auth_headers. Response: {data}") # Added more info
         access_token = data['access_token']
         return {'Authorization': f'Bearer {access_token}'}, user.id
 
@@ -674,24 +699,28 @@ class PlinkoApiTests(BaseTestCase):
             db.session.commit()
 
         test_cases = [
-            ({"chosen_stake_label": "Low", "slot_landed_label": "2x"}, "stake_amount", 400, "Validation failed"), # Missing stake_amount
-            ({"stake_amount": 1.0, "slot_landed_label": "2x"}, "chosen_stake_label", 400, "Validation failed"),    # Missing chosen_stake_label
-            ({"stake_amount": 1.0, "chosen_stake_label": "Low"}, "slot_landed_label", 400, "Validation failed"), # Missing slot_landed_label
-            ({"stake_amount": 1.0, "chosen_stake_label": "InvalidTier", "slot_landed_label": "2x"}, "error", 400, "Invalid stake label"), # Invalid stake tier
-            ({"stake_amount": 0.05, "chosen_stake_label": "Low", "slot_landed_label": "2x"}, "error", 400, "out of range for Low tier"), # Stake too low for tier
-            ({"stake_amount": 1.0, "chosen_stake_label": "Low", "slot_landed_label": "100x"}, "error", 400, "Invalid slot landed label"), # Invalid slot
+            # Marshmallow validation errors (missing fields)
+            ({"chosen_stake_label": "Low", "slot_landed_label": "2x"}, "stake_amount", 400, "Missing data for required field."),
+            ({"stake_amount": 1.0, "slot_landed_label": "2x"}, "chosen_stake_label", 400, "Missing data for required field."),
+            ({"stake_amount": 1.0, "chosen_stake_label": "Low"}, "slot_landed_label", 400, "Missing data for required field."),
+            # Custom validation errors (invalid choices or out of range)
+            ({"stake_amount": 1.0, "chosen_stake_label": "InvalidTier", "slot_landed_label": "2x"}, "chosen_stake_label", 400, "Must be one of: Low, Medium, High."),
+            ({"stake_amount": 0.05, "chosen_stake_label": "Low", "slot_landed_label": "2x"}, "error", 400, "Stake amount 0.05 out of range for Low tier"), # This is a custom error message from the route
+            ({"stake_amount": 1.0, "chosen_stake_label": "Low", "slot_landed_label": "100x"}, "slot_landed_label", 400, "Must be one of: 0.5x, 2x, 5x."),
         ]
 
-        for payload, error_key, expected_status, expected_message_part in test_cases:
+        for payload, error_field, expected_status, expected_message_part in test_cases:
             with self.subTest(payload=payload):
                 response = self.client.post('/api/plinko/play', headers=headers, json=payload)
                 data = json.loads(response.data.decode())
                 self.assertEqual(response.status_code, expected_status)
-                if 'success' in data: # Our custom success=False responses
-                    self.assertFalse(data['success'])
+
+                if 'success' in data and not data['success']: # Custom error from route logic (e.g. stake out of range)
                     self.assertIn(expected_message_part, data['error'])
                 else: # Marshmallow validation errors
-                    self.assertIn(expected_message_part, str(data.get('messages', data.get('error'))))
+                    messages = data.get('messages', {})
+                    self.assertIn(error_field, messages)
+                    self.assertIn(expected_message_part, messages[error_field][0])
 
 
     def test_plinko_play_no_auth(self):

@@ -3,7 +3,7 @@ import json
 import random
 from flask import current_app
 import secrets
-from casino_be.utils.spin_handler import SLOT_CONFIG_BASE_PATH
+# from casino_be.utils.spin_handler import SLOT_CONFIG_BASE_PATH # Removed import
 
 def load_multiway_game_config(slot_short_name):
     """
@@ -12,12 +12,19 @@ def load_multiway_game_config(slot_short_name):
     for multiway-specific configurations if they differ, or can be a direct reuse
     if the structure is identical.
     """
-    # Construct path like "public/slots/slot_short_name/gameConfig.json"
-    config_path = os.path.join(SLOT_CONFIG_BASE_PATH, slot_short_name, "gameConfig.json")
+    # Construct path relative to the 'casino_be' package directory
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'public', 'slots'))
+    config_path = os.path.join(base_dir, slot_short_name, "gameConfig.json")
 
     if not os.path.exists(config_path):
-        # Log or raise a more specific error for multiway config
-        raise FileNotFoundError(f"Multiway game configuration not found for slot '{slot_short_name}' at {config_path}")
+        # Fallback or alternative if casino_fe structure is intended
+        alt_base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'casino_fe', 'public', 'slots'))
+        alt_config_path = os.path.join(alt_base_dir, slot_short_name, "gameConfig.json")
+        if os.path.exists(alt_config_path):
+            config_path = alt_config_path
+        else:
+            primary_expected_path = os.path.join(base_dir, slot_short_name, "gameConfig.json")
+            raise FileNotFoundError(f"Multiway game configuration not found for slot '{slot_short_name}' at {primary_expected_path} (also checked {alt_config_path})")
 
     try:
         with open(config_path, 'r') as f:
@@ -480,30 +487,33 @@ def handle_multiway_spin(user: User, slot: db.Model, game_session: GameSession, 
                 line_win_detail['win_amount_sats'] = int(line_win_detail['win_amount_sats'] * current_spin_multiplier)
 
         # --- Check for Bonus Trigger (using multiway grid) ---
+        # Bonus trigger check should occur on all spins (normal and bonus) to allow for retriggers.
         bonus_triggered_this_spin = False
-        if not is_bonus_spin:
-            # check_bonus_trigger expects a grid of symbol IDs.
-            # generated_grid_data["symbols_grid"] is the correct structure.
-            bonus_trigger_info = check_bonus_trigger(
-                generated_grid_data["symbols_grid"], # Pass the actual grid of symbols
-                cfg_scatter_symbol_id,
-                cfg_bonus_features
-            )
-            if bonus_trigger_info['triggered']:
-                bonus_triggered_this_spin = True
-                newly_awarded_spins = bonus_trigger_info.get('spins_awarded', 0)
-                new_bonus_multiplier = bonus_trigger_info.get('multiplier', 1.0)
+        # check_bonus_trigger expects a grid of symbol IDs.
+        # generated_grid_data["symbols_grid"] is the correct structure.
+        bonus_trigger_info = check_bonus_trigger(
+            generated_grid_data["symbols_grid"], # Pass the actual grid of symbols
+            cfg_scatter_symbol_id,
+            cfg_bonus_features
+        )
 
-                if not game_session.bonus_active:
-                    game_session.bonus_active = True
-                    game_session.bonus_spins_remaining = newly_awarded_spins
-                    game_session.bonus_multiplier = new_bonus_multiplier
-                else: # Re-trigger
-                    game_session.bonus_spins_remaining += newly_awarded_spins
-                    if new_bonus_multiplier != game_session.bonus_multiplier and newly_awarded_spins > 0:
-                        game_session.bonus_multiplier = new_bonus_multiplier # Or some other logic like max()
+        if bonus_trigger_info['triggered']:
+            bonus_triggered_this_spin = True
+            newly_awarded_spins = bonus_trigger_info.get('spins_awarded', 0)
+            new_bonus_multiplier = bonus_trigger_info.get('multiplier', 1.0)
 
-        elif game_session.bonus_active and game_session.bonus_spins_remaining <= 0:
+            if not game_session.bonus_active: # Starting a new bonus
+                game_session.bonus_active = True
+                game_session.bonus_spins_remaining = newly_awarded_spins
+                game_session.bonus_multiplier = new_bonus_multiplier
+            else: # Re-trigger or adding to existing bonus
+                game_session.bonus_spins_remaining += newly_awarded_spins
+                # Consider if multiplier should update on retrigger, e.g., take max, or specific retrigger multiplier
+                if newly_awarded_spins > 0 and new_bonus_multiplier != game_session.bonus_multiplier : # Example: update if different
+                     game_session.bonus_multiplier = new_bonus_multiplier # Or max(game_session.bonus_multiplier, new_bonus_multiplier)
+
+        # Check if bonus ended (only if it was active before this spin and now remaining spins are zero or less)
+        if game_session.bonus_active and game_session.bonus_spins_remaining <= 0:
             game_session.bonus_active = False
             game_session.bonus_multiplier = 1.0 # Reset
 

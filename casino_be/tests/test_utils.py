@@ -8,7 +8,7 @@ from casino_be.app import app # Added app for app_context
 from datetime import datetime, timezone, timedelta
 
 # Importing BaseTestCase to leverage its setup for DB interactions
-from .test_api import BaseTestCase
+from casino_be.tests.test_api import BaseTestCase
 
 
 @unittest.skip("Skipping Bitcoin utils tests due to persistent python-bitcoinlib import issues in this environment.")
@@ -28,7 +28,7 @@ class TestSpinHandlerUtils(unittest.TestCase):
         Test calculate_win with a simple payline win.
         """
         grid = [[1, 1, 1, 2, 3], [4, 5, 6, 7, 8], [9, 10, 11, 12, 13]]
-        config_paylines = [{"id": "line1", "positions": [[0, 0], [0, 1], [0, 2], [0,3], [0,4]]}] # Top row
+        config_paylines = [{"id": "line1", "coords": [[0, 0], [0, 1], [0, 2], [0,3], [0,4]]}] # Top row
 
         config_symbols_map = {
             1: {"id": 1, "name": "Symbol1", "value_multipliers": {"3": 10.0}},
@@ -46,7 +46,8 @@ class TestSpinHandlerUtils(unittest.TestCase):
             config_symbols_map=config_symbols_map,
             total_bet_sats=total_bet_sats,
             wild_symbol_id=None,
-            scatter_symbol_id=None
+            scatter_symbol_id=None,
+            min_symbols_to_match=None
         )
 
         self.assertEqual(result['total_win_sats'], expected_total_win)
@@ -66,7 +67,7 @@ class TestSpinHandlerUtils(unittest.TestCase):
         scatter_symbol_id = 7
         config_symbols_map = {
             1: {"id": 1, "name": "Symbol1"},
-            7: {"id": 7, "name": "Scatter", "payouts": {"3": 5.0}},
+            7: {"id": 7, "name": "Scatter", "scatter_payouts": {"3": 5.0}}, # Changed "payouts" to "scatter_payouts"
         }
 
         total_bet_sats = 50
@@ -79,7 +80,8 @@ class TestSpinHandlerUtils(unittest.TestCase):
             config_symbols_map=config_symbols_map,
             total_bet_sats=total_bet_sats,
             wild_symbol_id=None,
-            scatter_symbol_id=scatter_symbol_id
+            scatter_symbol_id=scatter_symbol_id,
+            min_symbols_to_match=None
         )
 
         self.assertEqual(result['total_win_sats'], expected_total_win)
@@ -164,7 +166,8 @@ class TestBonusLogicUtils(BaseTestCase): # Inherit from BaseTestCase for app_con
 
     def test_update_wagering_progress(self):
         # User created via BaseTestCase's _create_user helper
-        user = self._create_user(username="bonuswageruser", email="bwu@example.com", balance=5000)
+        user = self._create_user(username="bonuswageruser", email="bwu@example.com")
+        user.balance = 5000 # Set balance separately
 
         # Bonus code created via BaseTestCase's _create_bonus_code helper
         # Ensure this helper is available in BaseTestCase as defined in the previous step for test_api.py
@@ -176,13 +179,12 @@ class TestBonusLogicUtils(BaseTestCase): # Inherit from BaseTestCase for app_con
                 user_id=user.id,
                 bonus_code_id=bonus_code.id, # Use the ID from the created bonus code
                 bonus_amount_awarded_sats=100,
-                wagering_requirement_multiplier=bonus_code.wagering_requirement_multiplier, # from bonus code
                 wagering_requirement_sats=100 * bonus_code.wagering_requirement_multiplier, # e.g. 100 * 10 = 1000
                 wagering_progress_sats=0,
                 is_active=True,
                 is_completed=False,
                 is_cancelled=False,
-                activated_at=datetime.now(timezone.utc)
+                awarded_at=datetime.now(timezone.utc)
             )
             db.session.add(user_bonus)
             db.session.commit()

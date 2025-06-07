@@ -126,6 +126,7 @@ class BonusCode(db.Model):
     uses_remaining = db.Column(db.Integer, nullable=True)
     expires_at = db.Column(db.DateTime(timezone=True), nullable=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    wagering_requirement_multiplier = db.Column(db.Float, default=1.0, nullable=False) # Added field
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     def __repr__(self):

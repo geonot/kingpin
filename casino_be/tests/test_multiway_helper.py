@@ -4,7 +4,7 @@ import json
 import secrets # To mock choices if needed for future cascade tests in multiway
 
 from casino_be.app import app, db
-from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction
+from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction, SlotSymbol
 from casino_be.utils.multiway_helper import handle_multiway_spin # Target function
 
 # Default configuration values that can be overridden by specific tests

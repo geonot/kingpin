@@ -4,7 +4,7 @@ import secrets # To mock choices if needed
 import json # Added for json.dumps in helper
 
 from casino_be.app import app, db
-from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction
+from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction, SlotSymbol # Added SlotSymbol
 from casino_be.utils.spin_handler import handle_spin # Target function
 # from casino_be.utils.slot_builder import SLOT_CONFIG_BASE_PATH # To see where load_game_config looks - Removed as it does not exist
 
@@ -14,16 +14,19 @@ BASE_GAME_CONFIG = {
         "slot_id": 1,
         "name": "Test Slot",
         "short_name": "test_slot1",
-        "layout": {"rows": 3, "columns": 5},
+        "layout": {
+            "rows": 3,
+            "columns": 5,
+            "paylines": [
+                {"id": "line_1", "coords": [[1,0],[1,1],[1,2],[1,3],[1,4]]} # Middle row
+            ]
+        },
         "symbols": [
             {"id": 1, "name": "SymbolA", "asset": "symA.png", "value_multipliers": {"3": 10, "4": 20, "5": 50}, "weight": 10},
             {"id": 2, "name": "SymbolB", "asset": "symB.png", "value_multipliers": {"3": 5, "4": 10, "5": 20}, "weight": 20},
             {"id": 3, "name": "SymbolC", "asset": "symC.png", "value_multipliers": {"3": 2, "4": 4, "5": 8}, "weight": 30},
             {"id": 4, "name": "Scatter", "asset": "scatter.png", "payouts": {"3": 5, "4": 10, "5": 20}, "weight": 5}, # Scatter
             {"id": 5, "name": "Wild", "asset": "wild.png", "weight": 3} # Wild
-        ],
-        "paylines": [
-            {"id": "line_1", "positions": [[1,0],[1,1],[1,2],[1,3],[1,4]]} # Middle row
         ],
         "payouts": [], # General payouts, might be used for cluster later
         "wild_symbol_id": 5,
@@ -43,6 +46,7 @@ class TestSpinHandler(unittest.TestCase):
         # self.app.config.update(TESTING=True) # Ensure testing config if not already set by env vars
         self.app_context = self.app.app_context()
         self.app_context.push()
+        db.session.expunge_all() # Ensure session is clean before creating tables and objects
         db.create_all()
 
         self.user = User(username='testuser', email='test@example.com', password='password')
@@ -50,24 +54,40 @@ class TestSpinHandler(unittest.TestCase):
         db.session.add(self.user)
 
         self.slot = Slot(
-            id=1,
+            id=1, # Explicitly setting ID
             name="Test Slot",
-            short_name="test_slot1", # Must match what load_game_config expects
+            short_name="test_slot1",
             num_rows=3,
             num_columns=5,
-            num_symbols=11, # Added default based on typical config
-            asset_directory="/test_assets/", # Added missing non-nullable field
+            num_symbols=5,
+            asset_directory="/test_assets/",
             is_active=True,
             rtp=95.0,
             volatility="Medium",
-            # Cascading fields will be set by mock_game_config typically
             is_cascading=False,
             win_multipliers=None
         )
-        # Add some default symbols to slot.symbols relationship if generate_spin_grid relies on it
-        # For now, assume config_symbols_map is primary source for symbol properties in spin_handler
         db.session.add(self.slot)
+        # db.session.flush() # Removed early flush for slot
+
+        # Create SlotSymbol instances based on BASE_GAME_CONFIG and associate with the slot
+        # These are needed for handle_cascade_fill's db_symbols argument (slot.symbols)
+        base_symbols_config = BASE_GAME_CONFIG.get("game", {}).get("symbols", [])
+        for symbol_conf in base_symbols_config:
+            slot_symbol = SlotSymbol(
+                slot_id=self.slot.id,
+                symbol_internal_id=symbol_conf["id"],
+                name=symbol_conf["name"],
+                img_link=symbol_conf.get("asset", f"default_asset_{symbol_conf['id']}.png"), # Provide img_link
+                value_multiplier=0.0, # Provide default for NOT NULL value_multiplier
+                # data field can be used for value_multipliers or scatter_payouts if needed by model
+                # For now, assuming spin_handler uses gameConfig.json primarily for these.
+            )
+            db.session.add(slot_symbol)
+            self.slot.symbols.append(slot_symbol) # Add to the relationship
+
         db.session.commit()
+
 
         self.game_session = GameSession(user_id=self.user.id, slot_id=self.slot.id, game_type='slot')
         db.session.add(self.game_session)
@@ -86,6 +106,7 @@ class TestSpinHandler(unittest.TestCase):
 
 
     def tearDown(self):
+        db.session.expunge_all() # Expunge all instances from the session
         db.session.remove()
         db.drop_all()
         self.app_context.pop()
@@ -122,10 +143,12 @@ class TestSpinHandler(unittest.TestCase):
 
     def test_win_on_non_cascading_slot(self):
         # Configure a winning grid
+        # BASE_GAME_CONFIG payline is middle row: [[1,0],[1,1],[1,2],[1,3],[1,4]]
+        # Symbol 1 (SymA) pays 10x for 3.
         winning_grid = [
-            [1, 1, 1, 2, 3], # Symbol 1 (value 10 for 3) on payline
-            [2, 3, 1, 2, 3],
-            [3, 1, 2, 3, 1]
+            [2, 3, 1, 2, 3],  # Non-winning row
+            [1, 1, 1, 2, 3],  # WINNING: SymA, SymA, SymA on middle row (payline)
+            [3, 1, 2, 3, 1]   # Non-winning row
         ]
         self.mock_generate_grid.return_value = winning_grid
         self.slot.is_cascading = False # Ensure slot model reflects this
@@ -178,7 +201,10 @@ class TestSpinHandler(unittest.TestCase):
                     {"id": 3, "name": "SymbolC", "asset": "symC.png", "value_multipliers": {"3": 2}, "weight": 30},
                     {"id": 5, "name": "Wild", "asset": "wild.png", "weight": 3}
                 ],
-                 "paylines": [{"id": "line_1", "positions": [[1,0],[1,1],[1,2]]}] # Simplified 3-symbol payline
+                "layout": { # Overriding layout to change paylines
+                    **BASE_GAME_CONFIG["game"]["layout"],
+                    "paylines": [{"id": "line_1", "coords": [[1,0],[1,1],[1,2]]}]
+                }
             }
         }
         self.mock_load_config.return_value = test_config
@@ -197,10 +223,12 @@ class TestSpinHandler(unittest.TestCase):
         # Let these new symbols for row 0, cols 0,1,2 be [3,3,3] (SymbolC, no win on the payline).
         # self.mock_choices is used by handle_cascade_fill. It's called for each new symbol.
         # Since 3 symbols are needed to fill the top row (cols 0, 1, 2 after fall).
+        # choices(k=1) returns a list like [symbol_id].
+        # Provide enough for two fills. First fill uses symbol 6 (expected to be non-winning).
         self.mock_choices.side_effect = [
-            [[3]], # New symbol for grid[0][0]
-            [[3]], # New symbol for grid[0][1]
-            [[3]], # New symbol for grid[0][2]
+            [6], [6], [6], # Fill for after initial win (SymB [2,2,2] wins)
+                           # This fill (Sym 6) should not create a new win on the payline.
+            [3], [3], [3]  # Extra fill symbols in case logic proceeds further than expected.
         ]
 
         bet_amount = 100
@@ -248,11 +276,15 @@ class TestSpinHandler(unittest.TestCase):
                 "cascade_type": "replace_in_place",
                 "win_multipliers": [2, 3],
                 "symbols": [
-                    {"id": 1, "name": "SymbolA", "asset": "symA.png", "value_multipliers": {"3": 10}, "weight": 10}, # Wins
-                    {"id": 2, "name": "SymbolB", "asset": "symB.png", "value_multipliers": {"3": 5}, "weight": 20},  # Initial win
-                    {"id": 3, "name": "SymbolC", "asset": "symC.png", "value_multipliers": {"3": 2}, "weight": 30},  # No win
+                    {"id": 1, "name": "SymbolA", "asset": "symA.png", "value_multipliers": {"3": 10}, "weight": 10},
+                    {"id": 2, "name": "SymbolB", "asset": "symB.png", "value_multipliers": {"3": 5}, "weight": 20},
+                    {"id": 3, "name": "SymbolC", "asset": "symC.png", "value_multipliers": {"3": 2}, "weight": 30},
+                    {"id": 6, "name": "SymbolDud", "asset": "symDud.png", "weight": 30} # Non-winning symbol
                 ],
-                "paylines": [{"id": "line_1", "positions": [[1,0],[1,1],[1,2]]}]
+                "layout": { # Overriding layout to change paylines
+                    **BASE_GAME_CONFIG["game"]["layout"],
+                    "paylines": [{"id": "line_1", "coords": [[1,0],[1,1],[1,2]]}]
+                }
             }
         }
         self.mock_load_config.return_value = test_config_replace
@@ -269,13 +301,9 @@ class TestSpinHandler(unittest.TestCase):
         # Let the new symbols be [1,1,1] (SymbolA) to cause a cascade win.
         # Then, for the next cascade, let the new symbols be [3,3,3] (SymbolC) to stop.
         self.mock_choices.side_effect = [
-            [[1]], # New symbol for grid[1][0] (replaces a '2')
-            [[1]], # New symbol for grid[1][1] (replaces a '2')
-            [[1]], # New symbol for grid[1][2] (replaces a '2')
-            # Second cascade fill (after [1,1,1] win)
-            [[3]], # New symbol for grid[1][0]
-            [[3]], # New symbol for grid[1][1]
-            [[3]], # New symbol for grid[1][2]
+            [1], [1], [1], # Fill for after initial win (makes SymA win)
+            [6], [6], [6], # Fill for after SymA win (makes SymDud, should not win on payline)
+            [6], [6], [6]  # Extra, just in case
         ]
 
         bet_amount = 100
@@ -353,8 +381,10 @@ class TestSpinHandler(unittest.TestCase):
         # Column 2: grid[2,2] removed. grid[1,2](2) falls to (2,2). grid[0,2](3) falls to (1,2). Needs 1 new at (0,2). Let it be 3.
         # This fill logic is complex to mock precisely without visualizing.
         # Let's simplify: assume 4 new symbols are needed and make them non-winning.
+        # Provide enough for a potential second fill if logic attempts it.
         self.mock_choices.side_effect = [
-            [[2]], [[3]], [[3]], [[2]] # Fill the 4 emptied spots (or top spots) with non-winning sequence
+            [2], [3], [3], [2], # Fill for after initial cluster win
+            [2], [3], [3], [2]  # Extra, just in case - make these non-winning for the specific test
         ]
 
         bet_amount = 100
@@ -398,9 +428,13 @@ class TestSpinHandler(unittest.TestCase):
                 "symbols": [
                     {"id": 1, "name": "SymbolA", "asset": "symA.png", "value_multipliers": {"3": 10}, "weight": 10},
                     {"id": 2, "name": "SymbolB", "asset": "symB.png", "value_multipliers": {"3": 5}, "weight": 20},
-                    {"id": 3, "name": "SymbolC", "asset": "symC.png", "value_multipliers": {"3": 2}, "weight": 30}, # Non-winning
+                    {"id": 3, "name": "SymbolC", "asset": "symC.png", "value_multipliers": {"3": 2}, "weight": 30},
+                    {"id": 6, "name": "SymbolDud", "asset": "symDud.png", "weight": 30} # Non-winning symbol
                 ],
-                "paylines": [{"id": "line_1", "positions": [[0,0],[0,1],[0,2]]}] # Top row payline
+                "layout": { # Overriding layout to change paylines
+                    **BASE_GAME_CONFIG["game"]["layout"],
+                    "paylines": [{"id": "line_1", "coords": [[0,0],[0,1],[0,2]]}]
+                }
             }
         }
         self.mock_load_config.return_value = test_config_multi
@@ -416,11 +450,12 @@ class TestSpinHandler(unittest.TestCase):
         # Mock choices for cascades (replace_in_place at [0,0],[0,1],[0,2])
         self.mock_choices.side_effect = [
             # Cascade 1: Replace [1,1,1] with [2,2,2] (SymbolB) -> Wins
-            [[2]], [[2]], [[2]],
+            [2], [2], [2],
             # Cascade 2: Replace [2,2,2] with [1,1,1] (SymbolA) -> Wins again
-            [[1]], [[1]], [[1]],
-            # Cascade 3: Replace [1,1,1] with [3,3,3] (SymbolC) -> No Win
-            [[3]], [[3]], [[3]],
+            [1], [1], [1],
+            # Cascade 3: Replace [1,1,1] with [6,6,6] (SymbolDud) -> No Win
+            [6], [6], [6],
+            [6], [6], [6] # Extra, just in case
         ]
 
         bet_amount = 100
@@ -511,7 +546,7 @@ class TestSpinHandler(unittest.TestCase):
         test_grid = [
             [1, 1, 2, 3, 2],
             [1, 1, 3, 2, 3],
-            [3, 2, 3, 4, 5]
+            [3, 2, 3, 4, 3] # Changed Wild (5) to non-winning SymbolC (3) to ensure no wilds
         ]
         self.mock_generate_grid.return_value = test_grid
         bet_amount = 100
@@ -627,12 +662,12 @@ class TestSpinHandler(unittest.TestCase):
         self.helper_configure_cluster_game(min_match=min_match, cluster_payouts_sym1=payouts_sym1,
                                            is_cascading=True, cascade_type="fall_from_top", win_multipliers=[2.0])
 
-        # Grid: 3 SymbolA (id=1), 1 Wild (id=5) at (0,0)
-        # Winning symbols are (0,0)W, (0,1)A, (1,0)A, (1,1)A
+        # Grid: 4 SymbolA (id=1), 0 Wilds for the initial win part.
+        # Payout for 4 SymA is 10x. Expected win 1000.
         initial_grid = [
-            [5, 1, 2, 3, 4], # Wild, SymbolA
-            [1, 1, 3, 2, 3], # SymbolA, SymbolA
-            [2, 3, 4, 5, 1]
+            [1, 1, 2, 3, 4],
+            [1, 1, 3, 2, 3],
+            [2, 3, 4, 5, 6] # Ensure no wilds that would make it > 4 effective count
         ]
         self.mock_generate_grid.return_value = initial_grid
 
@@ -645,10 +680,13 @@ class TestSpinHandler(unittest.TestCase):
         # After fall: grid[2,0] becomes 2. grid[1,0] needs fill. grid[0,0] needs fill.
         # Col 1: (0,1) removed. (1,1) removed. (2,1) is 3.
         # After fall: grid[2,1] becomes 3. grid[1,1] needs fill. grid[0,1] needs fill.
-        # So, 4 fills are needed for the top two rows in cols 0 and 1.
+        # Mock cascade fill: 4 symbols (1,1,1,1) removed from (0,0),(0,1),(1,0),(1,1)
+        # Needs 4 new symbols for the top positions in first two columns if "fall_from_top"
+        # Using a non-winning symbol (e.g. 6)
         self.mock_choices.side_effect = [
-            [[3]], [[3]], # For (0,0), (1,0)
-            [[3]], [[3]]  # For (0,1), (1,1)
+            [6], [6], # For col 0
+            [6], [6]  # For col 1
+            # Add more if more cascades are expected or possible
         ]
 
         bet_amount = 100

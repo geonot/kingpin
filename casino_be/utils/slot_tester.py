@@ -283,7 +283,6 @@ class SlotTester:
             bet_for_calc_win, # Base win calculation on original bet for bonus spins too
             cfg_wild_symbol_id,
             cfg_scatter_symbol_id,
-            game_data.get('payouts', []),
             cfg_min_symbols_to_match
         )
         initial_raw_win_sats = win_info['total_win_sats']
@@ -315,7 +314,6 @@ class SlotTester:
                     actual_bet_this_spin if not is_bonus_spin else bet_amount_sats,
                     cfg_wild_symbol_id,
                     cfg_scatter_symbol_id,
-                    game_data.get('payouts', []),
                     cfg_min_symbols_to_match
                 )
                 new_raw_win_this_cascade = cascade_win_info['total_win_sats']

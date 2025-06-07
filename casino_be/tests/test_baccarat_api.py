@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 from flask import Flask, jsonify
 from decimal import Decimal
+from flask_jwt_extended import create_access_token # Added import
 
 # Assuming app structure and necessary imports
 from casino_be.app import app, db
@@ -10,40 +11,56 @@ from casino_be.schemas import BaccaratTableSchema, BaccaratHandSchema, PlaceBacc
 
 # It's good practice to use a specific test configuration for Flask app
 # For simplicity, we'll use the existing app and mock heavily.
+from casino_be.tests.test_api import BaseTestCase # Import BaseTestCase
 
-class TestBaccaratAPI(unittest.TestCase):
+class TestBaccaratAPI(BaseTestCase): # Inherit from BaseTestCase
 
     def setUp(self):
-        self.app = app.test_client()
-        self.app_context = app.app_context()
-        self.app_context.push() # Push an application context
+        super().setUp() # Call BaseTestCase.setUp() to push app_context and call db.create_all()
 
-        # Mock user for JWT
-        self.mock_user = User(id=1, username='testuser', email='test@example.com', balance=10000)
-        self.mock_user.is_admin = False
+        # Create user using BaseTestCase helper
+        self.mock_user = self._create_user(username='baccarat_user', email='baccarat@example.com', password='password')
+        self.mock_user.is_admin = False # Customize if needed after creation
+        # db.session.add(self.mock_user) # _create_user already adds and commits if changes are made after.
+        # db.session.commit()
 
-        # Patch get_jwt_identity and current_user
-        self.patcher_get_jwt_identity = patch('casino_be.app.get_jwt_identity', return_value=self.mock_user.id)
-        self.patcher_current_user = patch('casino_be.app.current_user', self.mock_user)
+        with self.app_context: # app_context is available from super().setUp()
+            self.access_token = create_access_token(identity=self.mock_user) # Use the created user object
 
-        self.mock_get_jwt_identity = self.patcher_get_jwt_identity.start()
-        self.mock_current_user_obj = self.patcher_current_user.start()
+        # Mock User.query.get for user_lookup_callback.
+        # If this works, current_user within the route will be correctly set by @jwt_required.
+        # User.query.get will now find the user created by _create_user from the actual DB session
+        # if user_lookup_callback uses the actual session.
+        # However, to ensure the mock_user object (with any specific test modifications) is returned by JWT's user lookup:
+        self.mock_user_query_patch = patch('casino_be.models.User.query')
+        self.mock_user_query = self.mock_user_query_patch.start()
+
+        def mock_user_get(user_id_from_token):
+            if user_id_from_token == self.mock_user.id:
+                return self.mock_user
+            # Fallback to actual DB query for other IDs if necessary,
+            # but for these tests, only self.mock_user.id should be looked up via JWT.
+            # The self.mock_user_query is User.query. Using User.query.get() here would recurse.
+            # If a real DB lookup for other IDs was needed, it would require careful handling of the mock.
+            # For now, return None if not the mock_user.id.
+            return None
+        self.mock_user_query.get.side_effect = mock_user_get
 
 
     def tearDown(self):
-        self.patcher_get_jwt_identity.stop()
-        self.patcher_current_user.stop()
-        self.app_context.pop()
+        # self.patcher_current_user.stop() # No longer started
+        self.mock_user_query_patch.stop()
+        super().tearDown() # Call BaseTestCase.tearDown() to drop_all and pop_context
 
 
-    @patch('casino_be.models.BaccaratTable.query')
-    def test_get_baccarat_tables(self, mock_query):
+    @patch('casino_be.models.BaccaratTable.query') # This patch is for BaccaratTable, not BaccaratHand
+    def test_get_baccarat_tables(self, mock_baccarat_table_query): # Renamed mock for clarity
         # Mock DB response
         table1 = BaccaratTable(id=1, name="Baccarat Table 1", min_bet=100, max_bet=1000, max_tie_bet=200, commission_rate=Decimal("0.05"), is_active=True)
         table2 = BaccaratTable(id=2, name="Baccarat Table 2", min_bet=500, max_bet=5000, max_tie_bet=1000, commission_rate=Decimal("0.05"), is_active=True)
-        mock_query.filter_by.return_value.order_by.return_value.all.return_value = [table1, table2]
+        mock_baccarat_table_query.filter_by.return_value.order_by.return_value.all.return_value = [table1, table2]
 
-        response = self.app.get('/api/baccarat/tables', headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.get('/api/baccarat/tables', headers={'Authorization': f'Bearer {self.access_token}'})
 
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
@@ -56,7 +73,7 @@ class TestBaccaratAPI(unittest.TestCase):
         mock_table = BaccaratTable(id=1, name="Baccarat Table 1", is_active=True)
         mock_query_table.get.return_value = mock_table
 
-        response = self.app.post('/api/baccarat/tables/1/join', headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.post('/api/baccarat/tables/1/join', headers={'Authorization': f'Bearer {self.access_token}'})
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertTrue(data['status'])
@@ -66,7 +83,7 @@ class TestBaccaratAPI(unittest.TestCase):
     @patch('casino_be.models.BaccaratTable.query')
     def test_join_baccarat_table_not_found(self, mock_query_table):
         mock_query_table.get.return_value = None
-        response = self.app.post('/api/baccarat/tables/99/join', headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.post('/api/baccarat/tables/99/join', headers={'Authorization': f'Bearer {self.access_token}'})
         self.assertEqual(response.status_code, 404)
         data = response.get_json()
         self.assertFalse(data['status'])
@@ -76,7 +93,7 @@ class TestBaccaratAPI(unittest.TestCase):
     def test_join_baccarat_table_not_active(self, mock_query_table):
         mock_table = BaccaratTable(id=1, name="Baccarat Table 1", is_active=False)
         mock_query_table.get.return_value = mock_table
-        response = self.app.post('/api/baccarat/tables/1/join', headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.post('/api/baccarat/tables/1/join', headers={'Authorization': f'Bearer {self.access_token}'})
         self.assertEqual(response.status_code, 400) # As per current app.py logic
         data = response.get_json()
         self.assertFalse(data['status'])
@@ -121,7 +138,7 @@ class TestBaccaratAPI(unittest.TestCase):
             "bet_on_banker": 0,
             "bet_on_tie": 0
         }
-        response = self.app.post('/api/baccarat/hands', json=bet_payload, headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.post('/api/baccarat/hands', json=bet_payload, headers={'Authorization': f'Bearer {self.access_token}'})
 
         self.assertEqual(response.status_code, 200, msg=response.get_data(as_text=True))
         data = response.get_json()
@@ -156,7 +173,7 @@ class TestBaccaratAPI(unittest.TestCase):
         mock_bt_query.get.return_value = mock_table
 
         bet_payload = {"table_id": 1, "bet_on_player": 100, "bet_on_banker": 0, "bet_on_tie": 0}
-        response = self.app.post('/api/baccarat/hands', json=bet_payload, headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.post('/api/baccarat/hands', json=bet_payload, headers={'Authorization': f'Bearer {self.access_token}'})
 
         self.assertEqual(response.status_code, 400)
         data = response.get_json()
@@ -165,13 +182,15 @@ class TestBaccaratAPI(unittest.TestCase):
         mock_db_add.assert_not_called()
         mock_db_commit.assert_not_called()
 
-    @patch('casino_be.models.BaccaratHand.query')
-    def test_get_baccarat_hand_success(self, mock_hand_query):
+    @patch('casino_be.routes.baccarat.db.session')
+    def test_get_baccarat_hand_success(self, mock_db_session):
         mock_hand = BaccaratHand(id=1, user_id=self.mock_user.id, table_id=1, total_bet_amount=100, outcome="player_win")
-        # Simulate filter_by().first()
-        mock_hand_query.get.return_value = mock_hand
 
-        response = self.app.get('/api/baccarat/hands/1', headers={'Authorization': 'Bearer testtoken'})
+        mock_query_obj = MagicMock()
+        mock_query_obj.options.return_value.filter.return_value.first.return_value = mock_hand
+        mock_db_session.query.return_value = mock_query_obj
+
+        response = self.client.get('/api/baccarat/hands/1', headers={'Authorization': f'Bearer {self.access_token}'})
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertTrue(data['status'])
@@ -181,33 +200,39 @@ class TestBaccaratAPI(unittest.TestCase):
     @patch('casino_be.models.BaccaratHand.query')
     def test_get_baccarat_hand_not_found(self, mock_hand_query):
         mock_hand_query.get.return_value = None
-        response = self.app.get('/api/baccarat/hands/999', headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.get('/api/baccarat/hands/999', headers={'Authorization': f'Bearer {self.access_token}'})
         self.assertEqual(response.status_code, 404)
         data = response.get_json()
         self.assertFalse(data['status'])
         self.assertIn("not found", data['status_message'])
 
-    @patch('casino_be.models.BaccaratHand.query')
-    def test_get_baccarat_hand_unauthorized(self, mock_hand_query):
+    @patch('casino_be.routes.baccarat.db.session')
+    def test_get_baccarat_hand_unauthorized(self, mock_db_session):
         # Hand belongs to another user
         mock_hand = BaccaratHand(id=1, user_id=2, table_id=1, total_bet_amount=100, outcome="player_win")
-        mock_hand_query.get.return_value = mock_hand
+
+        mock_query_obj = MagicMock()
+        mock_query_obj.options.return_value.filter.return_value.first.return_value = mock_hand
+        mock_db_session.query.return_value = mock_query_obj
 
         # current_user.is_admin is False by default in self.mock_user
-        response = self.app.get('/api/baccarat/hands/1', headers={'Authorization': 'Bearer testtoken'})
+        response = self.client.get('/api/baccarat/hands/1', headers={'Authorization': f'Bearer {self.access_token}'})
         self.assertEqual(response.status_code, 403)
         data = response.get_json()
         self.assertFalse(data['status'])
         self.assertIn("not authorized", data['status_message'])
 
-    @patch('casino_be.models.BaccaratHand.query')
-    def test_get_baccarat_hand_admin_access(self, mock_hand_query):
+    @patch('casino_be.routes.baccarat.db.session')
+    def test_get_baccarat_hand_admin_access(self, mock_db_session):
         self.mock_user.is_admin = True # Make current_user an admin
         # Hand belongs to another user, but admin should access
         mock_hand = BaccaratHand(id=1, user_id=2, table_id=1, total_bet_amount=100, outcome="player_win")
-        mock_hand_query.get.return_value = mock_hand
 
-        response = self.app.get('/api/baccarat/hands/1', headers={'Authorization': 'Bearer testtoken'})
+        mock_query_obj = MagicMock()
+        mock_query_obj.options.return_value.filter.return_value.first.return_value = mock_hand
+        mock_db_session.query.return_value = mock_query_obj
+
+        response = self.client.get('/api/baccarat/hands/1', headers={'Authorization': f'Bearer {self.access_token}'})
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertTrue(data['status'])

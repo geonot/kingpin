@@ -13,7 +13,7 @@ from ..app import limiter # Assuming limiter can be imported directly
 baccarat_bp = Blueprint('baccarat_bp', __name__, url_prefix='/api/baccarat')
 
 @baccarat_bp.route('/tables', methods=['GET'])
-@jwt_required()
+@jwt_required() # Restoring JWT protection
 def get_baccarat_tables():
     try:
         tables = BaccaratTable.query.filter_by(is_active=True).order_by(BaccaratTable.id).all()
@@ -107,9 +107,12 @@ def play_baccarat_hand_route():
         )
         db.session.add(wager_tx)
 
+        # Assuming baccarat_helper.play_baccarat_hand has defaults for num_decks and tie_payout_rate
+        # if table.rules is not a field. BaccaratTable model has commission_rate.
         helper_result = baccarat_helper.play_baccarat_hand(
             player_bet_amount=Decimal(bet_player_sats), banker_bet_amount=Decimal(bet_banker_sats), tie_bet_amount=Decimal(bet_tie_sats),
-            num_decks=table.rules.get('num_decks', 6), commission_rate=table.commission_rate, tie_payout_rate=table.rules.get('tie_payout', 8)
+            commission_rate=table.commission_rate
+            # num_decks and tie_payout_rate will use defaults in helper if not passed
         )
 
         if "error" in helper_result:
@@ -160,7 +163,7 @@ def get_baccarat_hand(hand_id):
         return jsonify({'status': False, 'status_message': f'Baccarat hand {hand_id} not found.'}), HTTPStatus.NOT_FOUND
 
     # Assuming is_admin is available or not needed if endpoint is user-specific
-    if hand.user_id != user.id: # Add admin check if needed: and not user.is_admin
+    if hand.user_id != user.id and not user.is_admin: # Add admin check
         return jsonify({'status': False, 'status_message': 'You are not authorized to view this hand.'}), HTTPStatus.FORBIDDEN
 
     return jsonify({'status': True, 'hand': BaccaratHandSchema().dump(hand)}), HTTPStatus.OK

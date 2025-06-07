@@ -81,7 +81,6 @@ def apply_bonus_to_deposit(user: User, bonus_code_str: str, requested_deposit_am
             user_id=user.id,
             bonus_code_id=bonus_code.id,
             bonus_amount_awarded_sats=bonus_value_sats,
-            wagering_requirement_multiplier=multiplier, # Store the multiplier used
             wagering_requirement_sats=calculated_wagering_req_sats,
             is_active=True,
             is_completed=False,
