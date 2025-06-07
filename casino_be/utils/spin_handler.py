@@ -1,7 +1,7 @@
 import random
 import json
 import os
-import secrets
+# import secrets # No longer used
 from datetime import datetime, timezone
 from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserBonus # Added UserBonus
 # SlotSymbol might not be directly used if all config comes from JSON, but keep for now
@@ -491,7 +491,7 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
             weights = [w / total_weight for w in weights]
 
         for r_idx in range(rows):
-            row_symbols = secure_random.choices(symbols_for_choice, weights=weights, k=columns)
+            row_symbols = random.choices(symbols_for_choice, weights=weights, k=columns)
             grid[r_idx] = row_symbols # Assign directly to the row
         return grid
 
@@ -884,10 +884,9 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
                 else:
                     weights = [w / total_weight for w in weights]
 
-                secure_random = secrets.SystemRandom()
                 for r_fill in range(empty_slots_in_col):
                     if symbols_for_choice: # Ensure there are symbols to choose from
-                        new_grid[r_fill][c] = secure_random.choices(symbols_for_choice, weights=weights, k=1)[0]
+                        new_grid[r_fill][c] = random.choices(symbols_for_choice, weights=weights, k=1)[0]
                     else: # Fallback if no symbols somehow (should be caught earlier)
                         new_grid[r_fill][c] = spinable_symbol_ids[0] if spinable_symbol_ids else 0 # Default to 0 or first available
 
@@ -919,10 +918,9 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
         else:
             weights = [w / total_weight for w in weights]
 
-        secure_random = secrets.SystemRandom()
         for r, c in winning_coords_to_clear: # Iterate through the specific empty slots
             if symbols_for_choice:
-                new_grid[r][c] = secure_random.choices(symbols_for_choice, weights=weights, k=1)[0]
+                new_grid[r][c] = random.choices(symbols_for_choice, weights=weights, k=1)[0]
             else:
                 new_grid[r][c] = spinable_symbol_ids[0] if spinable_symbol_ids else 0
     else:

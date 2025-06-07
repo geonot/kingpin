@@ -1,0 +1,24 @@
+{
+  "game": {
+    "name": "Test Spin Success Slot",
+    "short_name": "spin_succ_slot",
+    "layout": {
+      "rows": 3,
+      "columns": 3,
+      "paylines": [
+        {"id": "line1", "coords": [[0,0],[0,1],[0,2]]}
+      ]
+    },
+    "symbols": [
+      {"id": 1, "name": "Cherry", "value_multipliers": {"3": 10}, "weight": 30},
+      {"id": 2, "name": "Lemon", "value_multipliers": {"3": 5}, "weight": 30},
+      {"id": 3, "name": "BAR", "value_multipliers": {"3": 20}, "weight": 20},
+      {"id": 4, "name": "Wild", "is_wild": true, "weight": 20}
+    ],
+    "wild_symbol_id": 4,
+    "scatter_symbol_id": null,
+    "bonus_features": {},
+    "is_cascading": false,
+    "min_symbols_to_match": null
+  }
+}

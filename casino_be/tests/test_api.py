@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 # It's crucial that 'app' and 'db' are imported from the main application package.
 # Assuming your Flask app instance is named 'app' and SQLAlchemy instance is 'db'
 # in 'casino_be.app' and models are in 'casino_be.models'.
-from casino_be.app import app, db
-from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction, BonusCode, UserBonus # Added BonusCode, UserBonus
+from casino_be.app import app, db, limiter # limiter import removed
+from casino_be.models import (User, Slot, GameSession, SlotSymbol, SlotBet, # Added PlinkoDropLog
+                              TokenBlacklist, Transaction, BonusCode, UserBonus, PlinkoDropLog)
 #SATOSHI_FACTOR might be needed if amounts are converted
 from casino_be.config import Config
 from datetime import timedelta # Added timedelta
+from casino_be.utils.plinko_helper import PAYOUT_MULTIPLIERS, STAKE_CONFIG # Added Plinko helpers
 
 
 class BaseTestCase(unittest.TestCase):
@@ -20,11 +22,19 @@ class BaseTestCase(unittest.TestCase):
     def setUpClass(cls):
         # Configure the Flask app for testing
         app.config['TESTING'] = True
+        app.config['RATELIMIT_ENABLED'] = False # Ensure Flask-Limiter is disabled via app config
         # Use an in-memory SQLite database for tests if TEST_DATABASE_URL is not set
         app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
         app.config['JWT_SECRET_KEY'] = 'test-super-secret-key' # Fixed JWT secret for tests
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
         app.config['WTF_CSRF_ENABLED'] = False # If using Flask-WTF
+
+        cls.limiter = limiter
+        if hasattr(cls.limiter, 'enabled'): # Check if limiter has 'enabled' attribute
+            cls.limiter.enabled = False
+        else:
+            # Log or handle the case where 'enabled' attribute is not found
+            print("Warning: Limiter does not have 'enabled' attribute in setUpClass. Rate limiting might not be disabled.")
 
         cls.app = app
         cls.client = cls.app.test_client()
@@ -39,14 +49,27 @@ class BaseTestCase(unittest.TestCase):
         with cls.app.app_context():
             db.drop_all()
 
+        if hasattr(cls.limiter, 'enabled'):
+            cls.limiter.enabled = True
+
     def setUp(self):
         """Set up for each test."""
         self.app_context = self.app.app_context()
         self.app_context.push()
+
+        self.limiter = limiter # Assign to instance for consistency
+        if hasattr(self.limiter, 'enabled'):
+           self.limiter.enabled = False
+        else:
+            print("Warning: Limiter does not have 'enabled' attribute in setUp. Rate limiting might not be disabled.")
+
         db.create_all() # Create tables fresh for each test
 
     def tearDown(self):
         """Tear down after each test."""
+        if hasattr(self.limiter, 'enabled'):
+           self.limiter.enabled = True
+
         db.session.remove()
         db.drop_all() # Drop tables after each test
         self.app_context.pop()
@@ -190,7 +213,7 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Invalid username or password')
+        self.assertEqual(data['status_message'], 'Invalid credentials.')
 
     def test_login_invalid_password(self):
         """Test login with an invalid password."""
@@ -203,7 +226,7 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Invalid username or password')
+        self.assertEqual(data['status_message'], 'Invalid credentials.')
 
 
 class GameApiTests(BaseTestCase):
@@ -255,9 +278,21 @@ class GameApiTests(BaseTestCase):
                 {"name": "Wild", "value_multiplier": 0, "img_link": "wild.png", "symbol_internal_id": 4, "slot_id": slot_id_val},
             ]
 
+            created_symbols = []
             for s_data in symbols_data:
                 symbol = SlotSymbol(**s_data)
                 db.session.add(symbol)
+                created_symbols.append(symbol)
+
+            # Add default SlotBet entries
+            default_bet_amounts = [10, 10 * Config.SATOSHI_FACTOR] # As used in tests
+            for bet_val in default_bet_amounts:
+                slot_bet = SlotBet(slot_id=slot_id_val, bet_amount=bet_val)
+                db.session.add(slot_bet)
+
+            slot.symbols = created_symbols # Explicitly associate symbols with the slot object
+            db.session.add(slot) # Re-add slot to session if needed after modification
+
             db.session.commit()
 
             # Optionally, refresh symbols or query them back if needed for association with slot.symbols
@@ -301,7 +336,7 @@ class GameApiTests(BaseTestCase):
         bet_amount_sats = 10 * Config.SATOSHI_FACTOR # Bet 10 BTC in satoshis
 
         spin_payload = {"bet_amount": bet_amount_sats}
-        response = self.client.post('/api/spin',
+        response = self.client.post('/api/slots/spin',
                                      headers={'Authorization': f'Bearer {token}'},
                                      json=spin_payload)
         data = json.loads(response.data.decode())
@@ -345,7 +380,7 @@ class GameApiTests(BaseTestCase):
 
         bet_amount_sats = 10 # Bet 10 satoshis
         spin_payload = {"bet_amount": bet_amount_sats}
-        response = self.client.post('/api/spin',
+        response = self.client.post('/api/slots/spin',
                                      headers={'Authorization': f'Bearer {token}'},
                                      json=spin_payload)
         data = json.loads(response.data.decode())

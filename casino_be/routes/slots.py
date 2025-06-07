@@ -39,9 +39,12 @@ def spin():
     if not game_session:
         return jsonify({'status': False, 'status_message': 'No active slot game session. Please join a slot game first.'}), 404
 
-    slot = Slot.query.get(game_session.slot_id)
+    slot = Slot.query.options(db.joinedload(Slot.symbols)).get(game_session.slot_id)
     if not slot:
          return jsonify({'status': False, 'status_message': 'Slot not found for session.'}), 500
+
+    # Explicitly load symbols to be absolutely sure, for diagnostics
+    _ = slot.symbols
 
     # --- Bet Amount Validation against SlotBet ---
     allowed_bets_query = SlotBet.query.filter_by(slot_id=slot.id).all()

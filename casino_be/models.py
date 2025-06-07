@@ -401,7 +401,7 @@ class PlinkoDropLog(db.Model):
     slot_landed_label = db.Column(db.String(50), nullable=False)
     multiplier_applied = db.Column(db.Float, nullable=False)
     winnings_amount = db.Column(db.BigInteger, nullable=False, default=0)  # In satoshis
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     user = db.relationship('User', back_populates='plinko_drops') # Assuming User.plinko_drops will be defined
@@ -411,8 +411,8 @@ class TokenBlacklist(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     jti = db.Column(db.String(255), nullable=False, unique=True, index=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
     
     def __repr__(self):
         return f'<TokenBlacklist {self.jti}>'
@@ -425,7 +425,7 @@ class RouletteGame(db.Model):
     bet_type = db.Column(db.String(50), nullable=False)  # e.g., 'straight_up_0', 'red', 'even', 'column_1', 'dozen_1'
     winning_number = db.Column(db.Integer, nullable=True) # Nullable until wheel spins
     payout = db.Column(db.Float, nullable=True) # Nullable until result
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Add this line
     user = db.relationship('User', backref=db.backref('roulette_games', lazy='dynamic'))
