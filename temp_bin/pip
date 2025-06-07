@@ -1,0 +1,7 @@
+#!/bin/bash
+if [ "$1" == "install" ]; then
+    echo "Dummy pip install successful for: ${@:3}"
+    true # Indicates success
+else
+    false # Indicates failure
+fi
