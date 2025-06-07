@@ -1,7 +1,0 @@
-#!/bin/bash
-if [ "$1" == "install" ]; then
-    echo "Dummy npm install successful"
-    true # Indicates success
-else
-    false # Indicates failure
-fi

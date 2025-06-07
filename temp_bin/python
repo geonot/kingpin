@@ -1,7 +1,0 @@
-#!/bin/bash
-if [ "$1" == "manage.py" ] && [ -x "./manage.py" ]; then
-    shift
-    ./manage.py "$@" # manage.py will indicate success/failure
-else
-    command -v python3 &>/dev/null && exec python3 "$@" || (echo "python3 not found" && false)
-fi

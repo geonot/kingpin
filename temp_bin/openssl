@@ -1,3 +1,0 @@
-#!/bin/bash
-echo "dummy_openssl_generated_key_$(date +%s)"
-true # Indicates success
