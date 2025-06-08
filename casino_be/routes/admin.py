@@ -1,12 +1,11 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 
-from ..models import db, User, GameSession, Transaction, BonusCode
-from ..schemas import (
+from models import db, User, GameSession, Transaction, BonusCode
+from schemas import (
     AdminUserSchema, UserListSchema, TransactionSchema, TransactionListSchema,
     BonusCodeSchema, BonusCodeListSchema, AdminCreditDepositSchema
 )
-from ..app import limiter # Assuming limiter can be imported directly
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 

@@ -2,17 +2,20 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from ..models import db, User, Transaction, UserBonus
-from ..schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema
-from ..services.bonus_service import apply_bonus_to_deposit
-from ..app import limiter # Assuming limiter can be imported directly
+from models import db, User, Transaction, UserBonus
+from schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema
+from services.bonus_service import apply_bonus_to_deposit
 
 user_bp = Blueprint('user', __name__, url_prefix='/api')
 
 @user_bp.route('/withdraw', methods=['POST'])
-@limiter.limit("5 per hour")
 @jwt_required()
 def withdraw():
+    # Apply rate limiting using current_app
+    limiter = current_app.extensions.get('limiter')
+    if limiter:
+        limiter.check()
+
     data = request.get_json()
     errors = WithdrawSchema().validate(data)
     if errors:

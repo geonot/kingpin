@@ -17,12 +17,8 @@ module.exports = {
         // Optional: Rewrite path if backend expects different base
         // pathRewrite: { '^/api': '' },
       },
-      // Proxy static assets from public/slotX if needed directly by frontend
-      // (Though Phaser should handle loading relative paths)
-       '/slot1': { target: 'http://127.0.0.1:5000/static/slot1', changeOrigin: true, pathRewrite: {'^/slot1': ''}},
-       '/slot2': { target: 'http://127.0.0.1:5000/static/slot2', changeOrigin: true, pathRewrite: {'^/slot2': ''}},
-       '/slot3': { target: 'http://127.0.0.1:5000/static/slot3', changeOrigin: true, pathRewrite: {'^/slot3': ''}},
-       '/slot4': { target: 'http://127.0.0.1:5000/static/slot4', changeOrigin: true, pathRewrite: {'^/slot4': ''}},
+      // Removed slot proxy rules - these files should be served directly from Vue.js public/ directory
+      // Assets proxy for shared assets from backend if needed
        '/assets': { target: 'http://127.0.0.1:5000/static/assets', changeOrigin: true, pathRewrite: {'^/assets': ''}},
     },
     // Optional: Allow external access to dev server
@@ -60,6 +56,10 @@ module.exports = {
     // Example: Define global constants
     config.plugin('define').tap(definitions => {
       definitions[0]['process.env']['VUE_APP_VERSION'] = JSON.stringify(require('./package.json').version);
+      // Add Vue.js feature flags to fix warnings
+      definitions[0]['__VUE_PROD_HYDRATION_MISMATCH_DETAILS__'] = JSON.stringify(false);
+      definitions[0]['__VUE_OPTIONS_API__'] = JSON.stringify(true);
+      definitions[0]['__VUE_PROD_DEVTOOLS__'] = JSON.stringify(false);
       return definitions;
     });
 

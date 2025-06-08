@@ -1,5 +1,5 @@
 <template>
-  <aside class="w-64 bg-bg-secondary text-text-primary p-4 shadow-lg flex flex-col space-y-6 fixed top-0 left-0 h-full pt-16">
+  <aside class="w-64 bg-bg-secondary text-text-primary p-4 shadow-lg flex flex-col space-y-6 fixed top-0 left-0 h-full pt-24 z-50">
     <!-- Adjust pt-16 based on header height -->
     <div>
       <h3 class="text-xs text-text-secondary uppercase font-semibold mb-2">Main Menu</h3>

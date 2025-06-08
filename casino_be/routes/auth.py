@@ -5,13 +5,18 @@ from flask_jwt_extended import (
 )
 from datetime import datetime, timedelta, timezone
 from marshmallow import ValidationError
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
-from ..models import db, User, TokenBlacklist
-from ..schemas import UserSchema, RegisterSchema, LoginSchema
-from ..utils.bitcoin import generate_bitcoin_wallet
-from ..app import limiter # Assuming limiter can be imported directly
+from models import db, User, TokenBlacklist
+from schemas import UserSchema, RegisterSchema, LoginSchema
+from utils.bitcoin import generate_bitcoin_wallet
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api')
+
+# Get the limiter instance that was initialized in app.py
+def get_limiter():
+    return current_app.extensions.get('limiter')
 
 @auth_bp.route('/me', methods=['GET'])
 @jwt_required()
@@ -25,8 +30,8 @@ def get_current_user():
         return jsonify({'status': False, 'status_message': 'Failed to fetch user profile.'}), 500
 
 @auth_bp.route('/register', methods=['POST'])
-@limiter.limit("10 per hour")
 def register():
+    # Rate limiting is handled by Flask-Limiter configuration in app.py
     data = request.get_json()
     errors = RegisterSchema().validate(data)
     if errors:
@@ -61,8 +66,8 @@ def register():
         return jsonify({'status': False, 'status_message': 'Registration failed.'}), 500
 
 @auth_bp.route('/login', methods=['POST'])
-@limiter.limit("10 per minute")
 def login():
+    # Rate limiting is handled by Flask-Limiter configuration in app.py
     data = request.get_json()
     schema = LoginSchema()
     try:

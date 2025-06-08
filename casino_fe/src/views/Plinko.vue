@@ -4,14 +4,14 @@
     <div class="ui-controls">
       <!-- Stake selection and play button will go here -->
       <div class="stake-selection">
-        <button @click="setStake('low')" :class="{ active: currentStake === 'low' }">Low (Green)</button>
-        <button @click="setStake('medium')" :class="{ active: currentStake === 'medium' }">Medium (Yellow)</button>
-        <button @click="setStake('high')" :class="{ active: currentStake === 'high' }">High (Red)</button>
+        <button @click="setStake('low')" :class="{ 'bg-green-500 text-white border-green-500 dark:bg-green-600 dark:border-green-600': currentStake === 'low' }" class="mx-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded cursor-pointer hover:bg-green-500 hover:text-white hover:border-green-500 dark:hover:bg-green-600 dark:hover:border-green-600 transition-colors">Low (Green)</button>
+        <button @click="setStake('medium')" :class="{ 'bg-yellow-500 text-white border-yellow-500 dark:bg-yellow-600 dark:border-yellow-600': currentStake === 'medium' }" class="mx-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded cursor-pointer hover:bg-yellow-500 hover:text-white hover:border-yellow-500 dark:hover:bg-yellow-600 dark:hover:border-yellow-600 transition-colors">Medium (Yellow)</button>
+        <button @click="setStake('high')" :class="{ 'bg-red-500 text-white border-red-500 dark:bg-red-600 dark:border-red-600': currentStake === 'high' }" class="mx-1 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded cursor-pointer hover:bg-red-500 hover:text-white hover:border-red-500 dark:hover:bg-red-600 dark:hover:border-red-600 transition-colors">High (Red)</button>
       </div>
-      <button @click="dropBallHandler" :disabled="isBallDropping">Drop Ball</button>
+      <button @click="dropBallHandler" :disabled="isBallDropping" class="px-6 py-3 bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 text-white font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors">Drop Ball</button>
       <div class="game-info">
-        <p>Current Stake: {{ currentStake }}</p>
-        <p>Last Winnings: {{ lastWinnings }}x</p>
+        <p class="text-gray-900 dark:text-gray-100">Current Stake: {{ currentStake }}</p>
+        <p class="text-gray-900 dark:text-gray-100">Last Winnings: {{ lastWinnings }}x</p>
         <!-- Balance display can be added if a store is available -->
       </div>
     </div>
@@ -131,23 +131,6 @@ export default {
   flex-direction: column;
   align-items: center;
   gap: 15px;
-}
-.stake-selection button {
-  margin: 0 5px;
-  padding: 10px 15px;
-  border: 1px solid #ddd;
-  background-color: #f0f0f0;
-  cursor: pointer;
-}
-.stake-selection button.active {
-  background-color: #4CAF50;
-  color: white;
-  border-color: #4CAF50;
-}
-.ui-controls button {
-  padding: 10px 20px;
-  font-size: 16px;
-  cursor: pointer;
 }
 .game-info p {
   margin: 5px 0;

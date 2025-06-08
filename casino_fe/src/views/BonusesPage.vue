@@ -18,11 +18,6 @@
 
 <script setup>
 // No specific script logic for this placeholder yet
-import { defineComponent } from 'vue'; // Added for explicitness, though setup implies it
-
-export default defineComponent({
-  name: 'BonusesPage',
-});
 </script>
 
 <style scoped>

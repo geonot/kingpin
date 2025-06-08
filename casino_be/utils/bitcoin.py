@@ -6,20 +6,18 @@
 # This implementation is for demonstration purposes ONLY.
 
 import logging
+import uuid
 from flask import current_app
-
-DUMMY_WALLET_COUNT = 0
 
 def generate_bitcoin_wallet():
     """
     Generates a new Bitcoin P2PKH address.
-    FOR TESTING: Returns a dummy, predictable address.
+    FOR TESTING: Returns a dummy, random address.
     Private keys are NOT generated or returned by this function.
     """
-    global DUMMY_WALLET_COUNT
-    DUMMY_WALLET_COUNT += 1
-    # Return a simple, non-random, but unique enough for testing, dummy address
-    dummy_address = f"dummyBitcoinAddress{DUMMY_WALLET_COUNT}"
+    # Generate a random UUID to ensure uniqueness across app restarts
+    random_id = str(uuid.uuid4()).replace('-', '')[:12]  # Use first 12 chars for shorter address
+    dummy_address = f"dummyBtc{random_id}"
     current_app.logger.info(f"Generated DUMMY Bitcoin address for testing: {dummy_address}")
     return dummy_address
 

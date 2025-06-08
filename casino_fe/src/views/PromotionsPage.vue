@@ -17,11 +17,7 @@
 </template>
 
 <script setup>
-import { defineComponent } from 'vue';
-
-export default defineComponent({
-  name: 'PromotionsPage',
-});
+// No specific script logic for this placeholder yet
 </script>
 
 <style scoped>

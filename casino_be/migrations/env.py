@@ -86,15 +86,8 @@ def run_migrations_online():
                 directives[:] = []
                 logger.info('No changes in schema detected.')
 
-    # FORCED FOR OFFLINE-LIKE GENERATION WHEN DB IS UNAVAILABLE
-    # connectable = current_app.extensions['migrate'].db.engine
-    dummy_sqlite_url = 'sqlite:///./_alembic_dummy_for_generation.db'
-    logger.info(f"Migration generation: Forcing connectable to use dummy SQLite URL: {dummy_sqlite_url}")
-    connectable = engine_from_config(
-        {'sqlalchemy.url': dummy_sqlite_url},  # Pass config dict directly
-        prefix='sqlalchemy.',
-        poolclass=pool.NullPool
-    )
+    # Use the actual database connection from Flask-Migrate
+    connectable = current_app.extensions['migrate'].db.engine
 
     with connectable.connect() as connection:
         context.configure(
@@ -130,14 +123,14 @@ elif ini_url:
     # URL is already set from ini file, no need to set it again
     logger.info(f"Using database URL from alembic.ini: {ini_url}")
 else:
-    logger.warning("Database URL not found in Flask config or alembic.ini. Defaulting to SQLite for migration generation.")
-    # Optionally, raise an error or exit
-    # raise ValueError("Missing database URL configuration for Alembic.")
-    config.set_main_option('sqlalchemy.url', 'sqlite:///./_alembic_dummy.db')
-
-# Force SQLite for migration generation if DB is not available
-config.set_main_option('sqlalchemy.url', 'sqlite:///./_alembic_dummy.db')
-logger.info("Forcing Alembic to use a dummy SQLite DB for migration generation.")
+    logger.warning("Database URL not found in Flask config or alembic.ini.")
+    # Use PostgreSQL from environment variables or raise error
+    try:
+        from config import Config
+        config.set_main_option('sqlalchemy.url', Config().SQLALCHEMY_DATABASE_URI)
+        logger.info("Using database URL from Config class.")
+    except Exception as e:
+        raise ValueError(f"Missing database URL configuration for Alembic: {e}")
 
 if context.is_offline_mode():
     run_migrations_offline()

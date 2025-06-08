@@ -3,7 +3,7 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone
-from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserBonus # Added UserBonus
+from models import db, SlotSpin, GameSession, User, Transaction, UserBonus # Added UserBonus
 # SlotSymbol might not be directly used if all config comes from JSON, but keep for now
 
 # --- Configuration ---

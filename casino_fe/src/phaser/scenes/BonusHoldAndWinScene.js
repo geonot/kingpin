@@ -59,7 +59,7 @@ export default class BonusHoldAndWinScene extends Phaser.Scene {
     this.initialRespins = this.bonusConfig.initialRespins || 3;
     this.gridConfig.rows = this.bonusConfig.bonusReelLayout?.rows || 3;
     this.gridConfig.cols = this.bonusConfig.bonusReelLayout?.columns || 5;
-    this.gridConfig.symbolSize = this.gameConfig.reel?.symbolSize || { width: 100, height: 100 };
+    this.gridConfig.symbolSize = this.gameConfig.game.reel?.symbolSize || { width: 100, height: 100 };
   }
 
   preload() {
@@ -266,12 +266,11 @@ export default class BonusHoldAndWinScene extends Phaser.Scene {
         return false;
     }
 
-    const iconFileName = coinSymbolDef.icon.split('/').pop().replace(/\..+$/, '');
-    const textureKey = `${this.slotId}_${iconFileName}`; // e.g. "hack_coin"
+    const textureKey = `symbol-${coinSymbolDef.id}`; // Use consistent texture key format
 
     let coinSprite;
     const positionX = this.gridConfig.symbolSize.width / 2;
-    const positionY = row * (this.gridConfig.symbolSize.height + (this.gameConfig.reel?.symbolSpacing || 0)) + this.gridConfig.symbolSize.height / 2;
+    const positionY = row * (this.gridConfig.symbolSize.height + (this.gameConfig.game.reel?.symbolSpacing || 0)) + this.gridConfig.symbolSize.height / 2;
 
     if (!this.textures.exists(textureKey)) {
         console.warn(`Texture key ${textureKey} not found for coin. Using fallback graphics.`);

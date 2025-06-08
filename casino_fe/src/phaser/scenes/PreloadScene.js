@@ -65,39 +65,66 @@ export default class PreloadScene extends Phaser.Scene {
     });
 
     // --- Load Common UI Assets ---
-    this.load.image('ui-spin-button', 'public/assets/slots/ui/spin_button.png');
-    this.load.image('ui-settings-button', 'public/assets/slots/ui/settings_button.png');
-    this.load.image('ui-turbo-button', 'public/assets/slots/ui/turbo_button.png');
-    this.load.image('ui-sound-on-button', 'public/assets/slots/ui/sound_on_button.png');
-    this.load.image('ui-sound-off-button', 'public/assets/slots/ui/sound_off_button.png');
-    this.load.image('ui-bet-increase-button', 'public/assets/slots/ui/bet_increase.png');
-    this.load.image('ui-bet-decrease-button', 'public/assets/slots/ui/bet_decrease.png');
-    this.load.image('ui-max-bet-button', 'public/assets/slots/ui/max_bet.png');
-    this.load.image('ui-paytable-button', 'public/assets/slots/ui/paytable_button.png');
-    this.load.image('ui-close-button', 'public/assets/slots/ui/close_button.png'); // For modals
+    // Load UI assets from the slot-specific directory using asset_dir instead of short_name
+    const basePath = slotGameJsonConfig.game?.asset_dir || `/${slotApiData.short_name}/`;
+    
+    // Load slot-specific UI buttons
+    this.load.image('spin-button', `${basePath}spin.png`);
+    this.load.image('settings-button', `${basePath}settings.png`);
+    this.load.image('turbo-button', `${basePath}autospin.png`); // Using autospin.png for turbo
+    this.load.image('auto-button', `${basePath}autospin.png`);
+    
+    // Load generic UI assets from /ui/ if they exist, otherwise use slot-specific fallbacks
+    this.load.image('sound-on-button', '/ui/sound_on_button.png');
+    this.load.image('sound-off-button', '/ui/sound_off_button.png');
+    this.load.image('bet-increase-button', '/ui/bet_increase.png');
+    this.load.image('bet-decrease-button', '/ui/bet_decrease.png');
+    this.load.image('max-bet-button', '/ui/max_bet.png');
+    this.load.image('paytable-button', '/ui/paytable_button.png');
+    this.load.image('close-button', '/ui/close_button.png'); // For modals
+    
+    // Load win particle effect - use coin.png from slot directory as fallback
+    this.load.image('win-particle', `${basePath}coin.png`);
 
 
     // --- Load Slot-Specific Assets ---
     // Use slotApiData for the base path (via short_name)
     // Use slotGameJsonConfig for the list of assets and their relative paths within the slot's folder
 
-    const basePath = `public/slots/${slotApiData.short_name}/`;
-
     // Background
-    const bgAsset = slotGameJsonConfig.assets?.background;
-    if (bgAsset) {
-      this.load.image('background', `${basePath}${bgAsset}`);
+    let bgPath = null;
+    if (slotGameJsonConfig.assets?.background) {
+      bgPath = slotGameJsonConfig.assets.background;
+    } else if (slotGameJsonConfig.game?.background?.image) {
+      bgPath = slotGameJsonConfig.game.background.image;
+    }
+    
+    if (bgPath) {
+      // Handle absolute vs relative paths
+      const backgroundPath = bgPath.startsWith('/') ? bgPath : `${basePath}${bgPath}`;
+      this.load.image('background', backgroundPath);
     } else {
-      console.warn(`Slots PreloadScene: Background image not defined in slotGameJsonConfig.assets for ${slotApiData.short_name}. Loading fallback.`);
-      this.load.image('background', 'public/assets/slots/default_background.png');
+      console.warn(`Slots PreloadScene: Background image not defined in slotGameJsonConfig for ${slotApiData.short_name}. Using default.`);
+      // Use a fallback that actually exists - the bg.png in slot1
+      this.load.image('background', '/slot1/bg.png');
     }
 
     // Symbols - from slotGameJsonConfig.game.symbols
     if (slotGameJsonConfig.game && slotGameJsonConfig.game.symbols && Array.isArray(slotGameJsonConfig.game.symbols)) {
       slotGameJsonConfig.game.symbols.forEach(symbol => {
-        if (symbol.id !== undefined && symbol.icon) { // Changed from symbol.image to symbol.icon
+        if (symbol.id !== undefined && symbol.icon) {
+          // Handle both absolute and relative paths correctly
+          let symbolPath;
+          if (symbol.icon.startsWith('/')) {
+            // Icon path is already absolute, use it directly
+            symbolPath = symbol.icon;
+          } else {
+            // Icon path is relative, combine with basePath
+            symbolPath = `${basePath}${symbol.icon}`;
+          }
+          
           // Key used here: `symbol-${symbol.id}` must match GameScene.js (and potentially BonusHoldAndWinScene)
-          this.load.image(`symbol-${symbol.id}`, `${basePath}${symbol.icon.startsWith('/') ? symbol.icon.substring(1) : symbol.icon}`);
+          this.load.image(`symbol-${symbol.id}`, symbolPath);
         } else {
           console.warn('Slots PreloadScene: Symbol missing id or icon path in slotGameJsonConfig.game.symbols.', symbol);
         }
@@ -163,18 +190,19 @@ export default class PreloadScene extends Phaser.Scene {
 
     // --- Load Common Audio Assets ---
     // These keys should be different from slot-specific ones to avoid conflicts if a slot defines 'spin', 'reel_stop' etc.
-    this.load.audio('snd-common-spin', ['public/assets/slots/audio/spin.mp3', 'public/assets/slots/audio/spin.ogg']);
-    this.load.audio('snd-common-reel-stop', ['public/assets/slots/audio/reel_stop.mp3', 'public/assets/slots/audio/reel_stop.ogg']);
-    this.load.audio('snd-common-win-small', ['public/assets/slots/audio/win_small.mp3', 'public/assets/slots/audio/win_small.ogg']);
-    this.load.audio('snd-common-win-medium', ['public/assets/slots/audio/win_medium.mp3', 'public/assets/slots/audio/win_medium.ogg']);
-    this.load.audio('snd-common-win-large', ['public/assets/slots/audio/win_large.mp3', 'public/assets/slots/audio/win_large.ogg']);
-    this.load.audio('snd-common-bonus-trigger', ['public/assets/slots/audio/bonus_trigger.mp3', 'public/assets/slots/audio/bonus_trigger.ogg']);
-    this.load.audio('snd-common-button-click', ['public/assets/slots/audio/button_click.mp3', 'public/assets/slots/audio/button_click.ogg']);
+    // For now, comment out missing audio assets to prevent 404 errors
+    // this.load.audio('snd-common-spin', ['/assets/slots/audio/spin.mp3', '/assets/slots/audio/spin.ogg']);
+    // this.load.audio('snd-common-reel-stop', ['/assets/slots/audio/reel_stop.mp3', '/assets/slots/audio/reel_stop.ogg']);
+    // this.load.audio('snd-common-win-small', ['/assets/slots/audio/win_small.mp3', '/assets/slots/audio/win_small.ogg']);
+    // this.load.audio('snd-common-win-medium', ['/assets/slots/audio/win_medium.mp3', '/assets/slots/audio/win_medium.ogg']);
+    // this.load.audio('snd-common-win-large', ['/assets/slots/audio/win_large.mp3', '/assets/slots/audio/win_large.ogg']);
+    // this.load.audio('snd-common-bonus-trigger', ['/assets/slots/audio/bonus_trigger.mp3', '/assets/slots/audio/bonus_trigger.ogg']);
+    // this.load.audio('snd-common-button-click', ['/assets/slots/audio/button_click.mp3', '/assets/slots/audio/button_click.ogg']);
 
 
-    // Particle Effects (Example)
-    this.load.image('win-particle-star', 'public/assets/slots/particles/star.png');
-    this.load.image('win-particle-coin', 'public/assets/slots/particles/coin.png');
+    // Particle Effects (Example) - comment out until assets exist
+    // this.load.image('win-particle-star', '/assets/slots/particles/star.png');
+    // this.load.image('win-particle-coin', '/assets/slots/particles/coin.png');
   }
 
   create() {

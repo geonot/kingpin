@@ -4,6 +4,7 @@ Flask-JWT-Extended==4.4.3
 Flask-Migrate==3.1.0
 Flask-SQLAlchemy==2.5.1
 SQLAlchemy==1.3.24 # Added to ensure compatibility with Flask-SQLAlchemy 2.5.1
+Flask-CORS==3.0.10 # Added for cross-origin request handling
 cryptography==3.4.7
 # bitcoin==1.1.42 # Replaced by python-bitcoinlib for better security and maintenance
 python-bitcoinlib==0.12.1
@@ -17,3 +18,5 @@ python-json-logger
 coverage
 pytest-cov
 treys
+python-dotenv # For loading .env files
+click==8.0.0 # For the admin CLI tool

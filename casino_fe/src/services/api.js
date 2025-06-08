@@ -115,10 +115,18 @@ export default {
     return apiClient.post('/end_session', payload);
   },
   joinGame(payload) {
-    return apiClient.post('/join', payload);
+    // Route to the correct game-specific join endpoint based on game type
+    if (payload.game_type === 'slot' || payload.slot_id) {
+      return apiClient.post('/slots/join', payload);
+    } else if (payload.game_type === 'blackjack' || payload.table_id) {
+      return apiClient.post('/blackjack/join', payload);
+    } else {
+      // Fallback to generic join if game type is unclear
+      return apiClient.post('/slots/join', payload);
+    }
   },
   spin(payload) {
-    return apiClient.post('/spin', payload);
+    return apiClient.post('/slots/spin', payload);
   },
   joinBlackjack(payload) {
     return apiClient.post('/join_blackjack', payload);

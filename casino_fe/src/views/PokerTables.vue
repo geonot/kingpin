@@ -28,7 +28,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import apiClient from '@/services/apiClient'; // Assuming apiClient is configured
+import api from '@/services/api'; // Use the existing api service
 
 const tables = ref([]);
 const loading = ref(true);
@@ -38,7 +38,7 @@ const fetchPokerTables = async () => {
   loading.value = true;
   error.value = null;
   try {
-    const response = await apiClient.get('/poker/tables');
+    const response = await api.get('/poker/tables');
     if (response.data && response.data.status && Array.isArray(response.data.tables)) {
       tables.value = response.data.tables;
     } else {
@@ -68,19 +68,17 @@ onMounted(() => {
 h1 {
   text-align: center;
   margin-bottom: 30px;
-  color: #333;
+  @apply text-gray-900 dark:text-gray-100;
 }
 
 .loading {
   text-align: center;
   font-size: 1.2em;
-  color: #555;
+  @apply text-gray-600 dark:text-gray-400;
 }
 
 .error-message {
-  background-color: #ffebee;
-  color: #c62828;
-  border: 1px solid #c62828;
+  @apply bg-red-50 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-600;
   padding: 15px;
   border-radius: 5px;
   margin-bottom: 20px;
@@ -95,16 +93,15 @@ h1 {
   white-space: pre-wrap;
   word-wrap: break-word;
   font-size: 0.9em;
-  background-color: #fce4ec;
+  @apply bg-red-100 dark:bg-red-800;
   padding: 10px;
   border-radius: 3px;
 }
 
-
 .no-tables {
   text-align: center;
   font-size: 1.1em;
-  color: #777;
+  @apply text-gray-600 dark:text-gray-400;
   margin-top: 20px;
 }
 
@@ -115,10 +112,9 @@ h1 {
 }
 
 .table-card {
-  border: 1px solid #ddd;
+  @apply border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800;
   border-radius: 8px;
   padding: 20px;
-  background-color: #fff;
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
   transition: transform 0.2s ease-in-out;
 }
@@ -130,32 +126,27 @@ h1 {
 .table-card h2 {
   margin-top: 0;
   margin-bottom: 15px;
-  color: #007bff; /* Bootstrap primary color */
+  @apply text-blue-600 dark:text-blue-400;
 }
 
 .table-card p {
   margin: 8px 0;
-  color: #555;
+  @apply text-gray-600 dark:text-gray-300;
   font-size: 0.95em;
 }
 
 .table-card p strong {
-  color: #333;
+  @apply text-gray-900 dark:text-gray-100;
 }
 
 .join-button {
   display: inline-block;
   margin-top: 15px;
   padding: 10px 15px;
-  background-color: #007bff;
-  color: white;
+  @apply bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white dark:text-white border border-blue-600 dark:border-blue-500;
   text-decoration: none;
   border-radius: 5px;
   text-align: center;
   transition: background-color 0.2s ease;
-}
-
-.join-button:hover {
-  background-color: #0056b3;
 }
 </style>

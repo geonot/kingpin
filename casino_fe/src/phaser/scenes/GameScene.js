@@ -10,7 +10,6 @@ const REEL_STOP_DELAY = 250; // Additional delay between stopping each reel (ms)
 const SYMBOL_WIN_ANIM_DURATION = 250; // Duration for symbol scale/pulse animation
 const PAYLINE_SHOW_DURATION = 1500; // How long each winning payline is shown (ms)
 const TOTAL_WIN_DISPLAY_DURATION = 3000; // How long the total win amount is shown prominently
-const SYMBOL_WIN_ANIM_DURATION = 250; // Already defined, ensure this is the one used
 
 
 export default class GameScene extends Phaser.Scene {
@@ -62,8 +61,13 @@ export default class GameScene extends Phaser.Scene {
 
   create() {
     console.log('GameScene: Create');
-    this.gameConfig = this.registry.get('gameConfig');
-    this.slotId = this.registry.get('slotId');
+    
+    // Fix: Use the correct registry keys that are set in BootScene
+    const slotApiData = this.registry.get('slotApiData');
+    const slotGameJsonConfig = this.registry.get('slotGameJsonConfig');
+    
+    this.gameConfig = slotGameJsonConfig;
+    this.slotId = slotApiData?.id;
     this.turboSpinEnabled = this.registry.get('turboEnabled');
     this.soundEnabled = this.registry.get('soundEnabled');
     // Apply initial sound setting
@@ -71,7 +75,9 @@ export default class GameScene extends Phaser.Scene {
 
     if (!this.gameConfig || !this.slotId) {
         console.error("GameScene: Missing game configuration or Slot ID!");
-        EventBus.emit('phaserError', 'Game initialization failed: Missing configuration.'); // Corrected EventBus call
+        console.error("slotApiData:", slotApiData);
+        console.error("slotGameJsonConfig:", slotGameJsonConfig);
+        EventBus.$emit('phaserError', 'Game initialization failed: Missing configuration.');
         return;
     }
 
@@ -81,16 +87,16 @@ export default class GameScene extends Phaser.Scene {
 
     // A.3: Game Type and Grid Configuration
     this.isMultiwayGame = (this.gameConfig.type === 'multiway');
-    const { rows, columns } = this.gameConfig.layout; // Base definitions
+    const { rows, columns } = this.gameConfig.game.layout; // Fix: layout is under game
 
     this.gridConfig.cols = columns;
 
     if (this.isMultiwayGame) {
-        this.gridConfig.initialRowsPerReel = this.gameConfig.layout.default_pane_counts || Array(columns).fill(rows || 3);
+        this.gridConfig.initialRowsPerReel = this.gameConfig.game.layout.default_pane_counts || Array(columns).fill(rows || 3);
         // Effective rows for initial grid height calculation (max of initial panes)
         this.gridConfig.rows = Math.max(...this.gridConfig.initialRowsPerReel);
         // Max possible rows any symbol could occupy across all reels for symbol map buffer
-        this.gridConfig.maxRowsForSymbolMap = Math.max(...(this.gameConfig.layout.possible_pane_counts || [[rows || 3]]).flat());
+        this.gridConfig.maxRowsForSymbolMap = Math.max(...(this.gameConfig.game.layout.possible_pane_counts || [[rows || 3]]).flat());
     } else {
         this.gridConfig.rows = rows || 3;
         this.gridConfig.initialRowsPerReel = Array(columns).fill(this.gridConfig.rows);
@@ -100,13 +106,13 @@ export default class GameScene extends Phaser.Scene {
     this.gridConfig.currentActualMaxRows = Math.max(...this.currentPanesPerReel, this.gridConfig.rows);
 
 
-    this.symbolSize = this.gameConfig.reel.symbolSize || { width: 100, height: 100 };
+    this.symbolSize = this.gameConfig.game.reel.symbolSize || { width: 100, height: 100 };
     // Calculate totalReelWidth and totalReelHeight based on the effective gridConfig.rows for multiway
-    const totalReelWidth = this.gridConfig.cols * this.symbolSize.width + (this.gridConfig.cols - 1) * (this.gameConfig.reel.reelSpacing || 0);
-    const totalReelHeight = this.gridConfig.rows * this.symbolSize.height + (this.gridConfig.rows - 1) * (this.gameConfig.reel.symbolSpacing || 0);
+    const totalReelWidth = this.gridConfig.cols * this.symbolSize.width + (this.gridConfig.cols - 1) * (this.gameConfig.game.reel.reelSpacing || 0);
+    const totalReelHeight = this.gridConfig.rows * this.symbolSize.height + (this.gridConfig.rows - 1) * (this.gameConfig.game.reel.symbolSpacing || 0);
 
-    const configStartX = this.gameConfig.reel.position?.x ?? (this.cameras.main.width - totalReelWidth) / 2;
-    const configStartY = this.gameConfig.reel.position?.y ?? 100;
+    const configStartX = this.gameConfig.game.reel.position?.x ?? (this.cameras.main.width - totalReelWidth) / 2;
+    const configStartY = this.gameConfig.game.reel.position?.y ?? 100;
 
     // Update gridConfig with calculated dimensions
     this.gridConfig.startX = configStartX;
@@ -138,16 +144,16 @@ export default class GameScene extends Phaser.Scene {
     // Notify Vue that Phaser is ready (if needed)
     // EventBus.$emit('phaserReady');
 
-    EventBus.$on('bonusGameComplete', this.handleBonusComplete, this);
-    EventBus.on('vueSpinResult', this.handleSpinResult, this); // Listen for spin results from Vue
+    EventBus.$on('bonusGameComplete', (data) => this.handleBonusComplete(data));
+    EventBus.$on('vueSpinResult', (responseData) => this.handleSpinResult(responseData)); // Listen for spin results from Vue
   }
 
   shutdown() {
     console.log('GameScene: shutdown');
     EventBus.$off('turboSettingChanged');
     EventBus.$off('soundSettingChanged');
-    EventBus.$off('bonusGameComplete', this.handleBonusComplete, this);
-    EventBus.off('vueSpinResult', this.handleSpinResult, this); // Unregister listener
+    EventBus.$off('bonusGameComplete');
+    EventBus.$off('vueSpinResult'); // Unregister listener
 
     this.reels.forEach(reelSymbols => {
         reelSymbols.forEach(symbol => {
@@ -194,11 +200,11 @@ export default class GameScene extends Phaser.Scene {
 
     const { cols, startX, startY } = this.gridConfig; // Use gridConfig.cols
     const { symbolSize } = this;
-    const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
-    const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
+    const reelSpacing = this.gameConfig.game.reel.reelSpacing || 0;
+    const symbolSpacing = this.gameConfig.game.reel.symbolSpacing || 0;
 
     // B.1: Number of symbols per reel: max possible rows + buffer
-    const symbolsToCreatePerReel = this.gridConfig.maxRowsForSymbolMap + 2;
+    const symbolsToCreatePerReel = this.gridConfig.maxRowsForSymbolMap + 4; // Increased buffer to prevent gaps
 
     for (let c = 0; c < cols; c++) {
       const reelX = startX + c * (symbolSize.width + reelSpacing);
@@ -209,12 +215,13 @@ export default class GameScene extends Phaser.Scene {
 
       for (let i = 0; i < symbolsToCreatePerReel; i++) {
         const randomSymbolConfig = this.getRandomSymbolConfig();
-        const symbolKey = `${this.slotId}_${randomSymbolConfig.asset.replace(/\..+$/, '')}`; // Construct key like "slot1_symbol_1"
+        const symbolKey = `symbol-${randomSymbolConfig.id}`; // Use the correct key format from PreloadScene
         const symbolY = i * (symbolSize.height + symbolSpacing);
 
+        // Fix: Set origin first, then setDisplaySize to avoid scaling artifacts
         const symbol = this.add.image(symbolSize.width / 2, symbolY + symbolSize.height / 2, symbolKey)
-          .setDisplaySize(symbolSize.width, symbolSize.height)
-          .setOrigin(0.5);
+          .setOrigin(0.5)
+          .setDisplaySize(symbolSize.width, symbolSize.height);
         
         reelContainer.add(symbol);
         currentReelSymbols.push(symbol);
@@ -243,8 +250,8 @@ export default class GameScene extends Phaser.Scene {
     // this.gridConfig.rows now represents the max initial height for multiway.
     const { rows, cols, startX, startY } = this.gridConfig;
     const { symbolSize } = this;
-    const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
-    const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
+    const reelSpacing = this.gameConfig.game.reel.reelSpacing || 0;
+    const symbolSpacing = this.gameConfig.game.reel.symbolSpacing || 0;
 
     const maskWidth = cols * symbolSize.width + (cols - 1) * reelSpacing;
     // For multiway, the mask height should accommodate the maximum possible symbols on any reel,
@@ -269,8 +276,8 @@ export default class GameScene extends Phaser.Scene {
   createBorders() {
     const { rows, cols, startX, startY, width, height } = this.gridConfig;
     const { symbolSize } = this;
-    const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
-    const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
+    const reelSpacing = this.gameConfig.game.reel.reelSpacing || 0;
+    const symbolSpacing = this.gameConfig.game.reel.symbolSpacing || 0;
 
     const borderGraphics = this.add.graphics().setDepth(10); // Ensure borders are on top
 
@@ -338,18 +345,18 @@ export default class GameScene extends Phaser.Scene {
       this.lastSpinResponse = responseData; // Store the full response
 
       // Extract data needed for animations and display
-      // Backend sends initial grid as 'spin_result'
-      const initialGrid = responseData.spin_result;
+      // Backend sends initial grid as 'result' (not 'spin_result')
+      const initialGrid = responseData.result;
       this.currentCascadeMultiplierLevel = responseData.current_multiplier_level || 0;
 
       let transposedTargetGrid;
 
       if (this.isMultiwayGame) {
-          // Assuming multiway structure within spin_result if applicable, or adjust as needed
+          // Assuming multiway structure within result if applicable, or adjust as needed
           // For now, let's assume 'initialGrid' is already correctly structured or needs similar processing
           // This part might need specific adaptation if multiway slots also become cascading with varying panes
           console.warn("Multiway cascading visuals might need specific handling for pane changes during cascades - not yet fully implemented.")
-          // Fallback to standard grid processing for now if structure is {spin_result: [[r,c]]}
+          // Fallback to standard grid processing for now if structure is {result: [[r,c]]}
           this.targetPanesPerReel = Array(this.gridConfig.cols).fill(this.gridConfig.rows); // Default for now
           const formattedGrid = this.formatSpinResult(initialGrid);
           transposedTargetGrid = this.transposeMatrix(formattedGrid);
@@ -360,7 +367,7 @@ export default class GameScene extends Phaser.Scene {
       }
 
       // Reset multiplier display in UI at the start of a new spin animation sequence
-      EventBus.emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
+      EventBus.$emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
       this.startReelSpinAnimation(transposedTargetGrid);
   }
 
@@ -368,9 +375,9 @@ export default class GameScene extends Phaser.Scene {
       if (this.isSpinning) return;
       this.isSpinning = true;
       this.clearWinAnimations();
-      EventBus.emit('lineWinUpdate', { winAmount: 0, isScatter: false, ways: undefined });
+      EventBus.$emit('lineWinUpdate', { winAmount: 0, isScatter: false, ways: undefined });
       // Reset UI multiplier display via UIScene at the beginning of a new spin
-      EventBus.emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
+      EventBus.$emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
       this.playSound(`${this.slotId}_spin_sound`); // Use slot-specific sound key
 
       const spinDuration = this.turboSpinEnabled ? REEL_SPIN_DURATION_TURBO : REEL_SPIN_DURATION_BASE;
@@ -393,22 +400,33 @@ export default class GameScene extends Phaser.Scene {
   spinReel(reelIndex, reelSymbols, baseDuration, targetSymbolIdsForThisReel, onCompleteCallback) { // D
     const { startY } = this.gridConfig; // rows is now dynamic for multiway
     const { symbolSize } = this;
-    const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0;
+    const symbolSpacing = this.gameConfig.game.reel.symbolSpacing || 0;
     const symbolHeightWithSpacing = symbolSize.height + symbolSpacing;
     const reelContainer = this.reelContainers[reelIndex];
 
     // totalReelHeight for wrapping based on max possible symbols
     const totalReelHeight = reelSymbols.length * symbolHeightWithSpacing;
     // visibleHeight based on *current* number of panes for this reel for stop positioning
-    // This might need adjustment if the reel "shrinks" or "grows" visually during spin.
-    // For now, assume it spins to fill its targetPanesPerReel space.
     const targetVisibleHeightThisReel = (this.targetPanesPerReel[reelIndex] || this.gridConfig.rows) * symbolHeightWithSpacing;
-
 
     const wraps = 3;
     const wrapDistance = wraps * totalReelHeight;
-    const spinDuration = (baseDuration + reelIndex * REEL_STOP_DELAY); // Removed *1.5 for now
-    const spinDistance = wrapDistance + targetVisibleHeightThisReel; // Spin relative to target height
+    // Fix: More progressive timing - increase gap between reels
+    const spinDuration = baseDuration + (reelIndex * 200); // Increased from 120ms to 200ms
+    const spinDistance = wrapDistance + targetVisibleHeightThisReel;
+
+    // Pre-populate symbols above the visible area to prevent gaps
+    reelSymbols.forEach((symbol, i) => {
+        if (i >= this.gridConfig.maxRowsForSymbolMap) {
+            // Position extra symbols above the visible area
+            symbol.y = (i - reelSymbols.length) * symbolHeightWithSpacing + symbolSize.height / 2;
+            const randomSymbolConfig = this.getRandomSymbolConfig();
+            symbol.setTexture(`symbol-${randomSymbolConfig.id}`);
+            symbol.setVisible(true);
+            // Fix: Ensure symbols are properly sized during spin
+            symbol.setOrigin(0.5).setDisplaySize(symbolSize.width, symbolSize.height);
+        }
+    });
 
     this.tweens.add({
         targets: reelContainer,
@@ -418,10 +436,13 @@ export default class GameScene extends Phaser.Scene {
         onUpdate: () => {
             reelSymbols.forEach((symbol) => {
                 const symbolWorldY = reelContainer.y + symbol.y;
-                if (symbolWorldY > startY + targetVisibleHeightThisReel + symbolHeightWithSpacing) { // Adjust condition based on dynamic height?
+                // More aggressive wrapping threshold to prevent gaps
+                if (symbolWorldY > startY + targetVisibleHeightThisReel + symbolHeightWithSpacing * 2) {
                     symbol.y -= totalReelHeight;
                     const randomSymbolConfig = this.getRandomSymbolConfig();
-                    symbol.setTexture(`${this.slotId}_${randomSymbolConfig.asset.replace(/\..+$/, '')}`);
+                    symbol.setTexture(`symbol-${randomSymbolConfig.id}`);
+                    // Fix: Ensure newly wrapped symbols are properly sized
+                    symbol.setOrigin(0.5).setDisplaySize(symbolSize.width, symbolSize.height);
                 }
             });
         },
@@ -438,11 +459,13 @@ export default class GameScene extends Phaser.Scene {
                 if (i < landedPanesCount) {
                     const symbolConfig = this.gameConfig.game.symbols.find(s => s.id === targetSymbolIdsForThisReel[i]);
                     if (symbolConfig) {
-                         symbol.setTexture(`${this.slotId}_${symbolConfig.asset.replace(/\..+$/, '')}`);
+                         symbol.setTexture(`symbol-${symbolConfig.id}`);
                     }
                     // Position based on landedPanesCount
                     symbol.y = i * symbolHeightWithSpacing + symbolSize.height / 2;
-                    symbol.setVisible(true).setDepth(2); // Ensure visible and set depth
+                    symbol.setVisible(true).setDepth(2);
+                    // Ensure final symbols are properly sized
+                    symbol.setOrigin(0.5).setDisplaySize(symbolSize.width, symbolSize.height);
                     this.symbolMap[`${reelIndex},${i}`] = symbol; // Update map for new visible symbols
                     symbol.setData('gridPosition', { col: reelIndex, row: i });
                 } else {
@@ -524,9 +547,9 @@ export default class GameScene extends Phaser.Scene {
           );
       } else {
           // If no wins and no bonus, ensure UI is idle
-          EventBus.emit('uiSetIdle');
+          EventBus.$emit('uiSetIdle');
           // Also ensure multiplier display is reset if it wasn't a win
-          EventBus.emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
+          EventBus.$emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
       }
   }
 
@@ -539,7 +562,7 @@ export default class GameScene extends Phaser.Scene {
                 this.showTotalWinAmount(totalWinAmountSats);
                 // If it's a cascading slot and there was a total win, update multiplier display
                 if (isCascading) {
-                    EventBus.emit('uiUpdateMultiplier', { level: currentCascadeLevel, multipliersConfig: this.cascadeWinMultipliers });
+                    EventBus.$emit('uiUpdateMultiplier', { level: currentCascadeLevel, multipliersConfig: this.cascadeWinMultipliers });
                 }
                 this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
                     this.clearWinAnimations();
@@ -551,7 +574,7 @@ export default class GameScene extends Phaser.Scene {
                     }
                 });
            } else {
-               EventBus.emit('uiSetIdle'); // No total win, ensure UI is idle
+               EventBus.$emit('uiSetIdle'); // No total win, ensure UI is idle
            }
           return;
       }
@@ -563,7 +586,7 @@ export default class GameScene extends Phaser.Scene {
             if (currentLineIndex >= winningLines.length) { // All initial lines shown
                  this.showTotalWinAmount(totalWinAmountSats);
                  if (isCascading) { // If cascading, update multiplier display after initial lines
-                    EventBus.emit('uiUpdateMultiplier', { level: currentCascadeLevel, multipliersConfig: this.cascadeWinMultipliers });
+                    EventBus.$emit('uiUpdateMultiplier', { level: currentCascadeLevel, multipliersConfig: this.cascadeWinMultipliers });
                  }
                  if (this.paylineTimer) this.paylineTimer.remove();
                  this.paylineTimer = this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {

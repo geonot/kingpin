@@ -198,14 +198,20 @@ export default createStore({
       }
     },
     async logout({ commit, state }) {
+      const currentAccessToken = state.userSession; // Store before clearing auth
       const currentRefreshToken = state.refreshToken; // Store before clearing auth
+      
       commit('clearAuth'); // Clear local tokens and user state immediately
 
       try {
         // Invalidate access token on backend (if it was still valid)
-        // This call will use the (now cleared) token from localStorage if interceptor adds it,
-        // or no token if interceptor doesn't find one. Backend should handle this gracefully.
-        await apiService.logout(); // No specific error handling needed for this call's failure here
+        if (currentAccessToken) {
+          // Use a temporary direct axios call to avoid interceptor complexities
+          const tempApiClient = axios.create({ baseURL: '/api' });
+          await tempApiClient.post('/logout', {}, { 
+            headers: { Authorization: `Bearer ${currentAccessToken}` } 
+          });
+        }
 
         // Invalidate refresh token on backend
         if (currentRefreshToken) {

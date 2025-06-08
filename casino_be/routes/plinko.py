@@ -2,19 +2,17 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from http import HTTPStatus
 
-from ..models import db, User, PlinkoDropLog, Transaction
-from ..schemas import PlinkoPlayRequestSchema, PlinkoPlayResponseSchema
-from ..utils.plinko_helper import (
+from models import db, User, PlinkoDropLog, Transaction
+from schemas import PlinkoPlayRequestSchema, PlinkoPlayResponseSchema
+from utils.plinko_helper import (
     validate_plinko_params, calculate_winnings,
     PAYOUT_MULTIPLIERS, SATOSHIS_PER_UNIT
 )
-from ..app import limiter # Assuming limiter can be imported directly
 
 plinko_bp = Blueprint('plinko', __name__, url_prefix='/api/plinko')
 
 @plinko_bp.route('/play', methods=['POST'])
 @jwt_required()
-@limiter.limit("120 per minute")
 def plinko_play():
     current_user_id = get_jwt_identity()
     user = User.query.get(current_user_id)

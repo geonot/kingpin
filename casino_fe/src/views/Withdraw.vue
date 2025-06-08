@@ -2,7 +2,7 @@
   <div class="container mx-auto mt-10 max-w-lg px-4">
     <h2 class="text-center mb-8">Withdraw Funds</h2>
 
-    <div v-if="!user" class="card text-center">
+    <div v-if="!currentUser" class="card text-center">
       Please log in to access the withdrawal page.
     </div>
 
@@ -10,8 +10,8 @@
       <div class="mb-6 pb-4 border-b border-border">
         <p class="text-lg text-text-primary">Your current balance:</p>
         <p class="text-3xl font-semibold text-accent mt-1">
-          {{ formatSatsToBtc(user.balance) }} BTC
-          <span class="text-sm text-text-secondary"> ({{ user.balance.toLocaleString() }} Sats)</span>
+          {{ formatSatsToBtc(currentUser.balance) }} BTC
+          <span class="text-sm text-text-secondary"> ({{ currentUser.balance.toLocaleString() }} Sats)</span>
         </p>
       </div>
 
@@ -121,7 +121,7 @@ const validateForm = () => {
     } else if (withdrawAmountSats.value < minWithdrawalSats) {
          formErrors.value.amount = `Minimum withdrawal amount is 0.0001 BTC (${minWithdrawalSats.toLocaleString()} Sats).`;
          isValid = false;
-    } else if (user.value && withdrawAmountSats.value > user.value.balance) {
+    } else if (currentUser.value && withdrawAmountSats.value > currentUser.value.balance) {
         formErrors.value.amount = 'Withdrawal amount cannot exceed your balance.';
          isValid = false;
     }

@@ -380,8 +380,8 @@ def calculate_multiway_win(
 from datetime import datetime, timezone
 # Assuming models.py is in the parent directory of utils/
 # Adjust if your project structure is different (e.g. casino_be.models)
-from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserBonus
-from casino_be.utils.spin_handler import check_bonus_trigger # Reusing bonus trigger logic
+from models import db, SlotSpin, GameSession, User, Transaction, UserBonus
+from utils.spin_handler import check_bonus_trigger # Reusing bonus trigger logic
 
 def handle_multiway_spin(user: User, slot: db.Model, game_session: GameSession, bet_amount_sats: int):
     """

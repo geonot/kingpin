@@ -9,7 +9,7 @@ export default class SpacecrashGameScene extends Phaser.Scene {
     this.startTime = 0; // Phaser game time when current round started
     this.gameStarted = false; // Is the rocket currently flying?
     this.gameOver = false;    // Has the game crashed?
-    this.multiplierText = null;
+    // this.multiplierText = null; // Removed as Vue handles UI display
   }
 
   preload() {
@@ -23,14 +23,6 @@ export default class SpacecrashGameScene extends Phaser.Scene {
 
     this.rocket = this.add.sprite(this.cameras.main.width / 2, this.cameras.main.height - 50, 'rocket').setOrigin(0.5, 1);
     this.rocket.setVisible(false); // Initially hidden until game starts
-
-    this.multiplierText = this.add.text(this.cameras.main.width / 2, 50, '1.00x', { 
-      fontSize: '32px', 
-      fill: '#ffffff',
-      fontFamily: 'Arial, sans-serif', // Added sans-serif fallback
-      stroke: '#000000',
-      strokeThickness: 4
-    }).setOrigin(0.5);
 
     // Initialize game state variables
     this.gameStarted = false;
@@ -47,7 +39,6 @@ export default class SpacecrashGameScene extends Phaser.Scene {
         this.gameOver = false;
         this.gameStarted = false;
         this.currentMultiplier = 1.00;
-        this.multiplierText.setText('1.00x');
         this.rocket.setVisible(false).setPosition(this.cameras.main.width / 2, this.cameras.main.height - 50).setAlpha(1).setScale(1);
         // Stop any explosion animations if they were ongoing
         if (this.rocket.anims.exists('explodeAnim')) {
@@ -82,7 +73,7 @@ export default class SpacecrashGameScene extends Phaser.Scene {
       this.sound.play('rocket_launch', { volume: 0.5 });
     } catch (e) { console.warn("Could not play rocket_launch sound", e); }
 
-    this.multiplierText.setText('1.00x');
+    // this.multiplierText.setText('1.00x'); // Removed as Vue handles UI display
     this.events.emit('GAME_STARTED'); // Emit to UIScene
   }
 
@@ -93,7 +84,7 @@ export default class SpacecrashGameScene extends Phaser.Scene {
     this.gameOver = true;
     this.gameStarted = false;
     this.currentMultiplier = crashPoint; // Set final multiplier
-    this.multiplierText.setText(this.currentMultiplier.toFixed(2) + 'x');
+    // this.multiplierText.setText(this.currentMultiplier.toFixed(2) + 'x'); // Removed as Vue handles UI display
 
     // Explosion animation
     // Assuming 'explosion' spritesheet has an animation key 'explodeAnim'
@@ -140,7 +131,7 @@ export default class SpacecrashGameScene extends Phaser.Scene {
     newMultiplier = Math.min(newMultiplier, 9999.00); // Cap it
 
     this.currentMultiplier = parseFloat(newMultiplier.toFixed(2));
-    this.multiplierText.setText(this.currentMultiplier.toFixed(2) + 'x');
+    // this.multiplierText.setText(this.currentMultiplier.toFixed(2) + 'x'); // Removed as Vue handles UI display
 
     // Move rocket up - speed can increase with multiplier or time
     // Simple upward movement, adjust factor for desired speed

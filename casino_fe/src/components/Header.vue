@@ -1,6 +1,6 @@
 <template>
-  <header class="bg-bg-secondary text-text-primary shadow-lg sticky top-0 z-50">
-    <nav class="container mx-auto px-4 py-3 flex justify-between items-center">
+  <header class="bg-bg-secondary text-text-primary shadow-lg sticky top-0 z-[70]">
+    <nav class="px-2 py-3 flex justify-between items-center">
       <!-- Logo -->
       <router-link :to="isAuthenticated ? '/slots' : '/'" class="flex items-center flex-shrink-0">
         <img src="@/assets/logo.png" alt="Kingpin Casino" class="h-10 md:h-12 mr-2 transition-transform duration-300 hover:scale-110" />
@@ -19,14 +19,16 @@
              <i class="fas fa-coins mr-1"></i> {{ formatSatsToBtc(user.balance, true) }}
           </div>
         </template>
-        <template v-else>
-          <router-link to="/login" class="nav-link">Login</router-link>
-          <router-link to="/register" class="btn-outline-gold">Register</router-link>
-        </template>
       </div>
 
-      <!-- Right side items: Profile/Auth, Dark Mode Toggle, Mobile Menu Button -->
+      <!-- Right side items: Auth, Profile, Dark Mode Toggle, Mobile Menu Button -->
       <div class="flex items-center space-x-3">
+        <!-- Login/Register (Not Authenticated) -->
+        <template v-if="!isAuthenticated">
+          <router-link to="/login" class="nav-link hidden md:inline-block">Login</router-link>
+          <router-link to="/register" class="btn-outline-gold hidden md:inline-block">Register</router-link>
+        </template>
+
         <!-- Profile Dropdown (Authenticated) -->
         <div v-if="isAuthenticated && user" class="relative hidden md:block" ref="dropdownContainer">
           <button @click="toggleDropdown" class="flex items-center focus:outline-none nav-link">
@@ -148,10 +150,6 @@ const toggleDarkMode = () => {
     emit('toggle-dark-mode');
 };
 
-// Removed one redundant handleLogout definition
-// Removed one redundant toggleDarkMode definition
-// Removed one redundant handleClickOutside definition (it was identical to the one above it, likely a copy-paste error in original code)
-
 const handleClickOutside = (event) => {
     if (dropdownContainer.value && !dropdownContainer.value.contains(event.target)) {
         dropdownOpen.value = false;
@@ -159,19 +157,11 @@ const handleClickOutside = (event) => {
     // Mobile menu closing is handled by its own button or navigation.
 };
 
-const handleLogout = async () => {
-  closeDropdownOnNav();
-  await store.dispatch('logout');
-  router.push('/');
-};
-
 const handleLogoutMobile = async () => {
   closeMobileMenu();
   await store.dispatch('logout');
   router.push('/');
 };
-
-// toggleDarkMode is already defined above correctly.
 
 onMounted(() => {
     document.addEventListener('click', handleClickOutside);
@@ -218,7 +208,7 @@ onBeforeUnmount(() => {
 }
 
 .btn-outline-gold {
-    @apply px-3 py-1.5 border border-gold text-gold rounded-md text-sm font-medium hover:bg-gold hover:text-gray-900 dark:hover:text-black transition-colors duration-200;
+    @apply px-3 py-1.5 border border-brand-gold text-brand-gold rounded-md text-sm font-medium hover:bg-brand-gold hover:text-gray-900 dark:hover:text-black transition-colors duration-200;
 }
 
 .dropdown-item {

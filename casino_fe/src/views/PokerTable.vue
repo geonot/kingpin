@@ -93,7 +93,7 @@
 <script setup>
 import { ref, onMounted, watch, computed } from 'vue';
 import { useRoute } from 'vue-router';
-import apiClient from '@/services/apiClient'; // Assuming apiClient is configured
+import api from '@/services/api'; // Use the existing api service
 
 const route = useRoute();
 const id = ref(route.params.id); // Table ID from route params
@@ -122,7 +122,7 @@ const fetchTableState = async (tableId) => {
   loading.value = true; // General loading for page/state refresh
   // error.value = null; // Keep previous general error if action fails
   try {
-    const response = await apiClient.get(`/poker/tables/${tableId}/state`);
+    const response = await api.get(`/poker/tables/${tableId}/state`);
     tableState.value = response.data;
   } catch (err) {
     console.error(`Failed to fetch table state for table ${tableId}:`, err);
@@ -191,7 +191,7 @@ const joinTable = async () => {
     return;
   }
   await handleApiResponse(
-    apiClient.post(`/poker/tables/${id.value}/join`, { seat_id: joinSeatId.value, buy_in_amount: joinBuyInAmount.value }),
+    api.post(`/poker/tables/${id.value}/join`, { seat_id: joinSeatId.value, buy_in_amount: joinBuyInAmount.value }),
     'Successfully joined table.'
   );
   joinSeatId.value = null;
@@ -200,14 +200,14 @@ const joinTable = async () => {
 
 const leaveTable = async () => {
   await handleApiResponse(
-    apiClient.post(`/poker/tables/${id.value}/leave`),
+    api.post(`/poker/tables/${id.value}/leave`),
     'Successfully left table.'
   );
 };
 
 const startHand = async () => {
   await handleApiResponse(
-    apiClient.post(`/poker/tables/${id.value}/start_hand`),
+    api.post(`/poker/tables/${id.value}/start_hand`),
     'New hand started.'
   );
 };
@@ -229,7 +229,7 @@ const performAction = async (actionType, amount = null) => {
   }
 
   await handleApiResponse(
-    apiClient.post(`/poker/tables/${id.value}/hands/${tableState.value.current_hand_id}/action`, payload),
+    api.post(`/poker/tables/${id.value}/hands/${tableState.value.current_hand_id}/action`, payload),
     `Action ${actionType} performed.`
   );
   betRaiseAmount.value = null; // Clear input after action
@@ -280,29 +280,27 @@ watch(() => route.params.id, (newId) => {
 <style scoped>
 .poker-table-view {
   padding: 20px;
-  max-width: 1200px; /* Increased max-width for better layout */
+  max-width: 1200px;
   margin: 0 auto;
   font-family: Arial, sans-serif;
-  color: #333;
+  @apply text-gray-900 dark:text-gray-100;
 }
 
 h1 {
   text-align: center;
   margin-bottom: 25px;
-  color: #2c3e50;
+  @apply text-gray-800 dark:text-gray-200;
 }
 
 .loading, .no-state {
   text-align: center;
   font-size: 1.2em;
-  color: #777;
+  @apply text-gray-600 dark:text-gray-400;
   margin-top: 30px;
 }
 
 .error-message {
-  background-color: #ffebee;
-  color: #c62828;
-  border: 1px solid #c62828;
+  @apply bg-red-50 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-600;
   padding: 15px;
   border-radius: 5px;
   margin-bottom: 20px;
@@ -317,35 +315,33 @@ h1 {
   white-space: pre-wrap;
   word-wrap: break-word;
   font-size: 0.9em;
-  background-color: #fce4ec;
+  @apply bg-red-100 dark:bg-red-800;
   padding: 10px;
   border-radius: 3px;
 }
 
 .table-state-display {
   margin-top: 20px;
-  background-color: #f9f9f9;
-  border: 1px solid #eee;
+  @apply bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-600;
   border-radius: 5px;
   padding: 20px;
 }
 
 .table-state-display h2 {
   margin-top: 0;
-  color: #007bff;
+  @apply text-blue-600 dark:text-blue-400;
   margin-bottom: 10px;
 }
 
 .table-state-display pre {
-  background-color: #fff;
-  border: 1px solid #ddd;
+  @apply bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600;
   padding: 15px;
   border-radius: 4px;
-  white-space: pre-wrap; /* Ensures long lines wrap */
-  word-break: break-all; /* Ensures long strings without spaces wrap */
+  white-space: pre-wrap;
+  word-break: break-all;
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.9em;
-  max-height: 500px; /* For very large states */
+  max-height: 500px;
   overflow-y: auto;
 }
 
@@ -357,25 +353,23 @@ h1 {
 }
 
 .table-info {
-  background-color: #e9f5ff;
+  @apply bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700;
   padding: 15px;
   border-radius: 8px;
-  border: 1px solid #b3d7ff;
   width: 100%;
-  max-width: 600px; /* Centered info box */
+  max-width: 600px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .table-info h2 {
   margin-top: 0;
-  color: #0056b3;
+  @apply text-blue-700 dark:text-blue-300;
 }
 
 .community-cards {
   margin-top: 10px;
   padding: 10px;
-  background-color: #fff;
-  border: 1px solid #ccc;
+  @apply bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600;
   border-radius: 4px;
   text-align: center;
 }
@@ -383,8 +377,7 @@ h1 {
 .card {
   display: inline-block;
   padding: 5px 10px;
-  border: 1px solid #333;
-  background-color: white;
+  @apply border border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100;
   border-radius: 4px;
   margin: 0 3px;
   font-weight: bold;
@@ -394,50 +387,47 @@ h1 {
 
 .player-seats-area {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); /* Responsive grid */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 15px;
   width: 100%;
   padding: 10px;
-  background-color: #f0f0f0; /* Light grey background for seats area */
+  @apply bg-gray-100 dark:bg-gray-800;
   border-radius: 8px;
 }
 
 .seat {
-  border: 1px solid #ccc;
+  @apply border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700;
   border-radius: 6px;
   padding: 10px;
-  background-color: #fff;
-  min-height: 120px; /* Ensure seats have some height */
+  min-height: 120px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .player-info {
-  position: relative; /* For dealer chip positioning */
+  position: relative;
 }
 .player-info strong {
-  color: #007bff;
+  @apply text-blue-600 dark:text-blue-400;
 }
 .player-info p {
   margin: 4px 0;
   font-size: 0.9em;
 }
 .hole-cards .card {
-  background-color: #f8f9fa;
-  color: #212529;
+  @apply bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-gray-100;
 }
 
 .empty-seat {
-  color: #888;
+  @apply text-gray-500 dark:text-gray-400;
   text-align: center;
-  padding-top: 40px; /* Center text a bit */
+  padding-top: 40px;
 }
 
 .dealer-chip {
   position: absolute;
   top: -5px;
   right: -5px;
-  background-color: #ffc107; /* Yellow for dealer chip */
-  color: #333;
+  @apply bg-yellow-400 text-gray-900 border border-yellow-500;
   border-radius: 50%;
   width: 20px;
   height: 20px;
@@ -446,25 +436,23 @@ h1 {
   justify-content: center;
   font-weight: bold;
   font-size: 0.8em;
-  border: 1px solid #e0a800;
 }
 
 .current-turn {
-  border: 2px solid #28a745; /* Green border for current turn */
-  box-shadow: 0 0 10px rgba(40, 167, 69, 0.5);
+  @apply border-2 border-green-500 dark:border-green-400;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
 }
 
 .actions-area {
   margin-top: 20px;
   padding: 15px;
-  background-color: #f8f9fa;
-  border: 1px solid #dee2e6;
+  @apply bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-600;
   border-radius: 8px;
   display: flex;
-  flex-direction: column; /* Stack form and buttons */
-  gap: 15px; /* Space between elements in actions area */
+  flex-direction: column;
+  gap: 15px;
   width: 100%;
-  max-width: 400px; /* Centered actions box */
+  max-width: 400px;
 }
 .join-table-form {
   display: flex;
@@ -473,7 +461,7 @@ h1 {
   margin-bottom: 15px;
 }
 .actions-area > button {
-  margin-bottom: 10px; /* Space below Leave and Start Hand buttons */
+  margin-bottom: 10px;
 }
 
 .join-table-form input[type="number"],
@@ -483,31 +471,24 @@ h1 {
 .in-game-actions input[type="number"] {
   padding: 10px;
   border-radius: 4px;
-  border: 1px solid #ced4da;
+  @apply border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100;
   font-size: 1em;
 }
 .join-table-form button,
 .actions-area > button,
 .in-game-actions button {
-  background-color: #007bff;
-  color: white;
+  @apply bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white dark:text-white border border-blue-600 dark:border-blue-500;
   cursor: pointer;
   transition: background-color 0.2s;
 }
-.join-table-form button:hover,
-.actions-area > button:hover,
-.in-game-actions button:hover {
-  background-color: #0056b3;
-}
 .in-game-actions button:disabled,
 .actions-area > button:disabled {
-  background-color: #ccc;
+  @apply bg-gray-400 dark:bg-gray-600 text-gray-700 dark:text-gray-400 border-gray-400 dark:border-gray-600;
   cursor: not-allowed;
 }
 
-
 .in-game-actions {
-  border-top: 1px solid #ccc;
+  @apply border-t border-gray-300 dark:border-gray-600;
   margin-top: 15px;
   padding-top: 15px;
   display: flex;
@@ -534,28 +515,23 @@ h1 {
   text-align: center;
 }
 .action-success {
-  background-color: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
+  @apply bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border border-green-300 dark:border-green-600;
 }
 .action-error {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+  @apply bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-600;
 }
 
 .hand-history-area {
   margin-top: 20px;
   padding: 15px;
-  background-color: #fdfdfd;
-  border: 1px solid #eee;
+  @apply bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-600;
   border-radius: 8px;
   width: 100%;
-  max-width: 600px; /* Or align with table-info */
+  max-width: 600px;
 }
 .hand-history-area h3 {
   margin-top: 0;
-  color: #333;
+  @apply text-gray-900 dark:text-gray-100;
 }
 .hand-history-area ul {
   list-style-type: none;
@@ -566,23 +542,9 @@ h1 {
 }
 .hand-history-area li {
   padding: 3px 0;
-  border-bottom: 1px dashed #eee;
+  @apply border-b border-dashed border-gray-200 dark:border-gray-600;
 }
 .hand-history-area li:last-child {
   border-bottom: none;
 }
-
-
-/* Basic attempt at circular/oval layout for more seats - very simplified */
-/* This would need significant work for a true circle, especially dynamic seat counts */
-/* For more than 4-6 seats, a grid or simpler flex row layout is more practical without complex JS positioning */
-/*
-.player-seats-area.seats-6 .seat:nth-child(1) { grid-column: 2 / 3; grid-row: 1 / 2; }
-.player-seats-area.seats-6 .seat:nth-child(2) { grid-column: 3 / 4; grid-row: 2 / 3; }
-.player-seats-area.seats-6 .seat:nth-child(3) { grid-column: 2 / 3; grid-row: 3 / 4; }
-.player-seats-area.seats-6 .seat:nth-child(4) { grid-column: 1 / 2; grid-row: 3 / 4; }
-.player-seats-area.seats-6 .seat:nth-child(5) { grid-column: 0 / 1; grid-row: 2 / 3; }
-.player-seats-area.seats-6 .seat:nth-child(6) { grid-column: 1 / 2; grid-row: 1 / 2; }
-*/
-
 </style>

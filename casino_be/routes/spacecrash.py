@@ -2,20 +2,18 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from marshmallow import ValidationError
 
-from ..models import db, User, SpacecrashGame, SpacecrashBet
-from ..schemas import (
+from models import db, User, SpacecrashGame, SpacecrashBet
+from schemas import (
     SpacecrashBetSchema, SpacecrashGameSchema,
     SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema
 )
-from ..utils import spacecrash_handler
-from ..app import limiter # Assuming limiter can be imported directly
-from ..routes.admin import is_admin # Import is_admin helper
+from utils import spacecrash_handler
+from routes.admin import is_admin # Import is_admin helper
 
 spacecrash_bp = Blueprint('spacecrash', __name__, url_prefix='/api/spacecrash')
 
 @spacecrash_bp.route('/bet', methods=['POST'])
 @jwt_required()
-@limiter.limit("30 per minute")
 def spacecrash_place_bet():
     data = request.get_json()
     try:
@@ -146,7 +144,6 @@ def spacecrash_game_history():
 
 @spacecrash_bp.route('/admin/next_phase', methods=['POST'])
 @jwt_required()
-@limiter.limit("10 per minute")
 def spacecrash_admin_next_phase():
     if not is_admin():
         return jsonify({'status': False, 'status_message': 'Access denied. Admin rights required.'}), 403

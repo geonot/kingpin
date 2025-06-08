@@ -92,20 +92,22 @@ const fetchSlotDetailsAndConfig = async (slotId) => {
     slotInfo.value = fetchedSlotInfo;
 
     // Now fetch the gameConfig.json for this specific slot
-    if (slotInfo.value.short_name) {
+    if (slotInfo.value.asset_directory) {
       loadingMessage.value = `Loading game configuration for ${slotInfo.value.name}...`;
       try {
-        const gameConfigPath = `public/slots/${slotInfo.value.short_name}/gameConfig.json`;
+        // Serve gameConfig.json directly from Vue.js frontend public directory
+        // asset_directory is like '/slot1/', so we remove the leading slash to get 'slot1/'
+        const gameConfigPath = `/${slotInfo.value.asset_directory.replace(/^\//, '')}gameConfig.json`;
         const response = await axios.get(gameConfigPath);
         slotGameJsonConfigContent.value = response.data;
-        console.log(`Successfully loaded gameConfig.json for ${slotInfo.value.short_name}`);
+        console.log(`Successfully loaded gameConfig.json from ${gameConfigPath}`);
       } catch (err) {
-        console.error(`Failed to load gameConfig.json for ${slotInfo.value.short_name}:`, err);
+        console.error(`Failed to load gameConfig.json from ${slotInfo.value.asset_directory}:`, err);
         errorObject.value = { status_message: `Could not load detailed game configuration for ${slotInfo.value.name}. Some features might be unavailable or use defaults.` };
       }
     } else {
-      console.error('Slot short_name is missing, cannot load gameConfig.json.');
-      errorObject.value = { status_message: 'Critical slot identifier missing, cannot load game configuration.' };
+      console.error('Slot asset_directory is missing, cannot load gameConfig.json.');
+      errorObject.value = { status_message: 'Critical slot asset directory missing, cannot load game configuration.' };
     }
   } else {
     console.error(`Slot with ID ${slotId} not found or API fetch failed.`);
@@ -229,7 +231,7 @@ const handlePhaserRequestBalanceUpdate = async () => {
     console.log("Vue: PhaserRequestBalanceUpdate received");
     try {
         await store.dispatch('fetchUserProfile');
-        EventBus.emit('vueBalanceUpdated', { balance: store.getters.currentUser?.balance });
+        EventBus.$emit('vueBalanceUpdated', { balance: store.getters.currentUser?.balance });
     } catch (err) {
         console.error("Vue: Error fetching user profile for balance update:", err);
     }
@@ -268,42 +270,60 @@ onMounted(async () => {
     isLoading.value = false;
   }
 
-  EventBus.on('phaserSpinResult', handlePhaserSpinResult);
-  EventBus.on('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
-  EventBus.on('phaserError', handlePhaserError);
-  EventBus.on('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
-  EventBus.on('spinCommand', handlePhaserSpinCommand);
+  EventBus.$on('phaserSpinResult', handlePhaserSpinResult);
+  EventBus.$on('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
+  EventBus.$on('phaserError', handlePhaserError);
+  EventBus.$on('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
+  EventBus.$on('spinRequest', handlePhaserSpinCommand); // Changed from 'spinCommand' to 'spinRequest'
 });
 
 const handlePhaserSpinCommand = async (payload) => {
     if (isSpinning.value) {
         console.warn("Vue: Spin command ignored, already spinning.");
-        EventBus.emit('spinReject', { message: 'Already spinning.' });
+        EventBus.$emit('spinReject', { message: 'Already spinning.' });
         return;
     }
     if (!isAuthenticated.value) {
         errorObject.value = { status_message: "Please log in to play." };
-        EventBus.emit('spinError', { message: 'User not authenticated.' });
+        EventBus.$emit('spinError', { message: 'User not authenticated.' });
         return;
     }
 
     const betAmount = payload.betAmount;
-    if (userBalance.value < betAmount) {
-        errorObject.value = { status_message: 'Insufficient balance.' };
-        EventBus.emit('phaserBalanceInsufficient');
+    
+    // Better error handling for insufficient balance
+    if (userBalance.value <= 0) {
+        errorObject.value = { 
+            status_message: 'You have no balance. Please deposit funds to start playing.',
+            actionButton: {
+                text: 'Deposit Funds',
+                action: () => router.push('/deposit')
+            }
+        };
+        EventBus.$emit('phaserBalanceInsufficient');
+        return;
+    } else if (userBalance.value < betAmount) {
+        errorObject.value = { 
+            status_message: `Insufficient balance. You need ${formatSatsToBtc(betAmount)} BTC but only have ${formatSatsToBtc(userBalance.value)} BTC.`,
+            actionButton: {
+                text: 'Deposit More',
+                action: () => router.push('/deposit')
+            }
+        };
+        EventBus.$emit('phaserBalanceInsufficient');
         return;
     }
 
     isSpinning.value = true;
     clearErrorObject();
-    EventBus.emit('vueSpinInitiated', { betAmount });
+    EventBus.$emit('vueSpinInitiated', { betAmount });
 
     console.log(`Vue: Dispatching spin action with bet: ${betAmount}`);
     try {
         const response = await store.dispatch('spin', { bet_amount: betAmount });
 
         if (response.status) {
-            EventBus.emit('vueSpinResult', response);
+            EventBus.$emit('vueSpinResult', response);
 
             if (response.current_multiplier_level && slotGameJsonConfigContent.value?.game?.win_multipliers) {
                 const level = response.current_multiplier_level;
@@ -317,19 +337,40 @@ const handlePhaserSpinCommand = async (payload) => {
                 currentMultiplierDisplay.value = 1;
             }
         } else {
-            errorObject.value = response;
-            EventBus.emit('spinError', { message: response.status_message || "Spin failed." });
+            // Enhanced error handling for backend responses
+            if (response.status_message && response.status_message.includes('Insufficient balance')) {
+                if (userBalance.value <= 0) {
+                    errorObject.value = { 
+                        status_message: 'You have no balance. Please deposit funds to start playing.',
+                        actionButton: {
+                            text: 'Deposit Funds',
+                            action: () => router.push('/deposit')
+                        }
+                    };
+                } else {
+                    errorObject.value = { 
+                        status_message: `Insufficient balance. You need ${formatSatsToBtc(betAmount)} BTC but only have ${formatSatsToBtc(userBalance.value)} BTC.`,
+                        actionButton: {
+                            text: 'Deposit More',
+                            action: () => router.push('/deposit')
+                        }
+                    };
+                }
+            } else {
+                errorObject.value = response;
+            }
+            EventBus.$emit('spinError', { message: response.status_message || "Spin failed." });
             currentMultiplierDisplay.value = 1;
         }
     } catch (err) {
         console.error("Vue: Error during spin action dispatch:", err);
         const message = err.status_message || "An unexpected error occurred during spin.";
         errorObject.value = { status_message: message };
-        EventBus.emit('spinError', { message });
+        EventBus.$emit('spinError', { message });
         currentMultiplierDisplay.value = 1;
     } finally {
         isSpinning.value = false;
-        EventBus.emit('vueSpinConcluded');
+        EventBus.$emit('vueSpinConcluded');
     }
 };
 
@@ -351,11 +392,11 @@ const endGameSession = async () => {
 onBeforeUnmount(async () => {
   console.log("Slot.vue: Cleaning up Phaser game instance and event listeners.");
 
-  EventBus.off('phaserSpinResult', handlePhaserSpinResult);
-  EventBus.off('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
-  EventBus.off('phaserError', handlePhaserError);
-  EventBus.off('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
-  EventBus.off('spinCommand', handlePhaserSpinCommand);
+  EventBus.$off('phaserSpinResult', handlePhaserSpinResult);
+  EventBus.$off('phaserBalanceInsufficient', handlePhaserBalanceInsufficient);
+  EventBus.$off('phaserError', handlePhaserError);
+  EventBus.$off('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
+  EventBus.$off('spinRequest', handlePhaserSpinCommand); // Changed from 'spinCommand' to 'spinRequest'
 
   currentMultiplierDisplay.value = 1; // Reset multiplier on unmount
 

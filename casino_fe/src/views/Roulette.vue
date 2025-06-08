@@ -39,19 +39,19 @@
           <label for="betAmount" class="block text-sm font-medium text-gray-300 mb-1">Bet Amount:</label>
           <input type="number" id="betAmount" v.model.number="betAmountInput" min="1" class="bg-gray-700 border border-gray-600 text-white rounded-md p-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter amount">
         </div>
-        <button @click="placeBet" :disabled="!canPlaceBet || isLoading" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="placeBet" :disabled="!canPlaceBet || isLoading" class="bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 text-white dark:text-white font-bold py-2 px-6 rounded-md shadow-md disabled:opacity-50 disabled:cursor-not-allowed border border-green-600 dark:border-green-500">
           <span v-if="isLoading">Spinning...</span>
           <span v-else>Place Bet & Spin</span>
         </button>
       </div>
-      <p class="text-xs text-gray-400 text-center mt-2">Select bet type on the table above (table to be implemented in Phaser).</p>
+      <p class="text-xs text-gray-400 dark:text-gray-500 text-center mt-2">Select bet type on the table above (table to be implemented in Phaser).</p>
 
       <!-- Simple Bet Type Buttons (Example) -->
       <div class="mt-4 flex flex-wrap justify-center gap-2">
-        <button @click="selectBetType('red', null)" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded">Bet Red</button>
-        <button @click="selectBetType('black', null)" class="bg-black border border-gray-600 hover:bg-gray-700 px-3 py-1 rounded">Bet Black</button>
-        <button @click="selectBetType('even', null)" class="bg-gray-500 hover:bg-gray-600 px-3 py-1 rounded">Bet Even</button>
-        <button @click="selectBetType('odd', null)" class="bg-gray-500 hover:bg-gray-600 px-3 py-1 rounded">Bet Odd</button>
+        <button @click="selectBetType('red', null)" class="bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 text-white dark:text-white border border-red-600 dark:border-red-500 px-3 py-1 rounded">Bet Red</button>
+        <button @click="selectBetType('black', null)" class="bg-gray-800 hover:bg-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 text-white dark:text-white border border-gray-800 dark:border-gray-700 px-3 py-1 rounded">Bet Black</button>
+        <button @click="selectBetType('even', null)" class="bg-gray-500 hover:bg-gray-600 dark:bg-gray-600 dark:hover:bg-gray-500 text-white dark:text-white border border-gray-500 dark:border-gray-600 px-3 py-1 rounded">Bet Even</button>
+        <button @click="selectBetType('odd', null)" class="bg-gray-500 hover:bg-gray-600 dark:bg-gray-600 dark:hover:bg-gray-500 text-white dark:text-white border border-gray-500 dark:border-gray-600 px-3 py-1 rounded">Bet Odd</button>
         <!-- Add more for columns, dozens, specific numbers as needed -->
       </div>
     </div>
@@ -213,7 +213,7 @@ export default {
 
       // Pass Vue component instance to the scene via scene's init method
       config.scene.forEach(sceneClass => {
-          if (sceneClass.hasOwnProperty('prototype') && sceneClass.prototype instanceof Phaser.Scene) {
+          if (Object.prototype.hasOwnProperty.call(sceneClass, 'prototype') && sceneClass.prototype instanceof Phaser.Scene) {
               // This is a common way to pass initial data to the first scene
               // Phaser will call scene.init(data)
               config.scene[config.scene.indexOf(sceneClass)] = {

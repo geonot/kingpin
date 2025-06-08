@@ -1,16 +1,26 @@
 import os
 
 class Config:
-    # PostgreSQL Database URI
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
-    if SQLALCHEMY_DATABASE_URI is None:
-        raise ValueError("DATABASE_URL environment variable not set.")
+    # Database configuration - PostgreSQL for both development and production
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    
+    if DATABASE_URL:
+        # Use provided DATABASE_URL
+        SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    else:
+        # Build from individual components for local development
+        DB_HOST = os.getenv('DB_HOST', 'localhost')
+        DB_PORT = os.getenv('DB_PORT', '5432')
+        DB_NAME = os.getenv('DB_NAME', 'kingpin_casino')
+        DB_USER = os.getenv('DB_USER', 'kingpin_user')
+        DB_PASSWORD = os.getenv('DB_PASSWORD', 'password123')
+        
+        SQLALCHEMY_DATABASE_URI = f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
+    
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # JWT Secret
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
-    if JWT_SECRET_KEY is None:
-        raise ValueError("JWT_SECRET_KEY environment variable not set.")
+    # JWT Secret - use default for development
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-key-change-in-production')
     JWT_ACCESS_TOKEN_EXPIRES = 3600  # 1 hour
     JWT_REFRESH_TOKEN_EXPIRES = 86400 * 7 # 7 days
     JWT_BLACKLIST_ENABLED = True
@@ -23,14 +33,12 @@ class Config:
     # Flask Debug Mode
     # For production, ensure FLASK_DEBUG is not set or set to 'False'.
     # Set FLASK_DEBUG to 'True' or '1' for development.
-    DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
+    DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() in ('true', '1', 't')
 
     # Satoshi Conversion Factor (1 BTC = 100,000,000 Satoshis)
     SATOSHI_FACTOR = 100_000_000
 
-    # Admin settings
-    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin') # Fallback for username is acceptable for now
-    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
-    if ADMIN_PASSWORD is None:
-        raise ValueError("ADMIN_PASSWORD environment variable not set. This is required for initial admin setup if no admin user exists or if using a default admin creation process that relies on it.")
-    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@kingpincasino.local') # Fallback for email is acceptable for now
+    # Admin settings - use defaults for development
+    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')  # Default for development
+    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@kingpincasino.local')

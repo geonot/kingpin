@@ -86,6 +86,16 @@ export default class UIScene extends Phaser.Scene {
         }
     });
 
+    // Listen for UI idle state to re-enable spin button
+    EventBus.$on('uiSetIdle', () => {
+        if (this.isSpinning) {
+            this.isSpinning = false;
+            if (this.spinButton) {
+                this.spinButton.setAlpha(1.0);
+            }
+        }
+    });
+
      // Listen for spin start/end from GameScene to disable/enable buttons
      // This might be redundant if GameScene directly checks its own isSpinning state
      // EventBus.$on('spinStateChanged', (data) => {
@@ -184,7 +194,7 @@ export default class UIScene extends Phaser.Scene {
             EventBus.$emit('getBalanceForDeduction', this.currentBetSats);
             
             // Emit spin request with bet amount
-            EventBus.$emit('spinRequest', { bet: this.currentBetSats }); // Emit request
+            EventBus.$emit('spinRequest', { betAmount: this.currentBetSats }); // Changed from 'bet' to 'betAmount'
         });
          // Re-enable spin button when spin completes (via GameScene event or specific callback)
         // We'll use the 'uiUpdate' event for simplicity, assuming it implies spin end if win occurs/balance updates

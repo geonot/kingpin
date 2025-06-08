@@ -13,7 +13,7 @@ from sqlalchemy import func, desc
 # Assuming models are in casino_be.models
 # Adjust the import path if your project structure is different.
 # from ..models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction # if utils is a module inside casino_be
-from casino_be.models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction
+from models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction
 
 # Card Constants
 SUITS = ['H', 'D', 'C', 'S']  # Hearts, Diamonds, Clubs, Spades
@@ -161,7 +161,7 @@ def start_new_hand(table_id: int):
     - Determines new dealer button position.
     - Assigns and collects Small and Big Blinds.
     - Creates and initializes a new PokerHand record.
-    - Creates and shuffles a deck.
+    - Creates and shuffles a new deck.
     - Deals hole cards to active players.
     - Determines the first player to act pre-flop.
     - Commits all changes to the database.
@@ -833,7 +833,7 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
     # For a "bet" action, it's generally expected that either:
     # 1. The current_bet_to_match_on_table is 0 (no prior bets this street).
     # 2. The player has already matched the current_bet_to_match_on_table (e.g. BB checking option, then deciding to bet).
-    #    This means player_invested_this_street == current_bet_to_match_on_table.
+    #    This means player_invested_this_street == current_bet_to_match.
     # If current_bet_to_match_on_table > player_invested_this_street, it implies an outstanding bet the player must call or raise.
     if current_bet_to_match_on_table > player_invested_this_street:
         # session.add(player_state) # Save cleared timer - commit will be handled before return
@@ -872,8 +872,6 @@ def handle_bet(user_id: int, table_id: int, hand_id: int, amount: int):
     # This happens if the amount they intend to bet (actual_bet_amount_put_in_pot) is equal to their stack.
     # And, critically for the "bet_all_in" string, usually implies they *intended* to bet `amount` but were capped by stack,
     # OR they intended to bet their exact stack.
-    # If `amount` (their declared bet) was greater than their stack, and they put in their stack, it's an all-in.
-    # If `amount` was equal to their stack, it's also an all-in.
     is_all_in = (actual_bet_amount_put_in_pot == player_state.stack_sats)
 
     player_state.stack_sats -= actual_bet_amount_put_in_pot
@@ -1299,7 +1297,7 @@ def _calculate_pot_limit_raise_sizes(
     # pot_total_before_this_player_acts = current_pot_total (this should include all previous bets)
     # amount_player_calls = amount_to_call_action
 
-    # Pot size for calculation = current_pot_total (all chips in pot now) + amount_to_call_action (the call this player makes)
+    # Pot size for calculation = current_pot_total (all chips in pot now) + amount_player_calls (the call this player makes)
     # This is the size of the pot if the current player just calls.
     pot_size_if_player_calls = current_pot_total + amount_to_call_action
 
@@ -1320,7 +1318,7 @@ def _calculate_pot_limit_raise_sizes(
     # Amount player needs to add to just call the current bet_to_match_this_street
     amount_to_call_action = bet_to_match_this_street - player_invested_this_street
     if amount_to_call_action < 0:
-        amount_to_call_action = 0 # Player has already invested enough, effectively a call costs 0 more.
+        amount_to_call_action = 0 # Player has already invested enough, effectively a call costs 0.
 
     # 1. Calculate Minimum Raise Target
     # The minimum total investment a player must make for a valid raise.
@@ -2279,7 +2277,7 @@ def check_and_handle_player_timeouts(table_id: int, session: Session) -> bool:
         original_turn_user_id = player_to_act_state.user_id
         seat_id = player_to_act_state.seat_id # For logging
 
-        current_app.logger.info(f"Player {original_turn_user_id} at seat {seat_id} on table {table_id} timed out for hand {poker_hand.id}. Auto-folding.")
+        current_app.logger.info(f"Player {original_turn_user_id} at seat {seat_id} timed out for hand {poker_hand.id}. Auto-folding.")
 
         # Clear the timer immediately to prevent re-entry if handle_fold has delays or issues
         player_to_act_state.time_to_act_ends = None
@@ -2405,5 +2403,3 @@ def get_table_state(table_id: int, hand_id: int | None, user_id: int):
 #   Hole cards should only be sent to the specific player they belong to, over a secure channel.
 #   The return structure needs to be different for actual game clients vs internal state.
 #   For now, acknowledging this as a placeholder structure.
-
-# current_app.logger.info("poker_helper.py structure created with placeholders.") # This print is at module level

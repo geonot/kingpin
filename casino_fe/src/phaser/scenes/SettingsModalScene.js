@@ -67,14 +67,20 @@ export default class SettingsModalScene extends Phaser.Scene {
     // --- Sound Toggle ---
     this.add.text(centerX - 100, startY, 'Sound:', labelStyle).setOrigin(0, 0.5).setDepth(2);
     this.soundValueText = this.add.text(centerX, startY, this.soundEnabled ? 'ON' : 'OFF', valueStyle).setOrigin(0, 0.5).setDepth(2);
-    const soundToggle = this.createToggleButton(toggleX, startY, this.soundEnabled, this.toggleSound);
-    soundToggle.setDepth(2);
+    const soundToggleParts = this.createToggleButton(toggleX, startY, this.soundEnabled, this.toggleSound);
+    // Set depth for each part of the toggle
+    soundToggleParts.groove.setDepth(2);
+    soundToggleParts.handle.setDepth(3);
+    soundToggleParts.zone.setDepth(2);
 
     // --- Turbo Spin Toggle ---
     this.add.text(centerX - 100, startY + spacingY, 'Turbo Spin:', labelStyle).setOrigin(0, 0.5).setDepth(2);
     this.turboValueText = this.add.text(centerX, startY + spacingY, this.turboEnabled ? 'ON' : 'OFF', valueStyle).setOrigin(0, 0.5).setDepth(2);
-    const turboToggle = this.createToggleButton(toggleX, startY + spacingY, this.turboEnabled, this.toggleTurbo);
-    turboToggle.setDepth(2);
+    const turboToggleParts = this.createToggleButton(toggleX, startY + spacingY, this.turboEnabled, this.toggleTurbo);
+    // Set depth for each part of the toggle
+    turboToggleParts.groove.setDepth(2);
+    turboToggleParts.handle.setDepth(3);
+    turboToggleParts.zone.setDepth(2);
 
     // --- Optional: Full Screen Button ---
      // this.add.text(centerX - 100, startY + spacingY * 2, 'Full Screen:', labelStyle).setOrigin(0, 0.5).setDepth(2);

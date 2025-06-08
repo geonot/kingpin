@@ -2,15 +2,15 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from ..models import db, User, GameSession, Slot, SlotBet # SlotBet imported
-from ..schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
-from ..utils.spin_handler import handle_spin
-from ..utils.multiway_helper import handle_multiway_spin
-from ..app import limiter # Assuming limiter can be imported directly
+from models import db, User, GameSession, Slot, SlotBet # SlotBet imported
+from schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
+from utils.spin_handler import handle_spin
+from utils.multiway_helper import handle_multiway_spin
 
 slots_bp = Blueprint('slots', __name__, url_prefix='/api/slots')
 
 @slots_bp.route('/', methods=['GET'])
+@slots_bp.route('', methods=['GET'])  # Add route without trailing slash to prevent 308 redirects
 def get_slots_list(): # Renamed from get_slots to avoid conflict if any other get_slots might exist
     try:
         slots = Slot.query.order_by(Slot.id).all()

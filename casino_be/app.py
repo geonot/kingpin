@@ -1,9 +1,17 @@
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
 from flask import Flask, request, jsonify, Blueprint, current_app, g
 import uuid
+import werkzeug.exceptions
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token, jwt_required,
     get_jwt_identity, get_jti, current_user
@@ -14,7 +22,7 @@ from pythonjsonlogger import jsonlogger
 from marshmallow import ValidationError
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
-from .models import (
+from models import (
     db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist,
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
@@ -22,7 +30,7 @@ from .models import (
     PlinkoDropLog, RouletteGame,  # Plinko models, added RouletteGame
     BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
 )
-from .schemas import (
+from schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
@@ -34,24 +42,27 @@ from .schemas import (
     # Baccarat schemas will be defined below for now, or imported if moved to a separate file
     BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema, BaccaratActionSchema # Actual Baccarat Schemas
 )
-from .utils.bitcoin import generate_bitcoin_wallet
-from .utils.spin_handler import handle_spin
-from .utils.multiway_helper import handle_multiway_spin
-from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
-from .utils import spacecrash_handler
-from .utils import poker_helper
-from .utils import roulette_helper # Import the new helper
-from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
-from .utils import baccarat_helper
-from .config import Config
+from utils.bitcoin import generate_bitcoin_wallet
+from utils.spin_handler import handle_spin
+from utils.multiway_helper import handle_multiway_spin
+from utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from utils import spacecrash_handler
+from utils import poker_helper
+from utils import roulette_helper # Import the new helper
+from utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
+from utils import baccarat_helper
+from config import Config
 from sqlalchemy.orm import joinedload # Added for poker join logic
 from decimal import Decimal
-from .services.bonus_service import apply_bonus_to_deposit
+from services.bonus_service import apply_bonus_to_deposit
 from http import HTTPStatus
 
 # --- App Initialization ---
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# --- CORS Setup ---
+CORS(app, origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8082", "http://127.0.0.1:8082"], supports_credentials=True)
 
 if not app.debug:
     # Configure JSON logging for production
@@ -88,7 +99,7 @@ limiter.init_app(app) # Rely entirely on app.config values set above
 
 # --- Database Setup ---
 db.init_app(app)
-migrate = Migrate(app, db, directory='casino_be/migrations')
+migrate = Migrate(app, db, directory='migrations')
 
 # --- JWT Setup ---
 jwt = JWTManager(app)
@@ -96,7 +107,7 @@ jwt = JWTManager(app)
 # --- JWT Helper Functions ---
 @jwt.user_identity_loader
 def user_identity_lookup(user):
-    return user.id
+    return str(user.id)  # Convert to string for JWT compatibility
 
 @jwt.user_lookup_loader
 def user_lookup_callback(_jwt_header, jwt_data):
@@ -113,8 +124,20 @@ def check_if_token_in_blacklist(jwt_header, jwt_payload):
     return False # Temporarily disable blocklist check
 
 # --- Global Error Handler ---
+@app.errorhandler(404)
+def handle_not_found(e):
+    current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - 404 Not Found: {request.url}")
+    return jsonify({
+        'status': False,
+        'status_message': 'The requested resource was not found.'
+    }), 404
+
 @app.errorhandler(Exception)
 def handle_unhandled_exception(e):
+    # Don't catch 404 errors here since they have their own handler
+    if isinstance(e, werkzeug.exceptions.NotFound):
+        return handle_not_found(e)
+    
     current_app.logger.error(f"Request ID: {g.get('request_id', 'N/A')} - Unhandled exception caught by global error handler:", exc_info=True)
     return jsonify({
         'status': False,
@@ -132,17 +155,17 @@ def add_security_headers(response):
     return response
 
 # --- Blueprint Imports ---
-from .routes.auth import auth_bp
-from .routes.user import user_bp
-from .routes.admin import admin_bp
-from .routes.slots import slots_bp
-from .routes.blackjack import blackjack_bp
-from .routes.poker import poker_bp
-from .routes.plinko import plinko_bp
-from .routes.roulette import roulette_bp
-from .routes.spacecrash import spacecrash_bp
-from .routes.meta_game import meta_game_bp
-from .routes.baccarat import baccarat_bp # New Baccarat import
+from routes.auth import auth_bp
+from routes.user import user_bp
+from routes.admin import admin_bp
+from routes.slots import slots_bp
+from routes.blackjack import blackjack_bp
+from routes.poker import poker_bp
+from routes.plinko import plinko_bp
+from routes.roulette import roulette_bp
+from routes.spacecrash import spacecrash_bp
+from routes.meta_game import meta_game_bp
+from routes.baccarat import baccarat_bp # New Baccarat import
 
 # CLI command for cleanup
 @app.cli.command('cleanup-expired-tokens')
@@ -169,4 +192,8 @@ app.register_blueprint(roulette_bp)
 app.register_blueprint(spacecrash_bp)
 app.register_blueprint(meta_game_bp)
 app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
+
+# Add main section to run the app
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
 
