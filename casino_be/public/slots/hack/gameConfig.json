@@ -4,6 +4,8 @@
     "name": "Hack the Planet",
     "short_name": "hack",
     "asset_dir": "/slot1/",
+    "wild_symbol_id": 9,
+    "scatter_symbol_id": 8,
     "layout": {
       "rows": 3,
       "columns": 5,
@@ -20,15 +22,16 @@
         {"id": "payline_10", "coords": [[0,0],[1,1],[0,2],[1,3],[0,4]]}
       ]
     },
-    "wild_symbol_id": 9,
-    "scatter_symbol_id": 8,
+    "symbol_count": 9,
+    "symbol_scatter": 8,
+    "symbol_wild": 9,
     "symbols": [
       { 
         "id": 1, 
         "icon": "/slot1/sprite_0.png", 
         "value": 1.5, 
         "name": "Symbol 1",
-        "weight": 10.0,
+        "weight": 10,
         "value_multipliers": {"3": 0.5, "4": 1, "5": 2}
       },
       { 
@@ -36,7 +39,7 @@
         "icon": "/slot1/sprite_1.png", 
         "value": 2, 
         "name": "Symbol 2",
-        "weight": 10.0,
+        "weight": 10,
         "value_multipliers": {"3": 0.5, "4": 1, "5": 2}
       },
       { 
@@ -44,7 +47,7 @@
         "icon": "/slot1/sprite_2.png", 
         "value": 2.5, 
         "name": "Symbol 3",
-        "weight": 5.0,
+        "weight": 8,
         "value_multipliers": {"3": 0.7, "4": 1.5, "5": 3}
       },
       { 
@@ -52,7 +55,7 @@
         "icon": "/slot1/sprite_3.png", 
         "value": 3, 
         "name": "Symbol 4",
-        "weight": 5.0,
+        "weight": 8,
         "value_multipliers": {"3": 0.7, "4": 1.5, "5": 3}
       },
       { 
@@ -60,7 +63,7 @@
         "icon": "/slot1/sprite_4.png", 
         "value": 5, 
         "name": "Symbol 5",
-        "weight": 2.0,
+        "weight": 6,
         "value_multipliers": {"3": 1, "4": 2.5, "5": 5}
       },
       { 
@@ -68,7 +71,7 @@
         "icon": "/slot1/sprite_5.png", 
         "value": 10, 
         "name": "Symbol 6",
-        "weight": 2.0,
+        "weight": 6,
         "value_multipliers": {"3": 1, "4": 2.5, "5": 5}
       },
       { 
@@ -76,7 +79,7 @@
         "icon": "/slot1/sprite_6.png", 
         "value": 20, 
         "name": "Symbol 7",
-        "weight": 1.0,
+        "weight": 4,
         "value_multipliers": {"3": 1.5, "4": 5, "5": 10}
       },
       { 
@@ -84,8 +87,7 @@
         "icon": "/slot1/sprite_7.png", 
         "value": null, 
         "name": "Scatter",
-        "weight": 1.0,
-        "is_scatter": true,
+        "weight": 2,
         "scatter_payouts": {"3": 2, "4": 10, "5": 50}
       },
       { 
@@ -93,33 +95,11 @@
         "icon": "/slot1/sprite_8.png", 
         "value": null, 
         "name": "Wild",
-        "weight": 1.5,
-        "is_wild": true
+        "weight": 1,
+        "value_multipliers": {"3": 2, "4": 10, "5": 50}
       },
-      { 
-        "id": 10, 
-        "icon": "/slot1/coin.png", 
-        "value": 0, 
-        "name": "Coin", 
-        "isBonusCoin": true,
-        "weight": 0.5
-      }
+      { "id": 10, "icon": "/slot1/coin.png", "value": 0, "name": "Coin", "isBonusCoin": true, "weight": 0 }
     ],
-    "reel_strips": [
-      [1,2,3,4,5,6,7,8,9, 1,2,3,1,4,5,1,2,3,4,5,6,7,8,9],
-      [1,2,3,4,5,6,7,8,9, 1,3,6,7,8,1,2,3,4,5,6,7,8,9],
-      [1,2,3,4,5,6,7,8,9, 1,2,4,5,9,8,1,2,3,4,5,6,7,8],
-      [1,2,3,4,5,6,7,8,9, 1,3,6,7,8,1,2,3,4,5,6,7,8,9],
-      [1,2,3,4,5,6,7,8,9, 2,4,5,8,9,1,2,3,4,5,6,7,8,9]
-    ],
-    "bonus_features": {
-      "free_spins": {
-        "trigger_symbol_id": 8,
-        "trigger_count": 3,
-        "spins_awarded": 10,
-        "multiplier": 3.0
-      }
-    },
     "ui": {
       "balance": { "position": { "x": 150, "y": 550 }, "style": { "font": "24px Arial", "color": "#ffffff" } },
       "betSize": { "position": { "x": 650, "y": 550 }, "style": { "font": "24px Arial", "color": "#ffffff" } },
@@ -150,6 +130,14 @@
       "winLine": { "duration": 500, "effect": "Pulse" },
       "symbolWin": { "duration": 300, "effect": "Scale" },
       "bonusTrigger": { "duration": 1500, "effect": "Flash" }
+    },
+    "bonus_features": {
+      "free_spins": {
+        "trigger_symbol_id": 8,
+        "trigger_count": 3,
+        "spins_awarded": 10,
+        "multiplier": 3.0
+      }
     },
     "bonus": {
       "triggerCount": 3,
@@ -182,6 +170,6 @@
       "soundDefault": true,
       "turboDefault": false,
       "betOptions": [10, 20, 50, 100, 200, 500]
-    }
   }
+}
 }

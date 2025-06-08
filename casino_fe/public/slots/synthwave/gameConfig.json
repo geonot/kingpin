@@ -1,104 +1,39 @@
 {
   "game": {
-    "slot_id": 1,
-    "name": "Hack the Planet",
-    "short_name": "hack",
-    "asset_dir": "/slot1/",
-    "wild_symbol_id": 9,
-    "scatter_symbol_id": 8,
+    "slot_id": 3,
+    "name": "Synthwave Future",
+    "short_name": "synthwave",
+    "asset_dir": "/slot3/",
     "layout": {
       "rows": 3,
-      "columns": 5,
-      "paylines": [
-        {"id": "payline_1", "coords": [[0,0],[0,1],[0,2],[0,3],[0,4]]},
-        {"id": "payline_2", "coords": [[1,0],[1,1],[1,2],[1,3],[1,4]]},
-        {"id": "payline_3", "coords": [[2,0],[2,1],[2,2],[2,3],[2,4]]},
-        {"id": "payline_4", "coords": [[0,0],[1,1],[2,2],[1,3],[0,4]]},
-        {"id": "payline_5", "coords": [[2,0],[1,1],[0,2],[1,3],[2,4]]},
-        {"id": "payline_6", "coords": [[0,0],[0,1],[1,2],[2,3],[2,4]]},
-        {"id": "payline_7", "coords": [[2,0],[2,1],[1,2],[0,3],[0,4]]},
-        {"id": "payline_8", "coords": [[1,0],[0,1],[0,2],[0,3],[1,4]]},
-        {"id": "payline_9", "coords": [[1,0],[2,1],[2,2],[2,3],[1,4]]},
-        {"id": "payline_10", "coords": [[0,0],[1,1],[0,2],[1,3],[0,4]]}
-      ]
+      "columns": 5
     },
     "symbol_count": 9,
     "symbol_scatter": 8,
     "symbol_wild": 9,
     "symbols": [
-      { 
-        "id": 1, 
-        "icon": "/slot1/sprite_0.png", 
-        "value": 1.5, 
-        "name": "Symbol 1",
-        "weight": 10,
-        "value_multipliers": {"3": 0.5, "4": 1, "5": 2}
-      },
-      { 
-        "id": 2, 
-        "icon": "/slot1/sprite_1.png", 
-        "value": 2, 
-        "name": "Symbol 2",
-        "weight": 10,
-        "value_multipliers": {"3": 0.5, "4": 1, "5": 2}
-      },
-      { 
-        "id": 3, 
-        "icon": "/slot1/sprite_2.png", 
-        "value": 2.5, 
-        "name": "Symbol 3",
-        "weight": 8,
-        "value_multipliers": {"3": 0.7, "4": 1.5, "5": 3}
-      },
-      { 
-        "id": 4, 
-        "icon": "/slot1/sprite_3.png", 
-        "value": 3, 
-        "name": "Symbol 4",
-        "weight": 8,
-        "value_multipliers": {"3": 0.7, "4": 1.5, "5": 3}
-      },
-      { 
-        "id": 5, 
-        "icon": "/slot1/sprite_4.png", 
-        "value": 5, 
-        "name": "Symbol 5",
-        "weight": 6,
-        "value_multipliers": {"3": 1, "4": 2.5, "5": 5}
-      },
-      { 
-        "id": 6, 
-        "icon": "/slot1/sprite_5.png", 
-        "value": 10, 
-        "name": "Symbol 6",
-        "weight": 6,
-        "value_multipliers": {"3": 1, "4": 2.5, "5": 5}
-      },
-      { 
-        "id": 7, 
-        "icon": "/slot1/sprite_6.png", 
-        "value": 20, 
-        "name": "Symbol 7",
-        "weight": 4,
-        "value_multipliers": {"3": 1.5, "4": 5, "5": 10}
-      },
-      { 
-        "id": 8, 
-        "icon": "/slot1/sprite_7.png", 
-        "value": null, 
-        "name": "Scatter",
-        "weight": 2,
-        "scatter_payouts": {"3": 2, "4": 10, "5": 50}
-      },
-      { 
-        "id": 9, 
-        "icon": "/slot1/sprite_8.png", 
-        "value": null, 
-        "name": "Wild",
-        "weight": 1,
-        "value_multipliers": {"3": 2, "4": 10, "5": 50}
-      },
-      { "id": 10, "icon": "/slot1/coin.png", "value": 0, "name": "Coin", "isBonusCoin": true, "weight": 0 }
+      { "id": 1, "icon": "/slot3/sprite_0.png", "value": 1.5, "name": "Symbol 1" },
+      { "id": 2, "icon": "/slot3/sprite_1.png", "value": 2, "name": "Symbol 2" },
+      { "id": 3, "icon": "/slot3/sprite_2.png", "value": 2.5, "name": "Symbol 3" },
+      { "id": 4, "icon": "/slot3/sprite_3.png", "value": 3, "name": "Symbol 4" },
+      { "id": 5, "icon": "/slot3/sprite_4.png", "value": 5, "name": "Symbol 5" },
+      { "id": 6, "icon": "/slot3/sprite_5.png", "value": 10, "name": "Symbol 6" },
+      { "id": 7, "icon": "/slot3/sprite_6.png", "value": 20, "name": "Symbol 7" },
+      { "id": 8, "icon": "/slot3/sprite_7.png", "value": null, "name": "Scatter" },
+      { "id": 9, "icon": "/slot3/sprite_8.png", "value": null, "name": "Wild" },
+      { "id": 10, "icon": "/slot3/coin.png", "value": 0, "name": "Coin", "isBonusCoin": true }
+    ],
+    "paylines": [
+      {"id": 0, "coords": [[0,0],[0,1],[0,2],[0,3],[0,4]]},
+      {"id": 1, "coords": [[1,0],[1,1],[1,2],[1,3],[1,4]]},
+      {"id": 2, "coords": [[2,0],[2,1],[2,2],[2,3],[2,4]]},
+      {"id": 3, "coords": [[0,0],[1,1],[2,2],[1,3],[0,4]]},
+      {"id": 4, "coords": [[2,0],[1,1],[0,2],[1,3],[2,4]]},
+      {"id": 5, "coords": [[0,0],[0,1],[1,2],[2,3],[2,4]]},
+      {"id": 6, "coords": [[2,0],[2,1],[1,2],[0,3],[0,4]]},
+      {"id": 7, "coords": [[1,0],[0,1],[0,2],[0,3],[1,4]]},
+      {"id": 8, "coords": [[1,0],[2,1],[2,2],[2,3],[1,4]]},
+      {"id": 9, "coords": [[0,0],[1,1],[0,2],[1,3],[0,4]]}
     ],
     "payouts": [
         {"symbol_id": 1, "matches": 3, "multiplier": 0.5}, {"symbol_id": 1, "matches": 4, "multiplier": 1}, {"symbol_id": 1, "matches": 5, "multiplier": 2},
@@ -115,10 +50,10 @@
       "betSize": { "position": { "x": 650, "y": 550 }, "style": { "font": "24px Arial", "color": "#ffffff" } },
       "win": { "position": { "x": 400, "y": 550 }, "style": { "font": "24px Arial", "color": "#FFD700" } },
       "buttons": {
-        "spin": { "position": { "x": 400, "y": 475 }, "icon": "/slot1/spin.png", "name": "spin-button", "size": {"width": 120, "height": 60} },
-        "autoSpin": { "position": { "x": 280, "y": 475 }, "icon": "/slot1/autospin.png", "name": "auto-button", "size": {"width": 80, "height": 40} },
+        "spin": { "position": { "x": 400, "y": 475 }, "icon": "/slot3/spin.png", "name": "spin-button", "size": {"width": 120, "height": 60} },
+        "autoSpin": { "position": { "x": 280, "y": 475 }, "icon": "/slot3/autospin.png", "name": "auto-button", "size": {"width": 80, "height": 40} },
         "settings": { "position": { "x": 750, "y": 50 }, "icon": "/assets/ui/settings.png" , "name": "settings-button", "size": {"width": 40, "height": 40} },
-        "turbo": { "position": { "x": 520, "y": 475 }, "icon": "/slot1/turbo.png", "name": "turbo-button", "size": {"width": 80, "height": 40} }
+        "turbo": { "position": { "x": 520, "y": 475 }, "icon": "/slot3/turbo.png", "name": "turbo-button", "size": {"width": 80, "height": 40} }
       },
       "betAdjust": {
         "minus": { "position": { "x": 590, "y": 550 }, "text": "-", "style": { "font": "28px Arial", "color": "#ffffff" } },
@@ -132,7 +67,7 @@
       "symbolSpacing": 0 
     },
     "background": {
-      "image": "/slot1/bg.png"
+      "image": "/slot3/bg.png"
     },
     "animations": {
       "spin": { "duration": 800, "easing": "Cubic.easeOut" },
@@ -140,14 +75,6 @@
       "winLine": { "duration": 500, "effect": "Pulse" },
       "symbolWin": { "duration": 300, "effect": "Scale" },
       "bonusTrigger": { "duration": 1500, "effect": "Flash" }
-    },
-    "bonus_features": {
-      "free_spins": {
-        "trigger_symbol_id": 8,
-        "trigger_count": 3,
-        "spins_awarded": 10,
-        "multiplier": 3.0
-      }
     },
     "bonus": {
       "triggerCount": 3,
@@ -163,7 +90,7 @@
       "resetRespinsValue": 3,
       "coinValueSource": "randomRange",
       "coinValueRange": [1, 10],
-      "bonusBackgroundAsset": "/slot1/bonus_bg.png",
+      "bonusBackgroundAsset": "/slot3/bonus_bg.png",
       "bonusMusic": "/assets/sounds/bonus_music.wav"
     },
     "sound": {

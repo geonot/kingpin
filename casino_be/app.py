@@ -57,141 +57,147 @@ from decimal import Decimal
 from services.bonus_service import apply_bonus_to_deposit
 from http import HTTPStatus
 
-# --- App Initialization ---
-app = Flask(__name__)
-app.config.from_object(Config)
+def create_app(config_class=Config):
+    """Application factory pattern."""
+    app = Flask(__name__)
+    app.config.from_object(config_class)
 
-# --- CORS Setup ---
-CORS(app, origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8082", "http://127.0.0.1:8082"], supports_credentials=True)
+    # --- CORS Setup ---
+    CORS(app, origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8082", "http://127.0.0.1:8082"], supports_credentials=True)
 
-if not app.debug:
-    # Configure JSON logging for production
-    logger = app.logger
-    handler = logging.StreamHandler()
-    # Updated formatter to include request_id
-    formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(levelname)s %(request_id)s %(module)s %(funcName)s %(lineno)d %(message)s'
-    )
-    handler.setFormatter(formatter)
-    logger.handlers.clear()
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    if not app.debug:
+        # Configure JSON logging for production
+        logger = app.logger
+        handler = logging.StreamHandler()
+        # Updated formatter to include request_id
+        formatter = jsonlogger.JsonFormatter(
+            '%(asctime)s %(levelname)s %(request_id)s %(module)s %(funcName)s %(lineno)d %(message)s'
+        )
+        handler.setFormatter(formatter)
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
-# --- Request ID Generation ---
-@app.before_request
-def add_request_id():
-    g.request_id = str(uuid.uuid4())
+    # --- Request ID Generation ---
+    @app.before_request
+    def add_request_id():
+        g.request_id = str(uuid.uuid4())
 
-# --- Rate Limiter Setup ---
-app.config['RATELIMIT_STORAGE_URI'] = Config.RATELIMIT_STORAGE_URI if hasattr(Config, 'RATELIMIT_STORAGE_URI') else 'memory://'
+    # --- Rate Limiter Setup ---
+    app.config['RATELIMIT_STORAGE_URI'] = config_class.RATELIMIT_STORAGE_URI if hasattr(config_class, 'RATELIMIT_STORAGE_URI') else 'memory://'
 
-if app.config.get("TESTING"):
-    app.config['RATELIMIT_ENABLED'] = False
-    app.config['RATELIMIT_DEFAULT_LIMITS_ENABLED'] = False # Disable default limits as well
-    app.config['RATELIMIT_DEFAULT_LIMITS'] = "10000 per second" # Set a very high limit
-else:
-    app.config.setdefault('RATELIMIT_ENABLED', True)
-    app.config.setdefault('RATELIMIT_DEFAULT_LIMITS_ENABLED', True)
-    app.config.setdefault('RATELIMIT_DEFAULT_LIMITS', "200 per day;50 per hour")
+    if app.config.get("TESTING"):
+        app.config['RATELIMIT_ENABLED'] = False
+        app.config['RATELIMIT_DEFAULT_LIMITS_ENABLED'] = False # Disable default limits as well
+        app.config['RATELIMIT_DEFAULT_LIMITS'] = "10000 per second" # Set a very high limit
+    else:
+        app.config.setdefault('RATELIMIT_ENABLED', True)
+        app.config.setdefault('RATELIMIT_DEFAULT_LIMITS_ENABLED', True)
+        app.config.setdefault('RATELIMIT_DEFAULT_LIMITS', "200 per day;50 per hour")
 
-limiter = Limiter(key_func=get_remote_address) # No app, no enabled, no defaults here
-limiter.init_app(app) # Rely entirely on app.config values set above
+    limiter = Limiter(key_func=get_remote_address) # No app, no enabled, no defaults here
+    limiter.init_app(app) # Rely entirely on app.config values set above
 
-# --- Database Setup ---
-db.init_app(app)
-migrate = Migrate(app, db, directory='migrations')
+    # --- Database Setup ---
+    db.init_app(app)
+    migrate = Migrate(app, db, directory='migrations')
 
-# --- JWT Setup ---
-jwt = JWTManager(app)
+    # --- JWT Setup ---
+    jwt = JWTManager(app)
 
-# --- JWT Helper Functions ---
-@jwt.user_identity_loader
-def user_identity_lookup(user):
-    return str(user.id)  # Convert to string for JWT compatibility
+    # --- JWT Helper Functions ---
+    @jwt.user_identity_loader
+    def user_identity_lookup(user):
+        return str(user.id)  # Convert to string for JWT compatibility
 
-@jwt.user_lookup_loader
-def user_lookup_callback(_jwt_header, jwt_data):
-    identity = jwt_data["sub"]
-    user_obj = User.query.get(identity)
-    return user_obj
+    @jwt.user_lookup_loader
+    def user_lookup_callback(_jwt_header, jwt_data):
+        identity = jwt_data["sub"]
+        user_obj = User.query.get(identity)
+        return user_obj
 
-@jwt.token_in_blocklist_loader
-def check_if_token_in_blacklist(jwt_header, jwt_payload):
-    jti = jwt_payload['jti']
-    # now = datetime.now(timezone.utc) # Not needed for temporary bypass
-    # token = db.session.query(TokenBlacklist.id).filter_by(jti=jti).scalar()
-    print(f"DEBUG_APP: check_if_token_in_blacklist called for jti: {jti}. Returning False (token not blocklisted).")
-    return False # Temporarily disable blocklist check
+    @jwt.token_in_blocklist_loader
+    def check_if_token_in_blacklist(jwt_header, jwt_payload):
+        jti = jwt_payload['jti']
+        # now = datetime.now(timezone.utc) # Not needed for temporary bypass
+        # token = db.session.query(TokenBlacklist.id).filter_by(jti=jti).scalar()
+        print(f"DEBUG_APP: check_if_token_in_blacklist called for jti: {jti}. Returning False (token not blocklisted).")
+        return False # Temporarily disable blocklist check
 
-# --- Global Error Handler ---
-@app.errorhandler(404)
-def handle_not_found(e):
-    current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - 404 Not Found: {request.url}")
-    return jsonify({
-        'status': False,
-        'status_message': 'The requested resource was not found.'
-    }), 404
+    # --- Global Error Handler ---
+    @app.errorhandler(404)
+    def handle_not_found(e):
+        current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - 404 Not Found: {request.url}")
+        return jsonify({
+            'status': False,
+            'status_message': 'The requested resource was not found.'
+        }), 404
 
-@app.errorhandler(Exception)
-def handle_unhandled_exception(e):
-    # Don't catch 404 errors here since they have their own handler
-    if isinstance(e, werkzeug.exceptions.NotFound):
-        return handle_not_found(e)
-    
-    current_app.logger.error(f"Request ID: {g.get('request_id', 'N/A')} - Unhandled exception caught by global error handler:", exc_info=True)
-    return jsonify({
-        'status': False,
-        'status_message': 'An unexpected internal server error occurred. Please try again later.'
-    }), 500
+    @app.errorhandler(Exception)
+    def handle_unhandled_exception(e):
+        # Don't catch 404 errors here since they have their own handler
+        if isinstance(e, werkzeug.exceptions.NotFound):
+            return handle_not_found(e)
+        
+        current_app.logger.error(f"Request ID: {g.get('request_id', 'N/A')} - Unhandled exception caught by global error handler:", exc_info=True)
+        return jsonify({
+            'status': False,
+            'status_message': 'An unexpected internal server error occurred. Please try again later.'
+        }), 500
 
-# --- Response Security Headers ---
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none';"
-    if request.is_secure and not app.debug:
-        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    return response
+    # --- Response Security Headers ---
+    @app.after_request
+    def add_security_headers(response):
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none';"
+        if request.is_secure and not app.debug:
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        return response
 
-# --- Blueprint Imports ---
-from routes.auth import auth_bp
-from routes.user import user_bp
-from routes.admin import admin_bp
-from routes.slots import slots_bp
-from routes.blackjack import blackjack_bp
-from routes.poker import poker_bp
-from routes.plinko import plinko_bp
-from routes.roulette import roulette_bp
-from routes.spacecrash import spacecrash_bp
-from routes.meta_game import meta_game_bp
-from routes.baccarat import baccarat_bp # New Baccarat import
+    # --- Blueprint Imports ---
+    from routes.auth import auth_bp
+    from routes.user import user_bp
+    from routes.admin import admin_bp
+    from routes.slots import slots_bp
+    from routes.blackjack import blackjack_bp
+    from routes.poker import poker_bp
+    from routes.plinko import plinko_bp
+    from routes.roulette import roulette_bp
+    from routes.spacecrash import spacecrash_bp
+    from routes.meta_game import meta_game_bp
+    from routes.baccarat import baccarat_bp # New Baccarat import
 
-# CLI command for cleanup
-@app.cli.command('cleanup-expired-tokens')
-def db_cleanup_expired_tokens_command():
-    now = datetime.now(timezone.utc)
-    try:
-        count = db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).count()
-        db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).delete()
-        db.session.commit()
-        print(f"Successfully deleted {count} expired token(s).")
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error during token cleanup: {str(e)}")
+    # CLI command for cleanup
+    @app.cli.command('cleanup-expired-tokens')
+    def db_cleanup_expired_tokens_command():
+        now = datetime.now(timezone.utc)
+        try:
+            count = db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).count()
+            db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).delete()
+            db.session.commit()
+            print(f"Successfully deleted {count} expired token(s).")
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error during token cleanup: {str(e)}")
 
-# Register Blueprints
-app.register_blueprint(auth_bp)
-app.register_blueprint(user_bp)
-app.register_blueprint(admin_bp)
-app.register_blueprint(slots_bp)
-app.register_blueprint(blackjack_bp)
-app.register_blueprint(poker_bp)
-app.register_blueprint(plinko_bp)
-app.register_blueprint(roulette_bp)
-app.register_blueprint(spacecrash_bp)
-app.register_blueprint(meta_game_bp)
-app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
+    # Register Blueprints
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(user_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(slots_bp)
+    app.register_blueprint(blackjack_bp)
+    app.register_blueprint(poker_bp)
+    app.register_blueprint(plinko_bp)
+    app.register_blueprint(roulette_bp)
+    app.register_blueprint(spacecrash_bp)
+    app.register_blueprint(meta_game_bp)
+    app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
+
+    return app
+
+# Create the app instance for direct usage
+app = create_app()
 
 # Add main section to run the app
 if __name__ == '__main__':

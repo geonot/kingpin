@@ -130,23 +130,34 @@ const joinGameAndInitPhaser = async (slotId) => {
     }
 
     localStorage.setItem(SLOT_ID_STORAGE_KEY, slotId.toString());
-    const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
-
-    if (existingSessionId && isAuthenticated.value) {
-        gameSessionId.value = existingSessionId;
-        console.log('Attempting to reuse existing game session:', gameSessionId.value);
-    } else if (isAuthenticated.value) {
+    
+    // Always try to join a new game session for slots to ensure fresh session
+    if (isAuthenticated.value) {
         try {
+            loadingMessage.value = 'Creating game session...';
+            console.log('Attempting to join slot game with payload:', { slot_id: slotId, game_type: 'slot' });
+            
             const response = await store.dispatch('joinGame', { slot_id: slotId, game_type: 'slot' });
-            if (response.status && response.session_id) {
+            console.log('Join game response:', response);
+            
+            if (response && response.status && response.session_id) {
                 gameSessionId.value = response.session_id;
                 localStorage.setItem(SESSION_STORAGE_KEY, response.session_id);
+                console.log('Successfully joined slot game session:', response.session_id);
             } else {
-                throw new Error(response.status_message || 'Failed to join game session.');
+                const errorMsg = response?.status_message || 'Failed to join game session - no session ID returned';
+                console.error('Join game failed:', response);
+                throw new Error(errorMsg);
             }
         } catch (err) {
             console.error('Error joining game:', err);
-            errorObject.value = { status_message: `Failed to join game: ${err.message}.` };
+            errorObject.value = { 
+                status_message: `Failed to join game session: ${err.message || 'Unknown error'}. Please try refreshing the page.`,
+                actionButton: {
+                    text: 'Refresh Page',
+                    action: () => window.location.reload()
+                }
+            };
             isLoading.value = false;
             return;
         }
@@ -289,6 +300,37 @@ const handlePhaserSpinCommand = async (payload) => {
         return;
     }
 
+    // Check if we have a valid game session
+    if (!gameSessionId.value) {
+        console.warn("No game session found, attempting to rejoin game before spin");
+        try {
+            const slotIdNum = Number(route.params.id);
+            await joinGameAndInitPhaser(slotIdNum);
+            if (!gameSessionId.value) {
+                errorObject.value = { 
+                    status_message: "Unable to establish game session. Please refresh the page and try again.",
+                    actionButton: {
+                        text: 'Refresh Page',
+                        action: () => window.location.reload()
+                    }
+                };
+                EventBus.$emit('spinError', { message: 'No game session' });
+                return;
+            }
+        } catch (err) {
+            console.error("Failed to rejoin game:", err);
+            errorObject.value = { 
+                status_message: "Failed to establish game session. Please refresh the page.",
+                actionButton: {
+                    text: 'Refresh Page',
+                    action: () => window.location.reload()
+                }
+            };
+            EventBus.$emit('spinError', { message: 'Session join failed' });
+            return;
+        }
+    }
+
     const betAmount = payload.betAmount;
     
     // Better error handling for insufficient balance
@@ -338,7 +380,20 @@ const handlePhaserSpinCommand = async (payload) => {
             }
         } else {
             // Enhanced error handling for backend responses
-            if (response.status_message && response.status_message.includes('Insufficient balance')) {
+            if (response.status_message && response.status_message.includes('No active slot game session')) {
+                console.warn("Backend reports no active session, attempting to rejoin");
+                // Clear the stored session ID as it's invalid
+                gameSessionId.value = null;
+                localStorage.removeItem(SESSION_STORAGE_KEY);
+                
+                errorObject.value = { 
+                    status_message: "Game session expired. Please refresh the page to start a new session.",
+                    actionButton: {
+                        text: 'Refresh Page',
+                        action: () => window.location.reload()
+                    }
+                };
+            } else if (response.status_message && response.status_message.includes('Insufficient balance')) {
                 if (userBalance.value <= 0) {
                     errorObject.value = { 
                         status_message: 'You have no balance. Please deposit funds to start playing.',

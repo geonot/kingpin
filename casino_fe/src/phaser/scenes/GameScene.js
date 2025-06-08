@@ -375,6 +375,24 @@ export default class GameScene extends Phaser.Scene {
       if (this.isSpinning) return;
       this.isSpinning = true;
       this.clearWinAnimations();
+      
+      // Additional reset: Ensure ALL symbols start with proper scale and size
+      this.reels.forEach((reelSymbols) => {
+          reelSymbols.forEach((symbol) => {
+              if (symbol && symbol.active) {
+                  // Kill any lingering tweens
+                  this.tweens.killTweensOf(symbol);
+                  // Reset to normal state
+                  symbol.setScale(1);
+                  symbol.setDepth(2);
+                  symbol.setAlpha(1);
+                  symbol.setOrigin(0.5);
+                  // Ensure proper display size
+                  symbol.setDisplaySize(this.symbolSize.width, this.symbolSize.height);
+              }
+          });
+      });
+
       EventBus.$emit('lineWinUpdate', { winAmount: 0, isScatter: false, ways: undefined });
       // Reset UI multiplier display via UIScene at the beginning of a new spin
       EventBus.$emit('uiUpdateMultiplier', { level: 0, multipliersConfig: this.cascadeWinMultipliers });
@@ -481,6 +499,7 @@ export default class GameScene extends Phaser.Scene {
   onAllReelsStopped() {
       console.log('GameScene: All reels stopped.');
       this.isSpinning = false;
+      this.isProcessingSpinResult = false; // Reset the processing flag
       // EventBus.$emit('spinAnimationComplete', this.lastSpinResponse); // Emit after bonus check or normal win processing
 
       const bonusConfig = this.gameConfig?.holdAndWinBonus;
@@ -536,12 +555,12 @@ export default class GameScene extends Phaser.Scene {
 
       EventBus.$emit('spinAnimationComplete', this.lastSpinResponse);
 
-      if (this.lastSpinResponse && this.lastSpinResponse.win_amount_sats > 0) { // Use win_amount_sats from response
-          this.playSoundWin(this.lastSpinResponse.win_amount_sats);
+      if (this.lastSpinResponse && this.lastSpinResponse.win_amount > 0) { // Fixed: Use win_amount instead of win_amount_sats
+          this.playSoundWin(this.lastSpinResponse.win_amount);
           // Display initial winning lines. Winning_lines in response is from initial spin.
           this.displayWinningLines(
               this.lastSpinResponse.winning_lines || [],
-              this.lastSpinResponse.win_amount_sats,
+              this.lastSpinResponse.win_amount,
               this.currentCascadeMultiplierLevel, // Pass multiplier level
               this.isCascadingSlot
           );
@@ -599,7 +618,8 @@ export default class GameScene extends Phaser.Scene {
                 return;
             }
             const winData = winningLines[currentLineIndex];
-            this.highlightWin(winData, true); // Pass true to pop symbols
+            // Only pop symbols in cascading slots, not regular slots
+            this.highlightWin(winData, isCascading); // Pass isCascading instead of always true
             this.showIndividualWinAmount(winData.win_amount_sats, winData);
             currentLineIndex++;
             if (this.paylineTimer) this.paylineTimer.remove();
@@ -610,26 +630,48 @@ export default class GameScene extends Phaser.Scene {
 
   highlightWin(winData, shouldPopSymbols = false) {
     this.paylineGraphics.clear();
+    
+    // Properly stop all existing win tweens and reset symbol properties
     this.activeWinTweens.forEach(({symbol, tween}) => {
         if (tween && tween.isPlaying()) tween.stop();
-        if (symbol && symbol.active) symbol.setScale(1).setDepth(2).setVisible(true); // Ensure visible
+        if (symbol && symbol.active) {
+            // Kill all tweens on this symbol to prevent accumulation
+            this.tweens.killTweensOf(symbol);
+            symbol.setScale(1).setDepth(2).setVisible(true).setAlpha(1); // Ensure proper reset
+            // Ensure proper display size is maintained
+            symbol.setDisplaySize(this.symbolSize.width, this.symbolSize.height);
+        }
     });
     this.activeWinTweens = [];
 
     const animateSymbol = (col, row) => {
         const symbol = this.getSymbolAt(col, row);
         if (symbol && symbol.active) {
+            // Kill any existing tweens on this symbol before starting new ones
+            this.tweens.killTweensOf(symbol);
+            
+            // Ensure symbol is properly sized before animation
+            symbol.setDisplaySize(this.symbolSize.width, this.symbolSize.height);
+            symbol.setOrigin(0.5);
             symbol.setDepth(5);
-            const existingTween = this.tweens.getTweensOf(symbol).find(tw => tw.callbacks && tw.callbacks.onYoyo);
-            if(existingTween) existingTween.stop();
 
             const tween = this.tweens.add({
                 targets: symbol,
-                scale: { from: 1, to: 1.2 },
+                scale: { from: 1, to: 1.1 }, // Reduced scale from 1.2 to 1.1 to prevent overflow
                 ease: 'Sine.easeInOut',
                 duration: SYMBOL_WIN_ANIM_DURATION,
                 yoyo: true,
-                repeat: shouldPopSymbols ? 1 : -1, // Repeat less if popping
+                repeat: shouldPopSymbols ? 1 : -1, // Repeat infinitely for non-cascading, once for cascading
+                onUpdate: () => {
+                    // Ensure display size remains correct during animation
+                    if (symbol && symbol.active) {
+                        const currentScale = symbol.scale;
+                        symbol.setDisplaySize(
+                            this.symbolSize.width * currentScale, 
+                            this.symbolSize.height * currentScale
+                        );
+                    }
+                },
                 onComplete: () => {
                     if (shouldPopSymbols && symbol && symbol.active) {
                         // Play pop / disappearance animation
@@ -643,6 +685,12 @@ export default class GameScene extends Phaser.Scene {
                                 if (symbol.active) symbol.setVisible(false); // Hide after pop
                             }
                         });
+                    } else {
+                        // For non-cascading slots, ensure symbol is reset to normal state
+                        if (symbol && symbol.active) {
+                            symbol.setScale(1);
+                            symbol.setDisplaySize(this.symbolSize.width, this.symbolSize.height);
+                        }
                     }
                 }
             });
@@ -703,53 +751,42 @@ export default class GameScene extends Phaser.Scene {
     }
 }
 
-  showIndividualWinAmount(amountSats, winData) { // G
-      if (!this.currentWinDisplay) return;
-      let textToShow = ''; // G.1
-      if (this.isMultiwayGame && !winData.is_scatter) {
-          const waysCount = winData.ways_count || winData.ways; // Support "ways" or "ways_count"
-          textToShow = `Way Win: ${formatSatsToBtc(amountSats)} (${waysCount} Ways)`;
-      } else if (winData.is_scatter || winData.type === 'scatter') { // Check type for robustness
-          textToShow = `Scatter: ${formatSatsToBtc(amountSats)}`;
-      } else { // Standard payline
-          const lineIdText = typeof winData.line_id === 'string' ? winData.line_id : (winData.line_index !== undefined ? `Line ${winData.line_index + 1}` : 'Line Win');
-          textToShow = `${lineIdText}: ${formatSatsToBtc(amountSats)}`;
-      }
-
-      this.currentWinDisplay.setText(textToShow).setAlpha(0).setVisible(true); // G.2
-      this.tweens.killTweensOf(this.currentWinDisplay);
-      this.tweens.add({
-          targets: this.currentWinDisplay, alpha: 1, duration: 300, ease: 'Linear', yoyo: true,
-          hold: PAYLINE_SHOW_DURATION - 600,
-          onComplete: () => { if (this.currentWinDisplay) this.currentWinDisplay.setVisible(false); }
-      });
-      // G.3 Emit event
-      EventBus.$emit('lineWinUpdate', {
-          winAmount: amountSats,
-          isScatter: (winData.is_scatter || winData.type === 'scatter'),
-          ways: (this.isMultiwayGame && !(winData.is_scatter || winData.type === 'scatter')) ? (winData.ways_count || winData.ways) : undefined
-      });
-  }
-
-   showTotalWinAmount(amountSats) {
-        if (!this.currentWinDisplay) return;
-        const amountBtc = formatSatsToBtc(amountSats);
-        this.currentWinDisplay.setText(`Total Win: ${amountBtc}`) // Removed BTC suffix, formatter adds it
-             .setAlpha(0).setVisible(true);
-        EventBus.$emit('lineWinUpdate', { winAmount: amountSats, isScatter: false, ways: undefined }); // Total win update
-        this.tweens.killTweensOf(this.currentWinDisplay);
-        this.tweens.add({ targets: this.currentWinDisplay, alpha: 1, duration: 500, ease: 'Back.easeOut' });
-    }
-
-  clearWinAnimations(clearTotalWinText = true) { // H
+clearWinAnimations(clearTotalWinText = true) { // H
+    // First, stop all active win tweens and reset their symbols
     this.activeWinTweens.forEach(({symbol, tween}) => {
         if (tween && tween.isPlaying()) tween.stop();
         if (symbol && symbol.active) {
+            // Kill all tweens on this symbol to prevent conflicts
+            this.tweens.killTweensOf(symbol);
             symbol.setScale(1); // Reset scale
             symbol.setDepth(2); // H.1 Reset depth
+            symbol.setAlpha(1); // Reset alpha in case it was changed
+            // Ensure proper display size is reset
+            symbol.setDisplaySize(this.symbolSize.width, this.symbolSize.height);
+            symbol.setOrigin(0.5); // Ensure proper origin
         }
     });
     this.activeWinTweens = [];
+
+    // Additional safety: Reset ALL visible symbols to ensure no symbols remain zoomed
+    // This catches any symbols that might have completed their tweens but weren't properly reset
+    for (let col = 0; col < this.gridConfig.cols; col++) {
+        const maxRows = this.isMultiwayGame ? this.currentPanesPerReel[col] : this.gridConfig.rows;
+        for (let row = 0; row < maxRows; row++) {
+            const symbol = this.getSymbolAt(col, row);
+            if (symbol && symbol.active) {
+                // Kill any remaining tweens and ensure proper reset
+                this.tweens.killTweensOf(symbol);
+                symbol.setScale(1);
+                symbol.setDepth(2);
+                symbol.setAlpha(1);
+                // Force proper display size reset
+                symbol.setDisplaySize(this.symbolSize.width, this.symbolSize.height);
+                symbol.setOrigin(0.5);
+            }
+        }
+    }
+
     this.paylineGraphics?.clear();
     if (this.paylineTimer) {
         this.paylineTimer.remove(false);
@@ -759,174 +796,112 @@ export default class GameScene extends Phaser.Scene {
         this.tweens.killTweensOf(this.currentWinDisplay);
         this.currentWinDisplay.setVisible(false).setText('');
     }
-  }
-
-  // --- Helper Methods ---
-   getSymbolAt(col, row) { // E
-    if (this.isMultiwayGame) { // E.1
-        if (!this.currentPanesPerReel || col < 0 || col >= this.gridConfig.cols || row < 0 || !this.currentPanesPerReel[col] || row >= this.currentPanesPerReel[col]) {
-            return null;
-        }
-    } else { // E.1
-        if (row < 0 || col < 0 || col >= this.gridConfig.cols || row >= this.gridConfig.rows) {
-            return null;
-        }
+    
+    // Ensure UI is set to idle after clearing win animations
+    if (clearTotalWinText) {
+        EventBus.$emit('uiSetIdle');
     }
-    return this.symbolMap[`${col},${row}`]; // E.1
   }
 
-  getSymbolWorldPosition(col, row) { // I
-      const symbol = this.getSymbolAt(col, row); // I.1
-      if (!symbol) return null; // I.1
+  // Helper methods
+  getSymbolAt(col, row) {
+      return this.symbolMap[`${col},${row}`] || null;
+  }
 
-      if (!symbol.parentContainer) {
-            const { startX, startY } = this.gridConfig;
-            const { symbolSize } = this;
-            const reelSpacing = this.gameConfig.reel.reelSpacing || 0;
-            const symbolSpacing = this.gameConfig.reel.symbolSpacing || 0; // Not typically used for Y per symbol in container
-            return {
-                x: startX + col * (symbolSize.width + reelSpacing) + symbolSize.width / 2,
-                y: startY + row * (symbolSize.height + symbolSpacing) + symbolSize.height / 2 // This Y is relative to grid top for this symbol
-            };
+  getSymbolWorldPosition(col, row) {
+      const symbol = this.getSymbolAt(col, row);
+      if (!symbol) return null;
+      const container = this.reelContainers[col];
+      return {
+          x: container.x + symbol.x,
+          y: container.y + symbol.y
+      };
+  }
+
+  showTotalWinAmount(totalWinAmountSats) {
+      const winAmountBtc = formatSatsToBtc(totalWinAmountSats);
+      this.currentWinDisplay.setText(`Total Win: ${winAmountBtc} BTC`);
+      this.currentWinDisplay.setVisible(true);
+      EventBus.$emit('lineWinUpdate', { winAmount: totalWinAmountSats, isScatter: false, ways: undefined });
+  }
+
+  showIndividualWinAmount(winAmountSats, winData) {
+      const winAmountBtc = formatSatsToBtc(winAmountSats);
+      let winText = `Line Win: ${winAmountBtc} BTC`;
+      
+      if (winData.is_scatter) {
+          winText = `Scatter Win: ${winAmountBtc} BTC`;
+      } else if (this.isMultiwayGame && winData.ways) {
+          winText = `${winData.ways} Ways: ${winAmountBtc} BTC`;
       }
-       const symbolLocalX = symbol.x;
-       const symbolLocalY = symbol.y;
-       const containerX = symbol.parentContainer.x;
-       const containerY = symbol.parentContainer.y;
-       return { x: containerX + symbolLocalX, y: containerY + symbolLocalY };
+      
+      this.currentWinDisplay.setText(winText);
+      this.currentWinDisplay.setVisible(true);
+      EventBus.$emit('lineWinUpdate', { 
+          winAmount: winAmountSats, 
+          isScatter: winData.is_scatter || false, 
+          ways: winData.ways 
+      });
   }
 
-   getPaylineColor(lineIndexOrId) { // Accept ID too
-        // If lineIndexOrId is a string (like "payline_1"), try to parse an index from it
-        let numericIndex = 0;
-        if (typeof lineIndexOrId === 'string' && lineIndexOrId.includes('_')) {
-            numericIndex = parseInt(lineIndexOrId.split('_')[1], 10) -1; // "payline_1" -> 0
-            if (isNaN(numericIndex)) numericIndex = 0;
-        } else if (typeof lineIndexOrId === 'number') {
-            numericIndex = lineIndexOrId;
-        }
-
-        const colors = [
-            0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff,
-            0x00ffff, 0xffa500, 0x800080, 0x008000, 0xff1493,
-            0xff4500, 0x1e90ff, 0xadff2f, 0xda70d6, 0x8a2be2
-        ];
-        return colors[numericIndex % colors.length];
-    }
-
-  formatSpinResult(spinResult) {
-    // For standard games, API sends "result" as [rows][cols]
-    // For multiway, API sends "result.symbols_grid" as [cols][rows_variable]
-    // This function is primarily for standard games to ensure [rows][cols]
-    if (this.isMultiwayGame) {
-        console.warn("formatSpinResult called for multiway game, this should not happen if backend structure is {spin_result: {symbols_grid: ...}}");
-        return spinResult; // Should be already in [cols][var_rows] or handled by handleSpinResult
-    }
-
-    const { rows, cols } = this.gridConfig;
-    // Check if it's already in the correct [rows][cols] format
-    if (Array.isArray(spinResult) && spinResult.length === rows &&
-        Array.isArray(spinResult[0]) && spinResult[0].length === cols) {
-        return spinResult;
-    }
-    // If it's a flat array, attempt to reshape. This is less likely with current backend.
-    if (Array.isArray(spinResult) && spinResult.length === rows * cols && !Array.isArray(spinResult[0])) {
-        console.warn("Received spin result as a flat array, reshaping to [rows][cols].");
-        const reshaped = [];
-        for (let r = 0; r < rows; r++) {
-           reshaped.push(spinResult.slice(r * cols, (r + 1) * cols));
-        }
-        return reshaped;
-    }
-    console.error("Received spin result in unexpected format for standard game:", spinResult);
-    // Fallback: return as is or an empty grid of correct dimensions
-    return Array(rows).fill(null).map(() => Array(cols).fill(1)); // Default to symbol '1'
+  getPaylineColor(lineId) {
+      const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffa500, 0x800080];
+      return colors[lineId % colors.length] || 0xffffff;
   }
 
-  transposeMatrix(matrix) {
-    if (!matrix || matrix.length === 0 || !Array.isArray(matrix[0])) return [];
-    return matrix[0].map((_, colIndex) => matrix.map(row => row[colIndex]));
+  // Sound methods
+  playSound(soundKey) {
+      if (this.soundEnabled && this.sound.get(soundKey)) {
+          this.sound.play(soundKey);
+      }
   }
 
-   playSound(key) {
-        if (this.soundEnabled && key) {
-            const sound = this.sound.get(key);
-            if (sound) {
-                sound.play();
-            } else {
-                console.warn(`Sound key "${key}" not found or loaded.`);
-            }
-        }
-    }
-
-    playSoundWin(winAmountSats) {
-        // Play different sounds based on win size relative to bet?
-        // Needs bet amount context here. For now, just play generic win sounds.
-        // We need the bet amount that triggered this win. Get from lastSpinResponse?
-        // const betAmount = this.lastSpinResponse?.bet_amount ?? 1; // Get bet if possible
-
-        if (winAmountSats > 0) {
-            // Simple logic: small vs large win sound
-            if (winAmountSats > (this.lastSpinResponse?.bet_amount ?? 10) * 10) { // Example: win > 10x bet
-                 this.playSound('winLarge');
-            } else if (winAmountSats > (this.lastSpinResponse?.bet_amount ?? 10) * 3) { // Example: win > 3x bet
-                this.playSound('winMedium');
-            } else {
-                this.playSound('winSmall');
-            }
-        }
-    }
-
-  handleBonusComplete(data) {
-    console.log('GameScene: Bonus game complete.', data);
-    this.scene.stop('BonusHoldAndWinScene');
-    // Ensure GameScene and UIScene are properly resumed and brought to top if necessary
-    this.scene.resume('GameScene');
-    this.scene.resume('UIScene');
-    this.scene.bringToTop('GameScene');
-    this.scene.bringToTop('UIScene');
-
-
-    const bonusWinAmount = data.winAmount || 0;
-
-    if (bonusWinAmount > 0) {
-        // Add bonus win to the session's total or display separately
-        // For now, let's assume lastSpinResponse might not be the right place if other wins already processed.
-        // We can directly update UI or manage a separate "bonus_win" field if API supports.
-
-        // Update global balance (example, actual implementation might differ)
-        EventBus.$emit('updateBalance', bonusWinAmount); // This is a client-side reflection.
-
-        // Display the bonus win amount prominently
-        // Option 1: Use existing currentWinDisplay
-        this.currentWinDisplay.setText(`Bonus Win: ${formatSatsToBtc(bonusWinAmount)}`).setVisible(true).setAlpha(1);
-        this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION * 1.5, () => { // Show longer
-            this.currentWinDisplay.setVisible(false);
-            EventBus.$emit('uiSetIdle'); // Set UI to idle after bonus win display
-        });
-
-        // Option 2: Emit to UIScene to handle special bonus win display
-        EventBus.$emit('uiUpdate', { winAmount: bonusWinAmount, isBonusWin: true, isTotalWin: true });
-
-        // Play a win sound for the bonus total
-        this.playSoundWin(bonusWinAmount); // You might want a specific sound for "bonus_total_win"
-
-    } else {
-      // No win from bonus, just set UI to idle
-      EventBus.$emit('uiSetIdle');
-    }
-
-    // Ensure isSpinning is false and UI controls are enabled
-    this.isSpinning = false;
-    // EventBus.$emit('enableSpinButton'); // Or let uiSetIdle handle this
+  playSoundWin(winAmount) {
+      if (!this.soundEnabled) return;
+      
+      // Play different win sounds based on win amount
+      if (winAmount > 100000) { // Big win
+          this.playSound('snd-common-big-win');
+      } else if (winAmount > 10000) { // Medium win
+          this.playSound('snd-common-medium-win');
+      } else {
+          this.playSound('snd-common-small-win');
+      }
   }
 
   playCascadeSettleEffect() {
-    // Placeholder for a visual effect when cascades are done and grid settles.
-    // Could be a brief shimmer, a sound, etc.
-    // For now, this does nothing, but hooks are in place.
-    console.log("GameScene: playCascadeSettleEffect (placeholder)");
+      // Visual effect when cascades complete
+      console.log('GameScene: Playing cascade settle effect');
+      // Add visual shimmer or settling animation here if needed
   }
 
-}
+  // Utility methods for data formatting
+  formatSpinResult(result) {
+      if (Array.isArray(result) && Array.isArray(result[0])) {
+          return result; // Already in correct format
+      }
+      console.warn('GameScene: Unexpected spin result format:', result);
+      return [];
+  }
 
+  transposeMatrix(matrix) {
+      if (!Array.isArray(matrix) || matrix.length === 0) return [];
+      return matrix[0].map((_, colIndex) => matrix.map(row => row[colIndex]));
+  }
+
+  // Bonus game handler
+  handleBonusComplete(data) {
+      console.log('GameScene: Bonus game complete', data);
+      this.scene.resume('GameScene');
+      this.scene.resume('UIScene');
+      
+      // Handle any bonus winnings or state updates
+      if (data.totalWin > 0) {
+          EventBus.$emit('balanceUpdate', data.totalWin);
+          this.showTotalWinAmount(data.totalWin);
+          this.time.delayedCall(TOTAL_WIN_DISPLAY_DURATION, () => {
+              this.clearWinAnimations();
+          });
+      }
+  }
+}

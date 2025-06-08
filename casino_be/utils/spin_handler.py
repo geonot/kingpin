@@ -124,6 +124,28 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
             raise ValueError("Invalid bet amount. Must be a positive integer (satoshis).")
 
+        # Load paylines to check minimum bet requirements
+        cfg_layout = game_config.get('game', {}).get('layout', {})
+        cfg_paylines = cfg_layout.get('paylines', [])
+        num_paylines = len(cfg_paylines)
+        
+        print(f"DEBUG_SPIN_HANDLER: bet_amount_sats={bet_amount_sats}, num_paylines={num_paylines}")
+        print(f"DEBUG_SPIN_HANDLER: bet_amount_sats % num_paylines = {bet_amount_sats % num_paylines if num_paylines > 0 else 'N/A'}")
+        
+        # IMPROVED: Check if bet is compatible with payline system instead of enforcing arbitrary minimums
+        # Only reject bets that would cause rounding issues, not enforce high minimums
+        if num_paylines > 0 and bet_amount_sats % num_paylines != 0:
+            # Calculate the nearest valid bet amounts
+            next_valid_bet = ((bet_amount_sats // num_paylines) + 1) * num_paylines
+            prev_valid_bet = (bet_amount_sats // num_paylines) * num_paylines
+            if prev_valid_bet == 0:
+                prev_valid_bet = num_paylines
+            
+            raise ValueError(f"Bet amount ({bet_amount_sats} sats) must be evenly divisible by number of paylines ({num_paylines}). "
+                            f"Try {prev_valid_bet} or {next_valid_bet} sats instead.")
+
+        print(f"DEBUG_SPIN_HANDLER: Bet validation passed!")
+
         if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0) :
             raise ValueError("Insufficient balance for this bet.")
 
@@ -399,6 +421,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         # --- Return Results ---
         # Ensure all satoshi amounts are integers
         return {
+            "spin_id": new_spin.id,  # Include the spin ID in the response
             "spin_result": initial_spin_grid_for_record, # Return the initial grid state
             "win_amount_sats": int(final_win_amount_for_session_and_tx),
             "winning_lines": winning_lines, # This currently holds results from the *initial* spin.
@@ -575,7 +598,11 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
     `scatter_symbol_id` is the internal ID from config.
     `min_symbols_to_match` (from game_config.game.min_symbols_to_match) is for "Match N" or cluster logic.
     """
-    # print(f"DEBUG_TEST_HANDLER: calculate_win called with total_bet_sats={total_bet_sats}") # Debug
+    print(f"DEBUG_WIN_CALC: calculate_win called with total_bet_sats={total_bet_sats}")
+    print(f"DEBUG_WIN_CALC: grid={grid}")
+    print(f"DEBUG_WIN_CALC: config_paylines count={len(config_paylines)}")
+    print(f"DEBUG_WIN_CALC: wild_symbol_id={wild_symbol_id}, scatter_symbol_id={scatter_symbol_id}")
+    
     total_win_sats = 0
     winning_lines_data = [] # Store detailed info about each win
     all_winning_symbol_coords = set() # Using a set to store unique [r,c] tuples for removal
@@ -583,21 +610,18 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
     num_cols = len(grid[0]) if num_rows > 0 else 0
 
     # --- Payline Wins ---
-    # Bet per line calculation:
+    # BETTER APPROACH: Use total bet for payout calculations instead of dividing by paylines
+    # This gives much more reasonable win amounts
     num_active_paylines = len(config_paylines) # Assuming all defined paylines are played
-    if num_active_paylines == 0:
-        bet_per_line_sats = 0 # Avoid division by zero; though should not happen with valid config
-    else:
-        # Ensure integer division, handle potential rounding if necessary (though satoshis should be precise)
-        bet_per_line_sats = total_bet_sats // num_active_paylines
-        # It's possible that total_bet_sats is not perfectly divisible.
-        # Game design should specify how this is handled (e.g. user bets per line, or total bet must be multiple of lines)
-        # For now, we assume total_bet_sats is what's wagered, and bet_per_line is derived.
-    # print(f"DEBUG_TEST_HANDLER: num_active_paylines={num_active_paylines}, bet_per_line_sats={bet_per_line_sats}") # Debug
-
+    
+    # Calculate base bet unit for scaling purposes
+    base_bet_unit = max(1, total_bet_sats // 100) if total_bet_sats >= 100 else 1
+    print(f"DEBUG_WIN_CALC: base_bet_unit={base_bet_unit}")
+    
     for payline_config in config_paylines:
         payline_id = payline_config.get("id", "unknown_line")
         payline_positions = payline_config.get("coords", [])
+        print(f"DEBUG_WIN_CALC: Checking payline {payline_id} with coords {payline_positions}")
 
         line_symbols_on_grid = [] # Actual symbol IDs on this payline from the spin grid
         actual_positions_on_line = [] # Coordinates of these symbols
@@ -610,10 +634,13 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
             else: # Should not happen with valid config
                 line_symbols_on_grid.append(None) # Placeholder for out-of-bounds
                 actual_positions_on_line.append(None)
+        
+        print(f"DEBUG_WIN_CALC: Payline {payline_id} symbols: {line_symbols_on_grid}")
 
         # Determine winning symbol and count for this line (left-to-right)
         first_symbol_on_line = line_symbols_on_grid[0]
         if first_symbol_on_line is None or first_symbol_on_line == scatter_symbol_id:
+            print(f"DEBUG_WIN_CALC: Payline {payline_id} skipped - starts with None or scatter")
             continue # Paylines typically don't start with scatter or empty positions
 
         match_symbol_id = None
@@ -654,6 +681,7 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
             match_symbol_id = first_symbol_on_line
             consecutive_count = 1
             winning_symbol_positions.append(actual_positions_on_line[0])
+            print(f"DEBUG_WIN_CALC: Payline {payline_id} starts with symbol {match_symbol_id}")
 
         # Continue counting from the position after initial sequence
         # If first symbol was wild and found a match, `consecutive_count` is already set.
@@ -666,22 +694,24 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
                     winning_symbol_positions.append(actual_positions_on_line[i])
                 else:
                     break # Sequence broken
+            
+            print(f"DEBUG_WIN_CALC: Payline {payline_id} final count: {consecutive_count} of symbol {match_symbol_id}")
 
         # Get payout for the matched sequence
         # The minimum match count is implicitly handled by what's defined in value_multipliers (e.g. no "1" or "2")
         payout_multiplier = get_symbol_payout(match_symbol_id, consecutive_count, config_symbols_map, is_scatter=False)
-        # print(f"DEBUG_TEST_HANDLER: Payline {payline_id}, Symbol {match_symbol_id}, Count {consecutive_count}, PayoutMultiplier {payout_multiplier}") # Debug
-
+        print(f"DEBUG_WIN_CALC: Payline {payline_id}, Symbol {match_symbol_id}, Count {consecutive_count}, PayoutMultiplier {payout_multiplier}")
 
         if payout_multiplier > 0:
-            # Line win = bet_per_line * symbol_multiplier
-            # Ensure bet_per_line_sats is used here.
-            line_win_sats = int(bet_per_line_sats * payout_multiplier)
-
-            # Apply spin multiplier if any (e.g. from free spins bonus)
-            # This is now handled outside, after all raw wins are calculated.
-            # line_win_sats = int(line_win_sats * current_spin_multiplier)
-
+            # IMPROVED: Line win = base_bet_unit * symbol_multiplier
+            # This scales with bet size but gives reasonable wins
+            line_win_sats = int(base_bet_unit * payout_multiplier)
+            
+            # Minimum win threshold to prevent tiny wins
+            min_win = max(1, total_bet_sats // 20)  # At least 5% of total bet
+            line_win_sats = max(line_win_sats, min_win)
+            
+            print(f"DEBUG_WIN_CALC: Payline {payline_id} WIN! {line_win_sats} sats (base_bet_unit={base_bet_unit} * multiplier={payout_multiplier}, min_win={min_win})")
 
             if line_win_sats > 0:
                 total_win_sats += line_win_sats
@@ -694,6 +724,8 @@ def calculate_win(grid, config_paylines, config_symbols_map, total_bet_sats, wil
                 })
                 for pos in winning_symbol_positions:
                     all_winning_symbol_coords.add(tuple(pos))
+        else:
+            print(f"DEBUG_WIN_CALC: Payline {payline_id} no win - payout_multiplier={payout_multiplier}")
 
     # --- Scatter Wins ---
     # (This part remains largely the same but contributes to all_winning_symbol_coords)
