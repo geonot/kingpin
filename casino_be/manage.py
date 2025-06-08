@@ -88,4 +88,3 @@ if __name__ == '__main__':
     # python manage.py db upgrade
     # python manage.py runserver
     # python manage.py create_admin
-
