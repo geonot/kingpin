@@ -69,13 +69,19 @@ def spacecrash_eject_bet():
     if active_bet.game.status != 'in_progress':
         return jsonify({'status': False, 'status_message': 'Game is no longer in progress.'}), 400
 
+    # Ensure crash_point is checked before attempting to get current_multiplier if game is in_progress
+    # This is a defensive check; crash_point should ideally always be set when a game starts.
+    # However, get_current_multiplier might rely on game_start_time and if crash_point is None when game is in_progress,
+    # it might indicate an inconsistent state that get_current_multiplier isn't designed to handle gracefully.
+    if active_bet.game.crash_point is None: # Should not happen if game is 'in_progress' and properly initialized
+        current_app.logger.error(f"CRITICAL: Game {active_bet.game.id} is in_progress but crash_point is None during eject by {user.id} before multiplier calculation.")
+        return jsonify({'status': False, 'status_message': 'Cannot process eject: game data inconsistent (crash point missing).'}), 500
+
     current_multiplier = spacecrash_handler.get_current_multiplier(active_bet.game)
 
-    if active_bet.game.crash_point is None: # Should not happen if game is 'in_progress'
-        current_app.logger.error(f"CRITICAL: Game {active_bet.game.id} is in_progress but crash_point is None during eject by {user.id}.")
-        return jsonify({'status': False, 'status_message': 'Cannot process eject: game data inconsistent.'}), 500
-
     # Check if already crashed before current_multiplier could be determined or if eject is too late
+    # Note: The previous check for active_bet.game.crash_point is None handles if crash_point is missing.
+    # Here, we assume crash_point is not None and proceed.
     if current_multiplier >= active_bet.game.crash_point:
         active_bet.status = 'busted'
         active_bet.ejected_at = active_bet.game.crash_point

@@ -376,11 +376,14 @@ async function ejectBet() {
     if (response.data.status) {
       ejectMessage.value = `Successfully ejected at ${response.data.ejected_at.toFixed(2)}x! You won ${response.data.win_amount} sats.`;
       isEjectSuccess.value = true;
-      isInGame.value = false; // User is now out of the current round
-      // Play eject sound - can be done here or in Phaser based on an event
-      if (game.value && game.value.sound && game.value.sound.get('eject_sound')) {
-         try { game.value.sound.play('eject_sound', { volume: 0.5 }); } catch(e) { console.warn("eject sound play error", e)}
+
+      // Emit event to Phaser for visual feedback
+      if (game.value && game.value.registry) {
+        game.value.registry.events.emit('PLAYER_SUCCESSFULLY_EJECTED');
       }
+
+      isInGame.value = false; // User is now out of the current round
+      // Sound play is moved to Phaser's handlePlayerEjectedVisuals
     } else {
       ejectMessage.value = response.data.status_message || 'Failed to eject.';
       isEjectSuccess.value = false;
@@ -445,7 +448,7 @@ onMounted(() => {
 
   // Setup event listeners from Phaser to Vue
   if (game.value && game.value.registry) { // Check if Phaser game is initialized
-    game.value.registry.events.on('PLAYER_EJECT', ejectBet, this); // 'this' context might be an issue here if not careful
+    // game.value.registry.events.on('PLAYER_EJECT', ejectBet, this); // REMOVED - Eject flow simplified
     game.value.registry.events.on('PHASER_GAME_OVER', (data) => {
       console.log('Vue: PHASER_GAME_OVER event received', data);
       // This event is more for Phaser to inform Vue that its animation/state is "game over".
@@ -474,7 +477,7 @@ onUnmounted(() => {
   if (game.value) {
     // Clean up Phaser-to-Vue event listeners
     if (game.value.registry) {
-        game.value.registry.events.off('PLAYER_EJECT', ejectBet, this);
+        // game.value.registry.events.off('PLAYER_EJECT', ejectBet, this); // REMOVED
         game.value.registry.events.off('PHASER_GAME_OVER');
     }
     game.value.destroy(true);
