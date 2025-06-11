@@ -1,0 +1,331 @@
+{
+    "name": "Neon Grid",
+    "short_name": "neon_grid",
+    "type": "standard",
+    "game": {
+        "layout": {
+            "columns": 5,
+            "rows": 3
+        },
+        "symbols": [
+            {
+                "id": 1,
+                "name": "Low1",
+                "asset": "neon_grid/symbols/neon_symbol_blue.png",
+                "weight": 10,
+                "payouts": {
+                    "line": {
+                        "3": 1.0,
+                        "4": 2,
+                        "5": 4
+                    }
+                }
+            },
+            {
+                "id": 2,
+                "name": "Low2",
+                "asset": "neon_grid/symbols/neon_symbol_green.png",
+                "weight": 10,
+                "payouts": {
+                    "line": {
+                        "3": 1.0,
+                        "4": 2,
+                        "5": 4
+                    }
+                }
+            },
+            {
+                "id": 3,
+                "name": "Mid1",
+                "asset": "neon_grid/symbols/neon_symbol_red.png",
+                "weight": 5,
+                "payouts": {
+                    "line": {
+                        "3": 2,
+                        "4": 4,
+                        "5": 8
+                    }
+                }
+            },
+            {
+                "id": 4,
+                "name": "Mid2",
+                "asset": "neon_grid/symbols/neon_symbol_yellow.png",
+                "weight": 5,
+                "payouts": {
+                    "line": {
+                        "3": 2,
+                        "4": 4,
+                        "5": 8
+                    }
+                }
+            },
+            {
+                "id": 5,
+                "name": "High1",
+                "asset": "neon_grid/symbols/neon_symbol_purple.png",
+                "weight": 3,
+                "payouts": {
+                    "line": {
+                        "3": 4,
+                        "4": 10,
+                        "5": 20
+                    }
+                }
+            },
+            {
+                "id": 6,
+                "name": "Wild",
+                "asset": "neon_grid/symbols/neon_wild.png",
+                "is_wild": true,
+                "weight": 2
+            },
+            {
+                "id": 7,
+                "name": "Scatter",
+                "asset": "neon_grid/symbols/neon_scatter.png",
+                "is_scatter": true,
+                "weight": 1,
+                "payouts": {
+                    "scatter": {
+                        "3": 5,
+                        "4": 10,
+                        "5": 25
+                    }
+                }
+            }
+        ],
+        "wild_symbol_id": 6,
+        "scatter_symbol_id": 7,
+        "bonus_features": {
+            "free_spins": {
+                "trigger_symbol_id": 7,
+                "trigger_count": 3,
+                "spins_awarded": 10,
+                "multiplier": 1.0
+            }
+        }
+    },
+    "reel": {
+        "symbolSize": {
+            "width": 90,
+            "height": 90
+        },
+        "reelSpacing": 5,
+        "symbolSpacing": 0,
+        "position": {
+            "x": 180,
+            "y": 150
+        }
+    },
+    "ui": {
+        "spinButton": {
+            "x": 400,
+            "y": 520,
+            "asset": "neon_grid/images/spin_button.png"
+        },
+        "betIncreaseButton": {
+            "x": 250,
+            "y": 520,
+            "asset": "neon_grid/images/bet_increase_neon.png"
+        },
+        "betDecreaseButton": {
+            "x": 150,
+            "y": 520,
+            "asset": "neon_grid/images/bet_decrease_neon.png"
+        },
+        "balanceText": {
+            "x": 100,
+            "y": 30,
+            "style": {
+                "font": "22px 'Orbitron'",
+                "fill": "#00ffdd"
+            }
+        },
+        "betText": {
+            "x": 200,
+            "y": 30,
+            "style": {
+                "font": "22px 'Orbitron'",
+                "fill": "#00ffdd"
+            }
+        },
+        "winText": {
+            "x": 700,
+            "y": 30,
+            "style": {
+                "font": "22px 'Orbitron'",
+                "fill": "#ff00ff"
+            }
+        },
+        "settingsButton": {
+            "x": 750,
+            "y": 520,
+            "asset": "neon_grid/images/settings_button.png"
+        },
+        "turboButton": {
+            "x": 50,
+            "y": 520,
+            "asset": "neon_grid/images/turbo_button_neon.png"
+        }
+    },
+    "sounds": {
+        "spin": "slots/neon_grid/sounds/spin_sound.mp3",
+        "reelStop": "slots/neon_grid/sounds/reel_stop_sound.mp3",
+        "winSmall": "slots/neon_grid/sounds/win_sound.mp3",
+        "buttonClick": "slots/neon_grid/sounds/button_click.mp3"
+    },
+    "assets": [
+        {
+            "type": "image",
+            "key": "neon_grid_symbol_1",
+            "path": "slots/neon_grid/symbols/neon_symbol_blue.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_symbol_2",
+            "path": "slots/neon_grid/symbols/neon_symbol_green.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_symbol_3",
+            "path": "slots/neon_grid/symbols/neon_symbol_red.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_symbol_4",
+            "path": "slots/neon_grid/symbols/neon_symbol_yellow.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_symbol_5",
+            "path": "slots/neon_grid/symbols/neon_symbol_purple.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_symbol_wild",
+            "path": "slots/neon_grid/symbols/neon_wild.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_symbol_scatter",
+            "path": "slots/neon_grid/symbols/neon_scatter.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_background",
+            "path": "slots/neon_grid/images/background.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_spin-button",
+            "path": "slots/neon_grid/images/spin_button.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_bet-increase-button",
+            "path": "slots/neon_grid/images/bet_increase_neon.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_bet-decrease-button",
+            "path": "slots/neon_grid/images/bet_decrease_neon.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_settings-button",
+            "path": "slots/neon_grid/images/settings_button.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_turbo-button",
+            "path": "slots/neon_grid/images/turbo_button_neon.png"
+        },
+        {
+            "type": "image",
+            "key": "neon_grid_win_particle",
+            "path": "slots/neon_grid/images/particle_win_neon.png"
+        },
+        {
+            "type": "audio",
+            "key": "neon_grid_spin_sound",
+            "path": "slots/neon_grid/sounds/spin_sound.mp3"
+        },
+        {
+            "type": "audio",
+            "key": "neon_grid_reel_stop_sound",
+            "path": "slots/neon_grid/sounds/reel_stop_sound.mp3"
+        },
+        {
+            "type": "audio",
+            "key": "neon_grid_win_sound",
+            "path": "slots/neon_grid/sounds/win_sound.mp3"
+        },
+        {
+            "type": "audio",
+            "key": "neon_grid_button_click_sound",
+            "path": "slots/neon_grid/sounds/button_click.mp3"
+        },
+        {
+            "type": "image",
+            "key": "close_button",
+            "path": "ui/close_button.png"
+        },
+        {
+            "type": "image",
+            "key": "sound_on_button",
+            "path": "ui/sound_on_button.png"
+        },
+        {
+            "type": "image",
+            "key": "sound_off_button",
+            "path": "ui/sound_off_button.png"
+        }
+    ],
+    "holdAndWinBonus": {
+        "triggerSymbolId": 8,
+        "minTriggerCount": 3,
+        "defaultCoinValue": 1,
+        "respinCount": 3,
+        "gridSize": {
+            "rows": 3,
+            "cols": 5
+        },
+        "possibleCoinValues": [
+            1,
+            2,
+            3,
+            5,
+            10,
+            20,
+            50,
+            100
+        ],
+        "jackpotSymbols": [
+            {
+                "id": "mini",
+                "value": 20,
+                "display": "MINI"
+            },
+            {
+                "id": "minor",
+                "value": 50,
+                "display": "MINOR"
+            },
+            {
+                "id": "major",
+                "value": 100,
+                "display": "MAJOR"
+            }
+        ],
+        "grandJackpot": {
+            "display": "GRAND",
+            "value": 500,
+            "condition": "fill_all_cells"
+        },
+        "assets": {
+            "background": "slots/neon_grid/images/bonus_background_neon.png",
+            "coin": "slots/neon_grid/images/bonus_coin_neon.png"
+        }
+    }
+}

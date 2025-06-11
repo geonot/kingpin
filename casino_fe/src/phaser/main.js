@@ -3,6 +3,8 @@ import BootScene from './scenes/BootScene';
 import GameScene from './scenes/GameScene';
 import UIScene from './scenes/UIScene';
 import SettingsModalScene from './scenes/SettingsModalScene';
+import NeonGridGameScene from './scenes/NeonGridGameScene';
+import NeonGridUIScene from './scenes/NeonGridUIScene';
 import PreloadScene from './scenes/PreloadScene'; // Add PreloadScene
 import BonusHoldAndWinScene from './scenes/BonusHoldAndWinScene';
 
@@ -34,7 +36,16 @@ const config = {
     },
   },
   // Define game scenes, order matters (first scene is started first)
-  scene: [BootScene, PreloadScene, GameScene, UIScene, SettingsModalScene, BonusHoldAndWinScene],
+  scene: [
+    BootScene,
+    PreloadScene,
+    GameScene,
+    UIScene,
+    NeonGridGameScene,
+    NeonGridUIScene,
+    BonusHoldAndWinScene,
+    SettingsModalScene
+],
 
   // Prevent blur on resized textures (important for pixel art if pixelArt: true)
   // Mipmapping can cause blurriness when downscaling
