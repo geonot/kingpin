@@ -722,5 +722,225 @@ class TestSpinHandler(unittest.TestCase):
     # - New symbols fall, and remaining/new wilds contribute to a *new* cluster win (possibly different symbol type).
     # - This would involve more complex mocking of `self.mock_choices.side_effect`.
 
+    def test_reel_strip_logic_produces_valid_grid(self):
+        # 1. Configure BASE_GAME_CONFIG for reel_strips
+        reel_strip_config = {
+            "game": {
+                **BASE_GAME_CONFIG["game"],
+                "layout": {
+                    "rows": 3,
+                    "columns": 3, # Simpler for this test
+                    "paylines": [{"id": "line_1", "coords": [[0,0],[0,1],[0,2]]}] # A simple payline
+                },
+                "symbols": [ # Ensure all symbols on strips are defined here
+                    {"id": 1, "name": "SymbolA", "asset": "symA.png", "weight": 10},
+                    {"id": 2, "name": "SymbolB", "asset": "symB.png", "weight": 20},
+                    {"id": 3, "name": "SymbolC", "asset": "symC.png", "weight": 30},
+                    {"id": 10, "name": "StripOnly1", "asset": "so1.png", "weight": 1},
+                    {"id": 11, "name": "StripOnly2", "asset": "so2.png", "weight": 1},
+                    {"id": 12, "name": "StripOnly3", "asset": "so3.png", "weight": 1},
+                ],
+                "reel_strips": [
+                    [1, 10, 2, 11, 3, 12],  # Reel 0
+                    [2, 11, 3, 12, 1, 10],  # Reel 1
+                    [3, 12, 1, 10, 2, 11]   # Reel 2
+                ],
+                "wild_symbol_id": None, # No wilds for simplicity here
+                "scatter_symbol_id": None, # No scatters for simplicity
+            }
+        }
+        self.mock_load_config.return_value = reel_strip_config
+
+        # Ensure slot model matches config rows/cols for generate_spin_grid's internal logic
+        self.slot.num_rows = reel_strip_config["game"]["layout"]["rows"]
+        self.slot.num_columns = reel_strip_config["game"]["layout"]["columns"]
+        db.session.commit()
+
+        # 2. Un-mock generate_spin_grid for this test. We want to test its actual reel strip logic.
+        #    We might need to mock secrets.SystemRandom().randrange if we want deterministic start_index.
+        #    For now, let's test if it produces a valid grid based on strips.
+        self.mock_generate_grid.stop() # Stop the general mock for this test method
+
+        # Mock randrange to control the start_index for each reel
+        # Let's say reel 0 starts at index 0, reel 1 at index 1, reel 2 at index 2
+        mock_randrange = patch('secrets.SystemRandom.randrange').start()
+        mock_randrange.side_effect = [0, 1, 2] # start_index for col 0, col 1, col 2
+
+        bet_amount = 100
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+
+        # 3. Assertions
+        spin_grid = result['spin_result']
+        self.assertIsNotNone(spin_grid)
+        self.assertEqual(len(spin_grid), reel_strip_config["game"]["layout"]["rows"])
+        self.assertEqual(len(spin_grid[0]), reel_strip_config["game"]["layout"]["columns"])
+
+        config_symbols_map = {s['id']: s for s in reel_strip_config["game"]["symbols"]}
+        all_possible_strip_symbols = set()
+        for strip in reel_strip_config["game"]["reel_strips"]:
+            for sym_id in strip:
+                all_possible_strip_symbols.add(sym_id)
+
+        for r_idx, row in enumerate(spin_grid):
+            for c_idx, symbol_id in enumerate(row):
+                self.assertIn(symbol_id, all_possible_strip_symbols, f"Symbol {symbol_id} at [{r_idx}][{c_idx}] not in any reel strip.")
+                self.assertIn(symbol_id, config_symbols_map.keys(), f"Symbol {symbol_id} at [{r_idx}][{c_idx}] not in config symbols.")
+
+        # Expected grid based on randrange side_effect [0,1,2] and rows=3
+        # Reel 0 (strip [1, 10, 2, 11, 3, 12]), start_index 0: [1, 10, 2]
+        # Reel 1 (strip [2, 11, 3, 12, 1, 10]), start_index 1: [11, 3, 12]
+        # Reel 2 (strip [3, 12, 1, 10, 2, 11]), start_index 2: [1, 10, 2]
+        expected_grid = [
+            [1, 11, 1],
+            [10, 3, 10],
+            [2, 12, 2]
+        ]
+        self.assertEqual(spin_grid, expected_grid, "Generated grid does not match expected from reel strips and mocked randrange.")
+
+        # Restart the mock_generate_grid for other tests after this one finishes
+        self.mock_generate_grid.start()
+        mock_randrange.stop()
+
+
+    def test_multiple_payline_wins_simultaneously(self):
+        multi_payline_config = {
+            "game": {
+                **BASE_GAME_CONFIG["game"],
+                "layout": {
+                    "rows": 3,
+                    "columns": 3,
+                    "paylines": [
+                        {"id": "line_top", "coords": [[0,0],[0,1],[0,2]]},    # Top row
+                        {"id": "line_middle", "coords": [[1,0],[1,1],[1,2]]} # Middle row
+                    ]
+                },
+                "symbols": [ # Symbol 1 pays 10x for 3, Symbol 2 pays 5x for 3
+                    {"id": 1, "name": "SymbolA", "asset": "symA.png", "value_multipliers": {"3": 10}, "weight": 10},
+                    {"id": 2, "name": "SymbolB", "asset": "symB.png", "value_multipliers": {"3": 5}, "weight": 20},
+                    {"id": 3, "name": "SymbolC", "asset": "symC.png", "weight": 30},
+                ],
+                 "wild_symbol_id": None,
+            }
+        }
+        self.mock_load_config.return_value = multi_payline_config
+
+        # Grid: Top row wins with 3xA (id=1), Middle row wins with 3xB (id=2)
+        test_grid = [
+            [1, 1, 1], # Win for SymbolA (10x)
+            [2, 2, 2], # Win for SymbolB (5x)
+            [3, 3, 3]
+        ]
+        self.mock_generate_grid.return_value = test_grid
+
+        bet_amount = 100 # Assume bet_per_line is total_bet / num_paylines.
+                        # For this test, calculate_win uses base_bet_unit = total_bet / 100.
+                        # Let's assume total_bet is applied per line for multiplier for simplicity in test expectation.
+                        # SymbolA win = 100 * 10 = 1000
+                        # SymbolB win = 100 * 5 = 500
+                        # Total win = 1500. (This matches current calculate_win logic where base_bet_unit is used)
+
+        # Recalculate based on current calculate_win logic:
+        # base_bet_unit = max(1, total_bet_sats // 100) = 100 // 100 = 1
+        # line_win_sats = int(base_bet_unit * payout_multiplier)
+        # min_win = max(1, total_bet_sats // 20) = 100 // 20 = 5
+        # SymA win: 1 * 10 = 10. Max(10, 5) = 10.
+        # SymB win: 1 * 5 = 5. Max(5, 5) = 5.
+        # Total win = 10 + 5 = 15.
+
+        expected_win_sym_a = 10
+        expected_win_sym_b = 5
+        expected_total_win = expected_win_sym_a + expected_win_sym_b
+
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+
+        self.assertEqual(result['win_amount_sats'], expected_total_win)
+        self.assertEqual(len(result['winning_lines']), 2)
+
+        line_top_win = next((line for line in result['winning_lines'] if line['line_id'] == "line_top"), None)
+        line_middle_win = next((line for line in result['winning_lines'] if line['line_id'] == "line_middle"), None)
+
+        self.assertIsNotNone(line_top_win)
+        self.assertEqual(line_top_win['symbol_id'], 1)
+        self.assertEqual(line_top_win['win_amount_sats'], expected_win_sym_a)
+
+        self.assertIsNotNone(line_middle_win)
+        self.assertEqual(line_middle_win['symbol_id'], 2)
+        self.assertEqual(line_middle_win['win_amount_sats'], expected_win_sym_b)
+
+    def test_bonus_active_spin_no_bet_deduction_and_multiplier(self):
+        self.game_session.bonus_active = True
+        self.game_session.bonus_spins_remaining = 1
+        self.game_session.bonus_multiplier = 2.0
+        db.session.commit()
+
+        # Config for a simple win
+        bonus_win_config = {
+            "game": {
+                **BASE_GAME_CONFIG["game"],
+                "layout": {"rows": 3, "columns": 3, "paylines": [{"id": "line_1", "coords": [[0,0],[0,1],[0,2]]}]},
+                "symbols": [{"id": 1, "name": "SymbolA", "asset": "symA.png", "value_multipliers": {"3": 10}, "weight": 10}],
+                "wild_symbol_id": None,
+            }
+        }
+        self.mock_load_config.return_value = bonus_win_config
+
+        # Grid for a win
+        winning_grid = [[1, 1, 1], [2, 2, 2], [3, 3, 3]]
+        self.mock_generate_grid.return_value = winning_grid
+
+        initial_balance = self.user.balance
+        bet_amount = 100 # This bet amount should not be deducted
+
+        # Raw win: SymA (id=1) 3 times. Multiplier 10. base_bet_unit = 1. min_win = 5. Raw win = 10.
+        expected_raw_win = 10
+        expected_multiplied_win = int(expected_raw_win * self.game_session.bonus_multiplier) # 10 * 2.0 = 20
+
+        result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
+
+        self.assertEqual(result['win_amount_sats'], expected_multiplied_win)
+        # Balance should be initial_balance + multiplied_win (no bet deduction)
+        self.assertEqual(self.user.balance, initial_balance + expected_multiplied_win)
+        self.assertEqual(self.game_session.bonus_spins_remaining, 0)
+        self.assertFalse(self.game_session.bonus_active) # Bonus ends as spins are 0
+
+        # Verify no wager transaction was created for this bonus spin
+        wager_tx = Transaction.query.filter_by(user_id=self.user.id, transaction_type='wager').first()
+        self.assertIsNone(wager_tx)
+
+        win_tx = Transaction.query.filter_by(user_id=self.user.id, transaction_type='win').first()
+        self.assertIsNotNone(win_tx)
+        self.assertEqual(win_tx.amount, expected_multiplied_win)
+
+
+    def test_handle_spin_with_invalid_config_structure(self):
+        malformed_config = {
+            "game": {
+                "name": "Test Slot",
+                "short_name": "test_slot1",
+                # Missing "layout" deliberately
+                "symbols": "this should be a list" # Invalid type
+            }
+        }
+        self.mock_load_config.return_value = malformed_config
+
+        bet_amount = 100
+        with self.assertRaisesRegex(ValueError, "Config validation error for slot 'test_slot1': game.layout must be a dictionary."):
+            handle_spin(self.user, self.slot, self.game_session, bet_amount)
+
+        # Test another malformed case
+        malformed_config_2 = {
+            "game": {
+                "name": "Test Slot",
+                "short_name": "test_slot1",
+                "layout": { "rows": 3, "columns": 5, "paylines": "not a list"}, # Invalid paylines type
+                 "symbols": [BASE_GAME_CONFIG["game"]["symbols"][0]]
+            }
+        }
+        self.mock_load_config.return_value = malformed_config_2
+        with self.assertRaisesRegex(ValueError, "Config validation error for slot 'test_slot1': game.layout.paylines must be a list."):
+            handle_spin(self.user, self.slot, self.game_session, bet_amount)
+
+
 if __name__ == '__main__':
     unittest.main()
