@@ -62,7 +62,7 @@ export default class SpacecrashPreloadScene extends Phaser.Scene {
 
     // Load game assets
     this.load.image('rocket', 'assets/space/rocket.png');
-    this.load.spritesheet('explosion', 'assets/space/explosion.png', { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('explosion', 'assets/space/explosion.png', { frameWidth: 1, frameHeight: 1 });
 
     // Load sound effects (placeholder paths)
     this.load.audio('rocket_launch', ['assets/sounds/launch.mp3', 'assets/sounds/launch.ogg']); // Provide multiple formats for compatibility

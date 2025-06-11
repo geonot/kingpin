@@ -16,30 +16,49 @@ export default class SpacecrashUIScene extends Phaser.Scene {
     // Listen for events from GameScene for internal coordination
     const gameScene = this.scene.get('SpacecrashGameScene');
 
-    gameScene.events.on('GAME_STARTED', () => {
-      console.log('SpacecrashUIScene: GAME_STARTED event received');
-      this.gameIsOver = false;
-    }, this);
+    // Bind context for handlers
+    this.handleGameStarted = this.handleGameStarted.bind(this);
+    this.handleGameOver = this.handleGameOver.bind(this);
+    this.handleResetUiView = this.handleResetUiView.bind(this);
 
-    gameScene.events.on('GAME_OVER', ({ crashPoint }) => {
-      console.log('SpacecrashUIScene: GAME_OVER event received', crashPoint);
-      this.gameIsOver = true;
-    }, this);
+    if (gameScene) { // It's good practice to check if scene exists
+      gameScene.events.on('GAME_STARTED', this.handleGameStarted, this);
+      gameScene.events.on('GAME_OVER', this.handleGameOver, this);
+      // Note: RESET_GAME_VIEW is on gameScene.registry.events, not gameScene.events
+      gameScene.registry.events.on('RESET_GAME_VIEW', this.handleResetUiView, this);
+    } else {
+      console.warn('SpacecrashUIScene: SpacecrashGameScene not found at create time.');
+    }
+  }
 
-    // Listen for RESET_GAME_VIEW from GameScene
-    gameScene.registry.events.on('RESET_GAME_VIEW', () => {
-      console.log('SpacecrashUIScene: RESET_GAME_VIEW event received');
-      this.gameIsOver = true;
-    }, this);
+  handleGameStarted() {
+    console.log('SpacecrashUIScene: GAME_STARTED event received');
+    this.gameIsOver = false;
+  }
 
-    // Listen for Vue-initiated eject requests and forward them
-    this.registry.events.on('VUE_EJECT_REQUEST', () => {
-      console.log('SpacecrashUIScene: VUE_EJECT_REQUEST received, forwarding to Vue');
-      this.registry.events.emit('PLAYER_EJECT');
-    }, this);
+  handleGameOver({ crashPoint }) {
+    console.log('SpacecrashUIScene: GAME_OVER event received', crashPoint);
+    this.gameIsOver = true;
+  }
+
+  handleResetUiView() {
+    console.log('SpacecrashUIScene: RESET_GAME_VIEW event received by UI scene');
+    this.gameIsOver = true;
   }
 
   update() {
     // Minimal update - most logic handled by Vue now
+  }
+
+  shutdown() {
+    console.log('SpacecrashUIScene: shutdown');
+    const gameScene = this.scene.get('SpacecrashGameScene');
+
+    if (gameScene) {
+      gameScene.events.off('GAME_STARTED', this.handleGameStarted, this);
+      gameScene.events.off('GAME_OVER', this.handleGameOver, this);
+      gameScene.registry.events.off('RESET_GAME_VIEW', this.handleResetUiView, this);
+    }
+    // No registry events were directly on this.registry.events to clean up
   }
 }
