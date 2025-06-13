@@ -19,7 +19,9 @@ app.config.globalProperties.$bus = emitter;
 // Use plugins
 app.use(store);
 
-// Inject the store instance into the apiService for interceptors and other needs
+// Inject the store instance into the apiService.
+// This allows the apiService to access the Vuex store, for example,
+// to read authentication tokens or dispatch actions upon API call events (e.g., session expiry).
 import { injectStore } from '@/services/api';
 injectStore(store);
 
