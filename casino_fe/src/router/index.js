@@ -207,7 +207,6 @@ router.beforeEach((to, from, next) => {
 
   // Routes requiring Admin privileges
   if (to.meta.requiresAdmin && !isAdmin) {
-      console.warn(`Access denied: Route ${to.name} requires admin privileges. User ID: ${store.state.user?.id}`); // Enhanced log
       // Redirect non-admins away to AccessDenied page
       next({ name: 'AccessDenied' }); // Changed from 'Slots'
       return;
