@@ -2,6 +2,7 @@ from marshmallow import Schema, fields, validate, ValidationError, pre_load, val
 from marshmallow_sqlalchemy import SQLAlchemyAutoSchema, auto_field
 from marshmallow.validate import OneOf, Range, Length, Email, Regexp
 from datetime import datetime, timezone
+from .models import TransactionStatus # Import TransactionStatus
 import re
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
@@ -132,6 +133,16 @@ class TransactionSchema(SQLAlchemyAutoSchema):
         model = Transaction
         load_instance = True
         sqla_session = db.session
+        # Ensure 'id' is dump_only if not already handled by default
+        dump_only = ("id",)
+
+    # Explicitly define status to ensure it uses enum values and is dump_only
+    status = fields.Enum(TransactionStatus, by_value=True, dump_only=True)
+    # Other fields will be auto-generated if not specified here.
+    # For example, if you want to customize 'amount' or 'transaction_type':
+    # amount = auto_field(dump_only=True) # Or specific field type if needed
+    # transaction_type = auto_field(dump_only=True) # Or specific field type if needed
+    user_id = auto_field(dump_only=True)
 
 
 class TransactionListSchema(PaginationSchema):

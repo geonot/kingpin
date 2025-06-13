@@ -2,9 +2,9 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from models import db, User, Transaction, UserBonus
-from schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema
-from services.bonus_service import apply_bonus_to_deposit
+from ..models import db, User, Transaction, UserBonus, TransactionStatus # Import TransactionStatus
+from ..schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema
+from ..services.bonus_service import apply_bonus_to_deposit
 
 user_bp = Blueprint('user', __name__, url_prefix='/api')
 
@@ -51,7 +51,7 @@ def withdraw():
         user.balance -= amount_sats
         transaction = Transaction(
             user_id=user.id, amount=amount_sats, transaction_type='withdraw',
-            status='pending', details={'withdraw_address': withdraw_address}
+            status=TransactionStatus.VALIDATING, details={'withdraw_address': withdraw_address}
         )
         db.session.add(transaction)
         db.session.commit()

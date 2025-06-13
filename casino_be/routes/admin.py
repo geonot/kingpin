@@ -1,8 +1,10 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
+from datetime import datetime, timezone # Import datetime and timezone
+from sqlalchemy.orm.attributes import flag_modified # For JSON field updates if needed
 
-from models import db, User, GameSession, Transaction, BonusCode
-from schemas import (
+from ..models import db, User, GameSession, Transaction, BonusCode, TransactionStatus # Import TransactionStatus
+from ..schemas import (
     AdminUserSchema, UserListSchema, TransactionSchema, TransactionListSchema,
     BonusCodeSchema, BonusCodeListSchema, AdminCreditDepositSchema
 )
@@ -304,3 +306,48 @@ def admin_delete_bonus_code(code_id_param):
         db.session.rollback()
         current_app.logger.error(f"Admin delete bonus code {code_id_param} failed: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Failed to delete bonus code.'}), 500
+
+@admin_bp.route('/withdrawals/<int:tx_id>/approve', methods=['PUT'])
+@jwt_required()
+def admin_approve_withdrawal_request(tx_id):
+    if not is_admin():
+        return jsonify({'status': False, 'status_message': 'Access denied. Admin privileges required.'}), 403
+
+    transaction = Transaction.query.get(tx_id)
+    if not transaction:
+        return jsonify({'status': False, 'status_message': f'Transaction with ID {tx_id} not found.'}), 404
+
+    if transaction.transaction_type != 'withdraw':
+        return jsonify({
+            'status': False,
+            'status_message': f'Transaction {tx_id} is not a withdrawal type (type: {transaction.transaction_type}). Cannot approve.'
+        }), 400
+
+    if transaction.status != TransactionStatus.VALIDATING:
+        return jsonify({
+            'status': False,
+            'status_message': f'Withdrawal request {tx_id} is not in VALIDATING status. Current status: {transaction.status.value}. Cannot approve.'
+        }), 400
+
+    try:
+        transaction.status = TransactionStatus.PENDING_APPROVAL
+
+        details = transaction.details or {}
+        details['admin_stage1_approved_at'] = datetime.now(timezone.utc).isoformat()
+        details['admin_stage1_approved_by_id'] = current_user.id
+        details['admin_stage1_approved_by_username'] = current_user.username
+
+        transaction.details = details
+        # If issues with JSON updates, uncomment the following:
+        # flag_modified(transaction, "details")
+
+        db.session.add(transaction) # Ensure transaction is added to session if it was detached or if it's a new context
+        db.session.commit()
+
+        current_app.logger.info(f"Admin {current_user.username} (ID: {current_user.id}) approved withdrawal request {tx_id} (Stage 1). Status changed to PENDING_APPROVAL.")
+        return jsonify({'status': True, 'transaction': TransactionSchema().dump(transaction)}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error during admin approval of withdrawal {tx_id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'An error occurred while approving the withdrawal request.'}), 500

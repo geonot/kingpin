@@ -9,6 +9,9 @@ if not os.environ.get('FLASK_APP'):
 
 try:
     from app import app, db
+    from flask.cli import AppGroup # For native Flask CLI commands
+    from casino_be.services.withdrawal_processor import process_pending_approvals, check_in_progress_withdrawals
+    from flask import current_app # To access logger within CLI commands
 except ImportError as e:
     print(f"Error importing Flask app: {e}")
     print("Ensure your Flask app instance is named 'app' in app.py and PYTHONPATH is correct.")
@@ -78,9 +81,37 @@ def create_admin(username, email, password):
 # The flask_script manager.run() will only execute flask_script commands.
 # The new command 'db_cleanup_expired_tokens' needs to be run via `flask db_cleanup_expired_tokens`.
 # That command has been moved to app.py for Flask's native CLI discovery.
+
+# --- Native Flask CLI Commands ---
+# These commands are run using `flask <group_name> <command_name>`
+withdrawal_cli = AppGroup('withdrawal', help='Manage withdrawal processing operations.')
+
+@withdrawal_cli.command('process_all')
+def process_all_withdrawals_command():
+    """Processes pending withdrawal approvals and checks status of in-progress withdrawals."""
+    # Ensure app context for logger and db access if command is run standalone
+    # However, Flask CLI usually handles this.
+    logger = current_app.logger
+    try:
+        logger.info("Starting withdrawal processing via CLI command (process_all)...")
+        process_pending_approvals()
+        check_in_progress_withdrawals()
+        logger.info("Withdrawal processing CLI command (process_all) finished successfully.")
+        print("Withdrawal processing (process_all) finished successfully.")
+    except Exception as e:
+        logger.error(f"Error during withdrawal_cli process_all command: {str(e)}", exc_info=True)
+        print(f"An error occurred during withdrawal processing (process_all): {str(e)}")
+
+# Register the native Flask CLI command group with the app instance
+if app: # Ensure app was imported successfully
+    app.cli.add_command(withdrawal_cli)
+else:
+    print("Flask app instance not available. Cannot add withdrawal CLI commands.")
+
+
 if __name__ == '__main__':
-    # Note: This will only run flask_script commands.
-    # To run app.cli commands, use `flask <command_name>`.
+    # Note: This will only run flask_script commands (like runserver, db, create_admin).
+    # To run app.cli commands (like withdrawal process_all), use `flask withdrawal process_all`.
     manager.run()
     # Usage:
     # python manage.py db init (only once)

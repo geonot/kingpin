@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from passlib.hash import pbkdf2_sha256 as sha256
 from decimal import Decimal
 from sqlalchemy import BigInteger, Index, JSON, UniqueConstraint, Numeric
+import enum
 
 db = SQLAlchemy()
 
@@ -95,7 +96,7 @@ class Transaction(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     amount = db.Column(BigInteger, nullable=False)
     transaction_type = db.Column(db.String(50), nullable=False, index=True)
-    status = db.Column(db.String(50), default='pending', nullable=False, index=True)
+    status = db.Column(db.Enum(TransactionStatus), default=TransactionStatus.PENDING, nullable=False, index=True)
     details = db.Column(JSON, nullable=True)
     slot_spin_id = db.Column(db.Integer, db.ForeignKey('slot_spin.id'), nullable=True, index=True)
     blackjack_hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id'), nullable=True, index=True)
@@ -112,6 +113,15 @@ class Transaction(db.Model):
 
     def __repr__(self):
         return f"<Transaction {self.id} (User: {self.user_id}, Type: {self.transaction_type}, Amount: {self.amount})>"
+
+class TransactionStatus(enum.Enum):
+    PENDING = "pending"
+    VALIDATING = "validating"
+    PENDING_APPROVAL = "pending_approval"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+    FAILED = "failed"
 
 class BonusCode(db.Model):
     __tablename__ = 'bonus_code'
