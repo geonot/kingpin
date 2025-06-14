@@ -43,7 +43,28 @@ logger = logging.getLogger('alembic.env')
 
 # Option 3: Import all models and use a shared MetaData instance
 # Ensure all your models use the same MetaData object (SQLAlchemy() usually handles this)
-from casino_be.models import db # If db = SQLAlchemy() is defined in models.py
+# from casino_be.models import db # If db = SQLAlchemy() is defined in models.py
+# target_metadata = db.metadata
+
+# Use metadata from the Flask app instance to ensure all models are registered
+# from casino_be.app import app as application  # Import the application instance from casino_be.app
+# with application.app_context():
+#    # It's common to use current_app within the context, but using 'application' directly
+#    # is also fine if current_app is not yet pushed or if 'application' is the fully configured app.
+#    # Flask-Migrate typically sets up target_metadata based on db.metadata from the app.
+#    # Let's explicitly use the metadata from the app's db object.
+#    target_metadata = application.extensions['migrate'].db.metadata
+
+# Try direct import and registration:
+from casino_be.models import db # The db = SQLAlchemy() instance
+# Import ALL models from casino_be.models.py to ensure they are registered with the db instance above
+# (Order might matter if there are complex dependencies, but typically not for registration itself)
+from casino_be.models import User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist, \
+    BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, \
+    SpacecrashGame, SpacecrashBet, PokerTable, PokerHand, PokerPlayerState, \
+    PlinkoDropLog, RouletteGame, BaccaratTable, BaccaratHand, BaccaratAction, \
+    CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry # NEW MODELS
+
 target_metadata = db.metadata
 # --- End Metadata Setup ---
 

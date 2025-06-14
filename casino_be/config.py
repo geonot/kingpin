@@ -46,6 +46,9 @@ class Config:
     # Service API Token for internal services (e.g., polling service)
     SERVICE_API_TOKEN = os.getenv('SERVICE_API_TOKEN', 'default_service_token_please_change')
 
+    # Feature Flags
+    CRYSTAL_GARDEN_ENABLED = os.getenv('CRYSTAL_GARDEN_ENABLED', 'True').lower() in ('true', '1', 't')
+
 
 class TestingConfig(Config):
     TESTING = True

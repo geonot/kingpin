@@ -7,6 +7,7 @@ import NeonGridGameScene from './scenes/NeonGridGameScene';
 import NeonGridUIScene from './scenes/NeonGridUIScene';
 import PreloadScene from './scenes/PreloadScene'; // Add PreloadScene
 import BonusHoldAndWinScene from './scenes/BonusHoldAndWinScene';
+import CrystalGardenScene from './scenes/crystal_garden_scene'; // Added CrystalGardenScene
 
 const config = {
   type: Phaser.AUTO, // Auto-detect renderer (WebGL or Canvas)
@@ -44,7 +45,8 @@ const config = {
     NeonGridGameScene,
     NeonGridUIScene,
     BonusHoldAndWinScene,
-    SettingsModalScene
+    SettingsModalScene,
+    CrystalGardenScene // Added CrystalGardenScene to the list
 ],
 
   // Prevent blur on resized textures (important for pixel art if pixelArt: true)

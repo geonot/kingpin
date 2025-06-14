@@ -37,7 +37,9 @@ from models import (
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
     PlinkoDropLog, RouletteGame,  # Plinko models, added RouletteGame
-    BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
+    BaccaratTable, BaccaratHand, BaccaratAction, # Baccarat models
+    # Crystal Garden Models
+    CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry
 )
 from schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
@@ -212,6 +214,7 @@ def create_app(config_class=Config):
     from routes.meta_game import meta_game_bp
     from routes.baccarat import baccarat_bp # New Baccarat import
     from routes.internal import internal_bp # New Internal import
+    from casino_be.routes.crystal_garden import crystal_garden_bp # Crystal Garden import
 
     # CLI command for cleanup
     @app.cli.command('cleanup-expired-tokens')
@@ -239,6 +242,7 @@ def create_app(config_class=Config):
     app.register_blueprint(meta_game_bp)
     app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
     app.register_blueprint(internal_bp) # Register internal blueprint
+    app.register_blueprint(crystal_garden_bp) # Register Crystal Garden blueprint
 
     return app
 

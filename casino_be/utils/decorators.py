@@ -27,3 +27,19 @@ def service_token_required(f):
             # 401 is typically for missing or malformed credentials.
             return jsonify({'status': False, 'status_message': 'Invalid service token.'}), 403
     return decorated_function
+
+def feature_flag_required(flag_name):
+    """
+    Decorator to enable/disable routes based on a feature flag in Flask app config.
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not current_app.config.get(flag_name, False):
+                # Return 404 to make it seem like the feature doesn't exist
+                # Or 403 Forbidden if you want to indicate it's a restricted feature
+                # Using 404 as per subtask description.
+                return jsonify({'message': 'This feature is not currently available.'}), 404
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator

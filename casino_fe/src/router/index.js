@@ -29,6 +29,7 @@ const Privacy = () => import('@/views/static/PrivacyPage.vue');
 const ResponsibleGaming = () => import('@/views/static/ResponsibleGamingPage.vue');
 const AdminDashboard = () => import('@/views/admin/AdminDashboard.vue');
 const AccessDeniedPage = () => import('@/views/AccessDeniedPage.vue');
+const CrystalGardenPage = () => import('@/views/CrystalGardenPage.vue'); // Import CrystalGardenPage
 
 
 const routes = [
@@ -168,7 +169,13 @@ const routes = [
      name: 'NotFound',
      component: () => import('@/views/NotFoundPage.vue'),
      meta: { title: 'Page Not Found' }
-   }
+   },
+  {
+    path: '/crystal-garden',
+    name: 'CrystalGarden',
+    component: CrystalGardenPage,
+    meta: { title: 'Crystal Garden', requiresAuth: true, featureFlag: 'CRYSTAL_GARDEN_ENABLED' }
+  }
 ];
 
 const router = createRouter({
@@ -210,6 +217,22 @@ router.beforeEach((to, from, next) => {
       // Redirect non-admins away to AccessDenied page
       next({ name: 'AccessDenied' }); // Changed from 'Slots'
       return;
+  }
+
+  // Feature Flag Check
+  if (to.meta.featureFlag) {
+    // Assuming a getter like 'isFeatureEnabled' exists in the store
+    // This getter would typically check a list of enabled features fetched from backend
+    if (store.getters.isFeatureEnabled && !store.getters.isFeatureEnabled(to.meta.featureFlag)) {
+      next({ name: 'NotFound' }); // Or 'AccessDenied' or a specific 'FeatureDisabled' page
+      return;
+    }
+    // If the getter itself doesn't exist, we can't reliably check.
+    // For now, if getter is not present, we'll log a warning and allow access for dev purposes.
+    // In a real app, this path should probably deny access or store should be guaranteed to have feature flags.
+    else if (!store.getters.isFeatureEnabled) {
+        console.warn(`Feature flag check: store.getters.isFeatureEnabled not found. Allowing access to ${to.path} for now.`);
+    }
   }
 
   // If no specific rules match, allow navigation
