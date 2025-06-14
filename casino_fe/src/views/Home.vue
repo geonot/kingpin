@@ -114,6 +114,7 @@ const isAuthenticated = computed(() => store.getters.isAuthenticated);
 const featuredSlots = ref([]);
 const isLoadingGames = ref(false);
 const gamesError = ref(null);
+const crystalGardenEnabled = ref(false); // For Crystal Garden link
 
 const getSlotImageUrl = (slot) => {
   if (slot.thumbnail_url) return slot.thumbnail_url;
@@ -143,6 +144,22 @@ onMounted(async () => {
   } finally {
     isLoadingGames.value = false;
   }
+
+  // Simulate feature flag check for Crystal Garden
+  // In a real app, this would come from a store or API call
+  // For example: crystalGardenEnabled.value = store.getters.isFeatureEnabled('CRYSTAL_GARDEN_ENABLED');
+  // Or an API call:
+  // try {
+  //   const response = await API.get('/config'); // Replace with actual API endpoint
+  //   if (response && response.data && response.data.featureFlags) {
+  //     crystalGardenEnabled.value = response.data.featureFlags.CRYSTAL_GARDEN_ENABLED === true;
+  //   } else { crystalGardenEnabled.value = true; /* fallback for dev if endpoint missing */ }
+  // } catch (e) {
+  //   console.error("Failed to fetch feature flags for Home page", e);
+  //   crystalGardenEnabled.value = false; // Default to false on error
+  // }
+  console.warn("Simulating CRYSTAL_GARDEN_ENABLED feature flag as true for UI link on Home.vue.");
+  crystalGardenEnabled.value = true; // Simulate as enabled for this subtask
 });
 </script>
 

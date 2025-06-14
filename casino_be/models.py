@@ -2,7 +2,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone
 from passlib.hash import pbkdf2_sha256 as sha256
 from decimal import Decimal
-from sqlalchemy import BigInteger, Index, JSON, UniqueConstraint, Numeric
+from sqlalchemy import BigInteger, Index, JSON, UniqueConstraint, Numeric, DateTime, Float, ForeignKey
 
 db = SQLAlchemy()
 
@@ -29,6 +29,11 @@ class User(db.Model):
     plinko_drops = db.relationship('PlinkoDropLog', back_populates='user', lazy=True)
     # roulette_games backref will be added by RouletteGame model
     baccarat_hands = db.relationship('BaccaratHand', back_populates='user', lazy='dynamic')
+
+    # Crystal Garden related relationships
+    garden = db.relationship("PlayerGarden", back_populates="user", uselist=False)
+    crystal_flowers = db.relationship("CrystalFlower", back_populates="user")
+    codex_entries = db.relationship("CrystalCodexEntry", back_populates="user")
 
     def check_password(self, password):
         return sha256.verify(password, self.password)
@@ -501,3 +506,124 @@ class BaccaratAction(db.Model):
 
     def __repr__(self):
         return f"<BaccaratAction {self.id} (Hand: {self.baccarat_hand_id}, User: {self.user_id}, Type: {self.action_type})>"
+
+
+# Crystal Garden Models
+class CrystalSeed(db.Model):
+    __tablename__ = 'crystal_seed'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, unique=True, nullable=False)
+    cost = db.Column(db.Integer, nullable=False)
+    potential_outcomes = db.Column(JSON, nullable=True)  # Describes potential crystal attributes
+
+    # Relationships
+    flowers_grown = db.relationship("CrystalFlower", back_populates="seed")
+
+    def __repr__(self):
+        return f"<CrystalSeed {self.name}>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'cost': self.cost,
+            'potential_outcomes': self.potential_outcomes
+        }
+
+class PlayerGarden(db.Model):
+    __tablename__ = 'player_garden'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)  # One garden per user
+    grid_size_x = db.Column(db.Integer, default=5, nullable=False)
+    grid_size_y = db.Column(db.Integer, default=5, nullable=False)
+    last_cycle_time = db.Column(DateTime, nullable=True)  # To track sun/moon cycle progression
+
+    # Relationships
+    user = db.relationship("User", back_populates="garden")
+    flowers = db.relationship("CrystalFlower", back_populates="garden")
+
+    def __repr__(self):
+        return f"<PlayerGarden for User {self.user_id}>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'grid_size_x': self.grid_size_x,
+            'grid_size_y': self.grid_size_y,
+            'last_cycle_time': self.last_cycle_time.isoformat() if self.last_cycle_time else None
+        }
+
+class CrystalFlower(db.Model):
+    __tablename__ = 'crystal_flower'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    crystal_seed_id = db.Column(db.Integer, db.ForeignKey('crystal_seed.id'), nullable=False)
+    player_garden_id = db.Column(db.Integer, db.ForeignKey('player_garden.id'), nullable=False)
+    planted_at = db.Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    growth_stage = db.Column(db.String, nullable=False)  # e.g., 'seeded', 'sprouting', 'blooming', 'withered'
+    color = db.Column(db.String, nullable=True)
+    size = db.Column(Float, nullable=True)
+    clarity = db.Column(Float, nullable=True)
+    special_type = db.Column(db.String, nullable=True)
+    appraised_value = db.Column(db.Integer, nullable=True)
+    position_x = db.Column(db.Integer, nullable=False)  # Position in the garden grid
+    position_y = db.Column(db.Integer, nullable=False)  # Position in the garden grid
+    active_power_ups = db.Column(db.JSON, nullable=True, default=lambda: [])
+
+    # Relationships
+    user = db.relationship("User", back_populates="crystal_flowers")
+    seed = db.relationship("CrystalSeed", back_populates="flowers_grown")
+    garden = db.relationship("PlayerGarden", back_populates="flowers")
+
+    def __repr__(self):
+        return f"<CrystalFlower {self.id} (Seed: {self.crystal_seed_id})>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'crystal_seed_id': self.crystal_seed_id,
+            'player_garden_id': self.player_garden_id,
+            'planted_at': self.planted_at.isoformat() if self.planted_at else None,
+            'growth_stage': self.growth_stage,
+            'color': self.color,
+            'size': self.size,
+            'clarity': self.clarity,
+            'special_type': self.special_type,
+            'appraised_value': self.appraised_value,
+            'position_x': self.position_x,
+            'position_y': self.position_y,
+            'active_power_ups': self.active_power_ups if self.active_power_ups is not None else []
+        }
+
+class CrystalCodexEntry(db.Model):
+    __tablename__ = 'crystal_codex_entry'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    crystal_name = db.Column(db.String, nullable=False)  # e.g., "Large Blue Sapphire"
+    color = db.Column(db.String, nullable=False)
+    size = db.Column(Float, nullable=False)
+    clarity = db.Column(Float, nullable=False)
+    special_type = db.Column(db.String, nullable=True)
+    first_discovered_at = db.Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    notes = db.Column(db.String, nullable=True)  # Player's personal notes or game-generated lore
+
+    # Relationships
+    user = db.relationship("User", back_populates="codex_entries")
+
+    def __repr__(self):
+        return f"<CrystalCodexEntry {self.crystal_name} for User {self.user_id}>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'crystal_name': self.crystal_name,
+            'color': self.color,
+            'size': self.size,
+            'clarity': self.clarity,
+            'special_type': self.special_type,
+            'first_discovered_at': self.first_discovered_at.isoformat() if self.first_discovered_at else None,
+            'notes': self.notes
+        }
