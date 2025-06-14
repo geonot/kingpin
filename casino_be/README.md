@@ -84,3 +84,21 @@ To create new migrations after modifying models, run:
 ```bash
 python manage.py db migrate
 python manage.py db upgrade
+```
+
+## Environment Variables
+
+The following environment variables are used to configure the backend application. Some have default values suitable for development, but it is crucial to set appropriate values for a production environment.
+
+-   `DATABASE_URL`: The complete connection string for the PostgreSQL database (e.g., `postgresql://user:password@host:port/dbname`). If this is set, it overrides the individual `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` variables. **Recommended for production.**
+-   `DB_HOST`: Database host. Default: `localhost`.
+-   `DB_PORT`: Database port. Default: `5432`.
+-   `DB_NAME`: Database name. Default: `kingpin_casino`.
+-   `DB_USER`: Database username. Default: `kingpin_user`.
+-   `DB_PASSWORD`: Database password. Default: `password123`. **Change for production.**
+-   `JWT_SECRET_KEY`: Secret key used for signing JWT tokens. Default: `dev-secret-key-change-in-production`. **CRITICAL: Set a strong, unique key for production.**
+-   `RATELIMIT_STORAGE_URI`: Storage URI for the rate limiter. Default: `memory://` (not suitable for production). For production, use a persistent store like Redis (e.g., `redis://localhost:6379/0`). **Change for production.**
+-   `FLASK_DEBUG`: Enables or disables Flask's debug mode. Default: `True` (for development). Set to `False` for production. **Change for production.**
+-   `ADMIN_USERNAME`: Username for the initial admin account. Default: `admin`. **Recommended to change for production.**
+-   `ADMIN_PASSWORD`: Password for the initial admin account. Default: `admin123`. **CRITICAL: Change to a strong password for production.**
+-   `ADMIN_EMAIL`: Email address for the initial admin account. Default: `admin@kingpincasino.local`. **Recommended to change for production.**
