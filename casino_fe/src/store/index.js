@@ -131,7 +131,6 @@ export default createStore({
         }
         return data;
       } catch (error) {
-        console.error("Registration Error:", error.response?.data || error.message);
         // The interceptor in api.js will handle generic network errors or 401s.
         // Specific error handling for registration (e.g., email already exists) can remain here.
         return error.response?.data || { status: false, status_message: "Network error during registration." };
@@ -153,7 +152,6 @@ export default createStore({
         if (error.response && error.response.status !== 401) {
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Login Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       } finally {
         commit('stopGlobalLoading');
@@ -191,7 +189,6 @@ export default createStore({
           return { status: false, status_message: data.status_message || "Session refresh failed." };
         }
       } catch (error) {
-        console.error("Token Refresh Action Error:", error.response?.data || error.message);
         // Logout will be dispatched by the interceptor in api.js
         await dispatch('logout'); // Ensure local state is cleared
         return { status: false, status_message: "Session expired. Please log in again." };
@@ -222,7 +219,6 @@ export default createStore({
         }
         return { status: true, status_message: "Logged out successfully." };
       } catch (error) {
-        console.warn("Server Logout Error during logout action:", error.response?.data || error.message);
         // Even if server logout fails, user is logged out locally.
         return { status: true, status_message: "Logged out locally. Server session might have issues clearing." };
       }
@@ -239,7 +235,6 @@ export default createStore({
         } catch (error) {
             // If fetchUserProfile itself fails (e.g. network error not caught by interceptor, or refresh fails and logs out)
             // this catch might not be strictly necessary if interceptor handles all logout cases.
-            console.error("Error during loadSession's fetchUserProfile:", error);
             // dispatch('logout'); // Consider if this is needed or if interceptor handles it.
         } finally {
             commit('stopGlobalLoading');
@@ -256,12 +251,10 @@ export default createStore({
         } else {
           // Non-2xx responses that are not 401 should be caught by the .catch block
           // This part might be redundant if apiService throws for non-ok responses.
-          console.warn("Failed to fetch user profile (API reported !status):", response.data.status_message);
           return null;
         }
       } catch (error) {
         // Interceptor should handle 401. This catches other errors (500, network, etc.).
-        console.error("Error fetching user profile:", error.response?.data || error.message);
         // Do not dispatch logout here directly, interceptor in api.js should manage it on 401.
         return null;
       }
@@ -280,7 +273,6 @@ export default createStore({
         } else {
           const errorMessage = response.data.status_message || 'Failed to parse slots data.';
           commit('setGlobalError', errorMessage);
-          console.error('Error fetching slots:', errorMessage);
           return { status: false, status_message: errorMessage };
         }
       } catch (error) {
@@ -289,7 +281,6 @@ export default createStore({
         if (error.response && error.response.status !== 401) { // Check error.response exists
           commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error('Network error fetching slots:', errData || error.message);
         return { status: false, status_message: errData?.status_message || defaultMessage };
       }
     },
@@ -297,7 +288,6 @@ export default createStore({
       if (!state.slotsLoaded) {
         const fetchResult = await dispatch('fetchSlots'); // Already uses apiService if fetchSlots is updated
         if (!fetchResult || fetchResult.status === false || !fetchResult.slots) { // Adjusted condition
-            console.error("fetchSlots failed or returned no slots, cannot filter for slot config");
             return null;
         }
       }
@@ -306,7 +296,6 @@ export default createStore({
         commit('setCurrentSlotConfig', slot);
         return slot;
       } else {
-        console.error(`Slot config for ID ${slotId} not found in loaded slots.`);
         return null;
       }
     },
@@ -319,7 +308,6 @@ export default createStore({
           return response.data;
         } else {
            const errorMessage = response.data.status_message || 'Failed to parse tables data.';
-           console.error('Error fetching tables:', errorMessage);
            return { status: false, status_message: errorMessage };
         }
       } catch (error) {
@@ -328,7 +316,6 @@ export default createStore({
         if (error.response && error.response.status !== 401) { // Check error.response exists
            // commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error('Network error fetching tables:', errData || error.message);
         return { status: false, status_message: errData?.status_message || defaultMessage };
       }
     },
@@ -336,7 +323,6 @@ export default createStore({
       if (!state.tablesLoaded) {
         const fetchResult = await dispatch('fetchTables'); // Already uses apiService if fetchTables is updated
         if (!fetchResult || fetchResult.status === false || !fetchResult.tables) { // Adjusted condition
-            console.error("fetchTables failed or returned no tables, cannot filter for table config");
             return null;
         }
       }
@@ -345,7 +331,6 @@ export default createStore({
         commit('setCurrentTableConfig', table);
         return table;
       } else {
-        console.error(`Table config for ID ${tableId} not found in loaded tables.`);
         return null;
       }
     },
@@ -362,7 +347,6 @@ export default createStore({
         if (error.response && error.response.status !== 401) { // Check error.response exists
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("End Session Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },
@@ -378,7 +362,6 @@ export default createStore({
         if (error.response && error.response.status !== 401) { // Check error.response exists
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Join Game Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },
@@ -400,7 +383,6 @@ export default createStore({
          if (error.response && error.response.status !== 400 && error.response.status !== 401 ) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Spin Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },
@@ -426,7 +408,6 @@ export default createStore({
         if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Join Blackjack Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },
@@ -444,7 +425,6 @@ export default createStore({
         if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Blackjack Action Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },
@@ -474,7 +454,6 @@ export default createStore({
         if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Withdraw Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },
@@ -492,7 +471,6 @@ export default createStore({
         if (error.response && error.response.status !== 400 && error.response.status !== 401 && error.response.status !== 409) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Update Settings Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },
@@ -510,7 +488,6 @@ export default createStore({
         if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
             commit('setGlobalError', errData?.status_message || defaultMessage);
         }
-        console.error("Apply Bonus Code Error:", errData || error.message);
         return errData || { status: false, status_message: defaultMessage };
       }
     },

@@ -37,7 +37,6 @@ apiClient.interceptors.response.use(response => response, async error => {
   const originalRequest = error.config;
   if (error.response && error.response.status === 401 && !originalRequest._retry && store) {
     originalRequest._retry = true;
-    console.log('Attempting to refresh token due to 401 error');
     try {
       // Check if refreshToken action exists (now global)
       if (store && store._actions['refreshToken']) {
@@ -51,21 +50,18 @@ apiClient.interceptors.response.use(response => response, async error => {
           originalRequest.headers.Authorization = `Bearer ${refreshData.access_token}`;
           return apiClient(originalRequest); // Retry original request
         } else {
-          console.log('Refresh token did not return new access token, attempting logout.');
           if (store && store._actions['logout']) { // Check if logout action exists
             await store.dispatch('logout');
           }
           return Promise.reject(error);
         }
       } else {
-         console.error('refreshToken action does not exist in the store. Attempting direct logout.');
          if (store && store._actions['logout']) { // Check if logout action exists
             await store.dispatch('logout');
          }
          return Promise.reject(error);
       }
     } catch (refreshError) {
-      console.error('Error during token refresh, attempting logout:', refreshError);
       if (store && store._actions['logout']) { // Check if logout action exists
         await store.dispatch('logout');
       }
