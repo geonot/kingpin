@@ -41,16 +41,34 @@ def register():
     if User.query.filter_by(email=data['email']).first():
         return jsonify({'status': False, 'status_message': 'Email already exists'}), 409
     try:
-        wallet_address = generate_bitcoin_wallet()
-        if not wallet_address:
+        # Generate_bitcoin_wallet now returns (address, private_key_wif)
+        address, private_key_wif = generate_bitcoin_wallet()
+
+        if not address or not private_key_wif:
+            current_app.logger.error("Failed to generate Bitcoin wallet (address or WIF is None).")
             return jsonify({'status': False, 'status_message': 'Failed to generate wallet address for user.'}), 500
+
         new_user = User(
             username=data['username'],
             email=data['email'],
             password=User.hash_password(data['password']),
-            deposit_wallet_address=wallet_address
+            deposit_wallet_address=address  # Store the address
         )
         db.session.add(new_user)
+        # The private_key_wif needs to be handled securely.
+        # For this exercise, we log its generation and the need for secure storage.
+        # In a production system, this key would be encrypted and stored in a secure vault,
+        # or managed via an HSM or dedicated key management service.
+        # It should NOT be stored directly on the User model in plain text.
+        current_app.logger.info(
+            f"Generated Bitcoin private key (WIF) for user {new_user.username} (ID will be {new_user.id} after commit). "
+            "This key MUST be stored securely and separately. First 5 chars of WIF: "
+            f"{private_key_wif[:5]}..."
+        )
+        # IMPORTANT: The private_key_wif is NOT being saved to the main user database here for security reasons.
+        # The polling service or a dedicated wallet management system would need access to this key
+        # (e.g., from a secure vault) to sweep funds.
+
         db.session.commit()
         access_token = create_access_token(identity=new_user)
         refresh_token = create_refresh_token(identity=new_user)

@@ -28,12 +28,12 @@
 
       <!-- Placeholder for QR Code - Generate dynamically or fetch if available -->
       <div class="mt-6 mb-8 flex justify-center">
-        <!-- Example using a library like 'qrcode.vue' or generate on backend -->
-         <div class="w-48 h-48 bg-bg-primary border border-border flex items-center justify-center rounded-md text-text-secondary">
-             <i class="fas fa-qrcode text-6xl"></i>
-             <span class="absolute text-xs mt-20">QR Code Placeholder</span>
-             <!-- Replace with actual QR code component -->
-             <!-- <qrcode-vue :value="user.deposit_wallet_address" :size="192" level="H" /> -->
+        <div v-if="currentUser && currentUser.deposit_wallet_address" class="p-2 bg-white rounded-md inline-block">
+          <qrcode-vue :value="currentUser.deposit_wallet_address" :size="192" level="H" />
+        </div>
+         <div v-else class="w-48 h-48 bg-bg-primary border border-border flex items-center justify-center rounded-md text-text-secondary">
+             <i class="fas fa-qrcode text-6xl opacity-50"></i>
+             <span class="absolute text-xs mt-20 text-center">Address not available<br/>or loading...</span>
          </div>
       </div>
 
@@ -80,6 +80,7 @@ import { ref, computed } from 'vue';
 import { useStore } from 'vuex';
 import { formatSatsToBtc } from '@utils/currencyFormatter';
 import ErrorMessage from '@components/ErrorMessage.vue';
+import QrcodeVue from 'qrcode.vue';
 
 const store = useStore();
 const currentUser = computed(() => store.getters.currentUser);
