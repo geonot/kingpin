@@ -9,58 +9,50 @@ from datetime import datetime, timezone
 from casino_be.app import app, db
 from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction, BonusCode, UserBonus, PlinkoDropLog # Added BonusCode, UserBonus, PlinkoDropLog
 #SATOSHI_FACTOR might be needed if amounts are converted
-from casino_be.config import Config
-from datetime import timedelta # Added timedelta
-from casino_be.utils.plinko_helper import PAYOUT_MULTIPLIERS # For Plinko tests
-
+from casino_be.config import Config, TestingConfig # Import TestingConfig
+from casino_be.app import create_app # Import create_app factory
+from datetime import timedelta
+from casino_be.utils.plinko_helper import PAYOUT_MULTIPLIERS
+# StaticPool is not needed for file-based DB strategy per test
+# from sqlalchemy.pool import StaticPool
 
 class BaseTestCase(unittest.TestCase):
-    """Base test case to set up and tear down the test environment."""
-
-    @classmethod
-    def setUpClass(cls):
-        # Configure the Flask app for testing
-        app.config['TESTING'] = True
-        # Use an in-memory SQLite database for tests if TEST_DATABASE_URL is not set
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
-        app.config['JWT_SECRET_KEY'] = 'test-super-secret-key' # Fixed JWT secret for tests
-        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        app.config['WTF_CSRF_ENABLED'] = False # If using Flask-WTF
-
-        # Explicitly disable limiter after TESTING is set
-        app.config['RATELIMIT_ENABLED'] = False
-        app.config['RATELIMIT_DEFAULT_LIMITS_ENABLED'] = False # Also disable default limits specifically
-        app.config['RATELIMIT_DEFAULT_LIMITS'] = "100000 per second" # Set a very high limit
-
-        from casino_be.app import limiter as global_limiter
-        global_limiter.enabled = False # Directly disable the imported limiter instance
-
-        cls.app = app
-        cls.client = cls.app.test_client()
-
-        # Create all database tables
-        with cls.app.app_context():
-            db.create_all()
-
-    @classmethod
-    def tearDownClass(cls):
-        # Drop all database tables
-        with cls.app.app_context():
-            db.drop_all()
+    """
+    Base test case to set up a fresh app and database for each test method,
+    ensuring maximum test isolation.
+    """
 
     def setUp(self):
         """Set up for each test."""
+        self.app = create_app(TestingConfig) # Create a new app instance with TestingConfig
+
+        # Store the database file path from the app's config for cleanup
+        self.test_db_file = self.app.config.get('DATABASE_FILE_PATH', 'test_casino_be_isolated.db') # Default if not in config
+
         self.app_context = self.app.app_context()
         self.app_context.push()
-        db.create_all() # Create tables fresh for each test
+
+        db.init_app(self.app) # Initialize db with the test app instance
+        db.drop_all()         # Ensure any existing tables are dropped
+        db.create_all()       # Create tables fresh for each test
+
+        self.client = self.app.test_client() # Create test client for this app instance
 
     def tearDown(self):
         """Tear down after each test."""
-        db.session.remove()
-        db.drop_all() # Drop tables after each test
+        db.session.remove()   # Remove session first
+        db.drop_all()         # Drop all tables
         self.app_context.pop()
 
-    def _create_user(self, username="testuser", email="test@example.com", password="password123"):
+        # Clean up the test database file
+        if os.path.exists(self.test_db_file):
+            try:
+                os.remove(self.test_db_file)
+            except OSError as e: # Handle potential errors during file removal (e.g., file in use)
+                print(f"Error removing test database file {self.test_db_file}: {e}")
+
+
+    def _create_user(self, username="testuser", email="test@example.com", password="password123", deposit_wallet_address=None):
         """Helper to create a user directly in the DB."""
         user = User(
             username=username,
@@ -68,29 +60,63 @@ class BaseTestCase(unittest.TestCase):
             password=User.hash_password(password), # Assuming User model has hash_password
             deposit_wallet_address=f"test_wallet_{username}" # Make wallet address unique
         )
-        with self.app.app_context():
-            db.session.add(user)
-            db.session.commit()
-            # Refresh user to get ID etc.
-            db.session.refresh(user)
+        # Operations will use the session from the currently active app context (e.g., from setUp)
+        db.session.add(user)
+        db.session.commit()
+        # Refresh user to get ID etc. and ensure it's attached to the current session
+        # If called from a context that's immediately popped, this refresh might not be useful to the caller.
+        # However, _login_and_get_token now re-fetches, which is safer.
+        db.session.refresh(user)
         return user
 
     def _create_bonus_code(self, code_id="TESTCODE", type="deposit", subtype="percentage", amount=10.0, amount_sats=None, uses_remaining=100, is_active=True, **kwargs): # Added **kwargs to accept extra params
-        with self.app.app_context():
-            bonus_code = BonusCode(
-                code_id=code_id,
-                type=type,
-                subtype=subtype,
-                amount=amount,
-                amount_sats=amount_sats,
-                uses_remaining=uses_remaining,
-                is_active=is_active,
-                expires_at=datetime.now(timezone.utc) + timedelta(days=30)
-            )
-            db.session.add(bonus_code)
-            db.session.commit()
-            db.session.refresh(bonus_code)
+        # This helper also assumes an app context is active (e.g., from setUp)
+        bonus_code = BonusCode(
+            code_id=code_id,
+            type=type,
+            subtype=subtype,
+            amount=amount,
+            amount_sats=amount_sats,
+            uses_remaining=uses_remaining,
+            is_active=is_active,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30)
+        )
+        db.session.add(bonus_code)
+        db.session.commit()
+        db.session.refresh(bonus_code)
         return bonus_code
+
+    def _login_and_get_token(self, username_prefix="testloginuser", password_suffix="password123"):
+        """
+        Ensures a user exists (or creates one), logs them in, and returns token and user_id.
+        Username is made unique with a suffix to avoid clashes if called multiple times.
+        """
+        # Make username unique to avoid clashes if called multiple times in complex test setups
+        # However, with proper setUp/tearDown for each test, this might not be strictly necessary
+        # but adds robustness if tests share state or are not perfectly isolated.
+        unique_username = f"{username_prefix}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        user_email = f"{unique_username}@example.com"
+
+        # Check if user exists, if not, create one using the helper
+        # The query should happen within the current app context
+        user = User.query.filter_by(username=unique_username).first()
+        if not user:
+            # _create_user handles its own session commit and refresh
+            user = self._create_user(username=unique_username, password=password_suffix, email=user_email)
+
+        # Ensure user is not None after attempt to create/fetch
+        self.assertIsNotNone(user, f"User {unique_username} could not be created or fetched.")
+        self.assertIsNotNone(user.id, f"User {unique_username} does not have an ID, creation/fetch failed.")
+
+
+        login_payload = {"username": user.username, "password": password_suffix}
+        response = self.client.post('/api/login', json=login_payload)
+        data = json.loads(response.data.decode())
+
+        self.assertTrue(data.get('status'), f"Login failed for {user.username}: {data.get('status_message', 'No status message')}")
+        self.assertIn('access_token', data, "Access token not in login response.")
+
+        return data['access_token'], user.id
 
 
 class AuthApiTests(BaseTestCase):
@@ -218,27 +244,7 @@ class AuthApiTests(BaseTestCase):
 class GameApiTests(BaseTestCase):
     """Tests for game related API endpoints."""
 
-    def _login_and_get_token(self, username="gameuser", password="gamepassword", email_suffix="@example.com"):
-        """Helper to register, login a user and return their access token."""
-        # Ensure email is unique if called multiple times with same username in different test classes
-        # or if user is not cleaned up properly between tests (though BaseTestCase should handle this)
-        user_email = f"{username}{email_suffix}"
-        # Check if user already exists to avoid re-creating, useful if helper is called multiple times in a single test method
-        # However, for test isolation, typically we create fresh users or rely on setUp/tearDown.
-        # For this helper, let's assume it might be called for a user that needs to be created.
-        user = User.query.filter_by(username=username).first()
-        if not user:
-            self._create_user(username=username, password=password, email=user_email)
-            user = User.query.filter_by(username=username).first() # Re-fetch user
-
-        self.assertIsNotNone(user, f"User {username} could not be created or fetched for login.")
-
-        login_payload = {"username": user.username, "password": password} # Use user.username from fetched user
-        response = self.client.post('/api/login', json=login_payload)
-        data = json.loads(response.data.decode())
-        self.assertTrue(data.get('status'), f"Login failed for user {username}. Response: {data}")
-        self.assertIn('access_token', data, f"access_token not in login response for user {username}. Response: {data}")
-        return data['access_token']
+    # GameApiTests will use the _login_and_get_token from BaseTestCase
 
     def _create_slot(self, name="Test Slot", short_name="test_slot_sn", reels=3, rows=3, paylines=5): # Added short_name param
         """Helper to create a slot machine directly in the DB."""
@@ -291,7 +297,7 @@ class GameApiTests(BaseTestCase):
 
     def test_spin_success(self):
         """Test a successful spin."""
-        token = self._login_and_get_token(username="spinner", password="spinpassword")
+        token, _ = self._login_and_get_token(username_prefix="spinner", password_suffix="spinpassword")
 
         # Get user for balance update
         with self.app.app_context():
@@ -299,7 +305,8 @@ class GameApiTests(BaseTestCase):
             self.assertIsNotNone(user)
             user.balance = 1000 * Config.SATOSHI_FACTOR # Give user 1000 BTC in satoshis
             db.session.commit()
-            db.session.refresh(user)
+            # Re-fetch user to ensure it's attached to the current session after commit
+            user = User.query.filter_by(username="spinner").first()
             original_balance = user.balance
 
         # Create a slot machine
@@ -307,15 +314,14 @@ class GameApiTests(BaseTestCase):
 
         with self.app.app_context():
             # Fetch user and slot within the current session context to avoid DetachedInstanceError
-            user_for_session = User.query.filter_by(username="spinner").first() # User from _login_and_get_token
+            # User object might have been created/modified in a different session/context from _login_and_get_token
+            user_for_session = User.query.filter_by(username="spinner").first()
             slot_for_session = Slot.query.get(slot_id)
             self.assertIsNotNone(user_for_session, "User for session not found")
             self.assertIsNotNone(slot_for_session, "Slot for session not found")
 
-            # Ensure user has balance (already done in _login_and_get_token's user creation, but good to be explicit if needed)
-            # For this test, user's balance is set after _login_and_get_token call.
-            original_balance = user_for_session.balance
-
+            # original_balance is already set correctly above with the re-fetched user.
+            # No need to set it again here from user_for_session unless balance was changed again without commit.
 
             game_session = GameSession(user_id=user_for_session.id, slot_id=slot_for_session.id, game_type="slot", session_start=datetime.now(timezone.utc))
             db.session.add(game_session)
@@ -345,7 +351,7 @@ class GameApiTests(BaseTestCase):
 
     def test_spin_insufficient_balance(self):
         """Test spin attempt with insufficient balance."""
-        token = self._login_and_get_token(username="pooruser", password="poorpassword")
+        token, _ = self._login_and_get_token(username_prefix="pooruser", password_suffix="poorpassword")
 
         # Set user balance
         with self.app.app_context():
@@ -381,20 +387,10 @@ class GameApiTests(BaseTestCase):
 # === Billing API Tests ===
 class BillingApiTests(BaseTestCase):
 
-    def _login_and_get_token(self, username="billinguser", password="billingpassword"):
-        """Helper to create, login a user and return their access token for billing tests."""
-        user = User.query.filter_by(username=username).first()
-        if not user:
-            user = self._create_user(username=username, password=password, email=f"{username}@example.com")
-
-        login_payload = {"username": username, "password": password}
-        response = self.client.post('/api/login', json=login_payload)
-        data = json.loads(response.data.decode())
-        self.assertTrue(data.get('status', False), f"Login failed for {username}: {data.get('status_message')}")
-        return data['access_token'], user.id # Return user_id as well for convenience
+    # BillingApiTests will now use the _login_and_get_token from BaseTestCase
 
     def test_deposit_success_no_bonus(self):
-        token, user_id = self._login_and_get_token(username="deposit_no_bonus_user")
+        token, user_id = self._login_and_get_token(username_prefix="deposit_no_bonus_user")
 
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -421,7 +417,7 @@ class BillingApiTests(BaseTestCase):
             self.assertEqual(transaction.status, 'completed')
 
     def test_deposit_success_with_valid_percentage_bonus(self):
-        token, user_id = self._login_and_get_token(username="deposit_perc_bonus_user")
+        token, user_id = self._login_and_get_token(username_prefix="deposit_perc_bonus_user")
         bonus_code_obj = self._create_bonus_code(code_id="PERC50", type="deposit", subtype="percentage", amount=50.0, wagering_multiplier=20) # 50% bonus
 
         with self.app.app_context():
@@ -459,7 +455,7 @@ class BillingApiTests(BaseTestCase):
             self.assertIsNotNone(bonus_tx) # Assuming bonus service creates a 'bonus' transaction
 
     def test_deposit_success_with_valid_fixed_bonus(self):
-        token, user_id = self._login_and_get_token(username="deposit_fixed_bonus_user")
+        token, user_id = self._login_and_get_token(username_prefix="deposit_fixed_bonus_user")
         fixed_bonus_sats = 10000
         bonus_code_obj = self._create_bonus_code(code_id="FIXED10K", type="deposit", subtype="fixed", amount=None, amount_sats=fixed_bonus_sats, wagering_multiplier=25)
 
@@ -492,7 +488,7 @@ class BillingApiTests(BaseTestCase):
             self.assertTrue(user_bonus.is_active)
 
     def test_deposit_fail_invalid_bonus_code(self):
-        token, user_id = self._login_and_get_token(username="deposit_invalid_bonus_user")
+        token, user_id = self._login_and_get_token(username_prefix="deposit_invalid_bonus_user")
 
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -518,7 +514,7 @@ class BillingApiTests(BaseTestCase):
             self.assertIsNone(user_bonus)
 
     def test_withdraw_success(self):
-        token, user_id = self._login_and_get_token(username="withdraw_success_user")
+        token, user_id = self._login_and_get_token(username_prefix="withdraw_success_user")
         withdraw_amount = 1000 # Adjusted to meet min withdrawal
 
         with self.app.app_context():
@@ -544,7 +540,7 @@ class BillingApiTests(BaseTestCase):
             self.assertEqual(transaction.status, 'pending') # Withdrawals are pending
 
     def test_withdraw_fail_insufficient_funds(self):
-        token, user_id = self._login_and_get_token(username="withdraw_insufficient_user")
+        token, user_id = self._login_and_get_token(username_prefix="withdraw_insufficient_user")
 
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -560,7 +556,7 @@ class BillingApiTests(BaseTestCase):
         self.assertEqual(data['status_message'], 'Insufficient funds')
 
     def test_withdraw_fail_active_bonus_wagering_incomplete(self):
-        token, user_id = self._login_and_get_token(username="withdraw_wagering_user")
+        token, user_id = self._login_and_get_token(username_prefix="withdraw_wagering_user")
         bonus_code_obj = self._create_bonus_code(code_id="WAGERBONUS", type="deposit", subtype="fixed", amount_sats=500, wagering_multiplier=10)
 
         with self.app.app_context():
@@ -596,21 +592,10 @@ class PlinkoApiTests(BaseTestCase):
 
     SATOSHIS_PER_UNIT = 100_000_000 # Should match app.py or be imported from config if centralized
 
-    def _get_auth_headers(self, username="plinko_user", password="plinko_password"):
-        # Create user if not exists, then login
-        user = User.query.filter_by(username=username).first()
-        if not user:
-            self._create_user(username=username, password=password, email=f"{username}@example.com")
-            user = User.query.filter_by(username=username).first() # Re-fetch user
-
-        self.assertIsNotNone(user, f"User {username} could not be created or fetched for _get_auth_headers.")
-        
-        login_payload = {"username": user.username, "password": password} # Use user.username from fetched user
-        response = self.client.post('/api/login', json=login_payload)
-        data = json.loads(response.data.decode())
-        self.assertTrue(data.get('status'), f"Login failed for user {username} in _get_auth_headers. Response: {data}") # Added more info
-        access_token = data['access_token']
-        return {'Authorization': f'Bearer {access_token}'}, user.id
+    def _get_auth_headers(self, username_prefix="plinko_user", password_suffix="plinko_password"):
+        # Uses the BaseTestCase _login_and_get_token
+        access_token, user_id = self._login_and_get_token(username_prefix=username_prefix, password_suffix=password_suffix)
+        return {'Authorization': f'Bearer {access_token}'}, user_id
 
     def test_plinko_play_success(self):
         headers, user_id = self._get_auth_headers()

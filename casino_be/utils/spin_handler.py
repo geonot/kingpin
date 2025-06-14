@@ -3,7 +3,7 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone
-from ..models import db, SlotSpin, GameSession, User, Transaction, UserBonus
+from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserBonus
 
 # --- Configuration ---
 # SLOT_CONFIG_BASE_PATH = "public/slots" # Example, actual path construction is dynamic

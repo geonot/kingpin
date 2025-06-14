@@ -211,6 +211,7 @@ def create_app(config_class=Config):
     from routes.spacecrash import spacecrash_bp
     from routes.meta_game import meta_game_bp
     from routes.baccarat import baccarat_bp # New Baccarat import
+    from routes.internal import internal_bp # New Internal import
 
     # CLI command for cleanup
     @app.cli.command('cleanup-expired-tokens')
@@ -237,6 +238,7 @@ def create_app(config_class=Config):
     app.register_blueprint(spacecrash_bp)
     app.register_blueprint(meta_game_bp)
     app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
+    app.register_blueprint(internal_bp) # Register internal blueprint
 
     return app
 

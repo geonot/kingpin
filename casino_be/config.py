@@ -37,3 +37,31 @@ class Config:
 
     # Satoshi Conversion Factor (1 BTC = 100,000,000 Satoshis)
     SATOSHI_FACTOR = 100_000_000
+
+    # Admin settings - use defaults for development
+    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')  # Default for development
+    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@kingpincasino.local')
+
+    # Service API Token for internal services (e.g., polling service)
+    SERVICE_API_TOKEN = os.getenv('SERVICE_API_TOKEN', 'default_service_token_please_change')
+
+
+class TestingConfig(Config):
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = 'postgresql:///./test_casino_be_isolated.db' # File-based for test isolation
+    # Define a key to store the database file path for easy cleanup
+    DATABASE_FILE_PATH = SQLALCHEMY_DATABASE_URI.replace('postgresql:///', '')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    JWT_SECRET_KEY = 'test-jwt-secret-key'
+    # Disable CSRF protection for tests if applicable (e.g., if using Flask-WTF)
+    WTF_CSRF_ENABLED = False
+    # Disable rate limiting for tests
+    RATELIMIT_ENABLED = False
+    RATELIMIT_DEFAULT_LIMITS_ENABLED = False
+    # Ensure engine options for SQLite are appropriate if not using in-memory
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'connect_args': {'check_same_thread': False}
+        # StaticPool is not typically needed for file-based DBs,
+        # as file ensures persistence across connections.
+    }
