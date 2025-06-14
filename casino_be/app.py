@@ -51,6 +51,7 @@ from schemas import (
     # Baccarat schemas will be defined below for now, or imported if moved to a separate file
     BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema, BaccaratActionSchema # Actual Baccarat Schemas
 )
+from utils.auth import register_jwt_handlers
 from utils.bitcoin import generate_bitcoin_wallet
 from utils.spin_handler import handle_spin
 from utils.multiway_helper import handle_multiway_spin
@@ -116,25 +117,7 @@ def create_app(config_class=Config):
 
     # --- JWT Setup ---
     jwt = JWTManager(app)
-
-    # --- JWT Helper Functions ---
-    @jwt.user_identity_loader
-    def user_identity_lookup(user):
-        return str(user.id)  # Convert to string for JWT compatibility
-
-    @jwt.user_lookup_loader
-    def user_lookup_callback(_jwt_header, jwt_data):
-        identity = jwt_data["sub"]
-        user_obj = User.query.get(identity)
-        return user_obj
-
-    @jwt.token_in_blocklist_loader
-    def check_if_token_in_blacklist(jwt_header, jwt_payload):
-        jti = jwt_payload['jti']
-        # now = datetime.now(timezone.utc) # Not needed for temporary bypass
-        # token = db.session.query(TokenBlacklist.id).filter_by(jti=jti).scalar()
-        print(f"DEBUG_APP: check_if_token_in_blacklist called for jti: {jti}. Returning False (token not blocklisted).")
-        return False # Temporarily disable blocklist check
+    register_jwt_handlers(jwt)
 
     # --- Specific Error Handlers ---
     @app.errorhandler(ValidationError)
