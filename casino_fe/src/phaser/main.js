@@ -27,6 +27,8 @@ const config = {
     pixelArt: false, // Set to true if using pixel art assets
     antialias: true, // Smoother edges for vector graphics and scaled bitmaps
     antialiasGL: true, // Antialiasing for WebGL renderer
+    mipmapFilter: 'LINEAR_MIPMAP_LINEAR',
+    roundPixels: true,
     // powerPreference: 'high-performance' // Request high performance GPU if available
   },
   physics: {

@@ -7,7 +7,7 @@ const REEL_SPIN_DURATION_BASE = 800; // Base duration for a reel spin (ms)
 const REEL_SPIN_DURATION_TURBO = 200;
 const REEL_START_DELAY = 150; // Stagger delay between starting each reel (ms)
 const REEL_STOP_DELAY = 250; // Additional delay between stopping each reel (ms)
-const SYMBOL_WIN_ANIM_DURATION = 250; // Duration for symbol scale/pulse animation
+// const SYMBOL_WIN_ANIM_DURATION = 250; // Duration for symbol scale/pulse animation - Now in animationConfigs
 const PAYLINE_SHOW_DURATION = 1500; // How long each winning payline is shown (ms)
 const TOTAL_WIN_DISPLAY_DURATION = 3000; // How long the total win amount is shown prominently
 
@@ -37,6 +37,55 @@ export default class GameScene extends Phaser.Scene {
     // Config loaded from registry
     this.gameConfig = null;
     this.slotId = null;
+
+    // Configurable animations and styles
+    this.animationConfigs = {
+      particleWin: {
+        textureKey: 'win-particle', // Default particle texture
+        duration: 800, // Lifespan of particles
+        speed: { min: 100, max: 300 },
+        angle: { min: 220, max: 320 },
+        scale: { start: 0.8, end: 0 },
+        lifespan: 800, // Matches duration for simplicity
+        quantity: 10,
+        frequency: -1, // Burst mode
+        gravityY: 400,
+        blendMode: 'ADD',
+        type: 'burst' // 'burst' or 'trail' (trail not implemented yet)
+      },
+      symbolWin: {
+        duration: SYMBOL_WIN_ANIM_DURATION, // Fallback to constant
+        scaleTo: 1.1,
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+        repeat: -1, // Infinite for non-cascading
+        type: 'pulse' // 'pulse', 'pop', 'glow' (others not implemented)
+      },
+      symbolPop: { // For cascading symbols
+        duration: 150,
+        scaleTo: 0.5,
+        alphaTo: 0,
+        ease: 'Power2',
+        type: 'pop'
+      }
+    };
+
+    this.styleConfigs = {
+      paylines: {
+        width: 5,
+        color: 0xffd700, // Default single gold color
+        colors: [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffa500, 0x800080], // Default cycle
+        alpha: 0.9
+      },
+      winDisplayText: {
+        font: 'bold 28px Arial',
+        fill: '#FFD700',
+        stroke: '#000000',
+        strokeThickness: 4,
+        align: 'center'
+      }
+    };
+
     this.symbolSize = { width: 100, height: 100 }; // Default, loaded from config
     // A.2 Initialize gridConfig with more comprehensive defaults
     this.gridConfig = {
@@ -79,6 +128,14 @@ export default class GameScene extends Phaser.Scene {
         console.error("slotGameJsonConfig:", slotGameJsonConfig);
         EventBus.$emit('phaserError', 'Game initialization failed: Missing configuration.');
         return;
+    }
+
+    // Merge animation and style configurations from gameConfig.json
+    if (this.gameConfig.game?.animations) {
+        this.animationConfigs = Phaser.Utils.Objects.MergeDeep({}, this.animationConfigs, this.gameConfig.game.animations);
+    }
+    if (this.gameConfig.game?.styles) {
+        this.styleConfigs = Phaser.Utils.Objects.MergeDeep({}, this.styleConfigs, this.gameConfig.game.styles);
     }
 
     // Load cascade configurations from gameConfig
@@ -306,16 +363,17 @@ export default class GameScene extends Phaser.Scene {
   }
 
   createParticles() {
-     this.winEmitter = this.add.particles(0, 0, 'win-particle', {
-            speed: { min: 100, max: 300 },
-            angle: { min: 220, max: 320 }, // Emit downwards-ish arc
-            scale: { start: 0.8, end: 0 },
-            lifespan: 800,
-            quantity: 10, // Emit 10 particles per burst
-            frequency: -1, // Emit only on demand (burst)
-            gravityY: 400,
-            blendMode: 'ADD' // Bright additive blending
-        }).setDepth(15); // Ensure particles are visible
+    const particleConfig = this.animationConfigs.particleWin;
+    this.winEmitter = this.add.particles(0, 0, particleConfig.textureKey, {
+        speed: particleConfig.speed,
+        angle: particleConfig.angle,
+        scale: particleConfig.scale,
+        lifespan: particleConfig.lifespan || particleConfig.duration, // Use lifespan, fallback to duration
+        quantity: particleConfig.quantity,
+        frequency: particleConfig.frequency,
+        gravityY: particleConfig.gravityY,
+        blendMode: particleConfig.blendMode === 'ADD' ? Phaser.BlendModes.ADD : Phaser.BlendModes.NORMAL // Handle blend mode string
+    }).setDepth(15); // Ensure particles are visible
   }
 
   createPaylineGraphics() {
@@ -323,19 +381,22 @@ export default class GameScene extends Phaser.Scene {
   }
 
   createWinDisplay() {
-       this.currentWinDisplay = this.add.text(
-            this.cameras.main.width / 2,
-            this.gridConfig.startY + this.gridConfig.height + 30, // Position below the reels
-            '', // Initially empty
-            {
-                font: 'bold 28px Arial',
-                fill: '#FFD700', // Gold color
-                stroke: '#000000',
-                strokeThickness: 4,
-                align: 'center'
-            }
-        ).setOrigin(0.5).setDepth(20); // Above most elements
-        this.currentWinDisplay.setVisible(false); // Hide initially
+    const winTextStyle = this.styleConfigs.winDisplayText;
+    this.currentWinDisplay = this.add.text(
+        this.cameras.main.width / 2,
+        this.gridConfig.startY + this.gridConfig.height + 30, // Position below the reels
+        '', // Initially empty
+        {
+            fontFamily: winTextStyle.fontFamily || 'Arial', // Provide fallback for fontFamily
+            fontSize: winTextStyle.fontSize || '28px', // Provide fallback for fontSize
+            fontStyle: winTextStyle.fontStyle || 'bold', // Provide fallback for fontStyle
+            fill: winTextStyle.fill,
+            stroke: winTextStyle.stroke,
+            strokeThickness: winTextStyle.strokeThickness,
+            align: winTextStyle.align
+        }
+    ).setOrigin(0.5).setDepth(20); // Above most elements
+    this.currentWinDisplay.setVisible(false); // Hide initially
   }
 
  // --- Spin Logic ---
@@ -655,38 +716,38 @@ export default class GameScene extends Phaser.Scene {
             symbol.setOrigin(0.5);
             symbol.setDepth(5);
 
+            const symbolWinConfig = this.animationConfigs.symbolWin;
+            const symbolPopConfig = this.animationConfigs.symbolPop;
+
             const tween = this.tweens.add({
                 targets: symbol,
-                scale: { from: 1, to: 1.1 }, // Reduced scale from 1.2 to 1.1 to prevent overflow
-                ease: 'Sine.easeInOut',
-                duration: SYMBOL_WIN_ANIM_DURATION,
-                yoyo: true,
-                repeat: shouldPopSymbols ? 1 : -1, // Repeat infinitely for non-cascading, once for cascading
+                scale: { from: 1, to: symbolWinConfig.scaleTo || 1.1 },
+                ease: symbolWinConfig.ease || 'Sine.easeInOut',
+                duration: symbolWinConfig.duration || 250,
+                yoyo: symbolWinConfig.yoyo !== undefined ? symbolWinConfig.yoyo : true,
+                repeat: shouldPopSymbols ? (symbolWinConfig.cascadeRepeat === undefined ? 1 : symbolWinConfig.cascadeRepeat) : (symbolWinConfig.repeat === undefined ? -1 : symbolWinConfig.repeat),
                 onUpdate: () => {
-                    // Ensure display size remains correct during animation
                     if (symbol && symbol.active) {
                         const currentScale = symbol.scale;
                         symbol.setDisplaySize(
-                            this.symbolSize.width * currentScale, 
+                            this.symbolSize.width * currentScale,
                             this.symbolSize.height * currentScale
                         );
                     }
                 },
                 onComplete: () => {
                     if (shouldPopSymbols && symbol && symbol.active) {
-                        // Play pop / disappearance animation
                         this.tweens.add({
                             targets: symbol,
-                            alpha: 0,
-                            scale: 0.5,
-                            duration: 150,
-                            ease: 'Power2',
+                            alpha: { from: 1, to: symbolPopConfig.alphaTo !== undefined ? symbolPopConfig.alphaTo : 0 },
+                            scale: { from: symbol.scale, to: symbolPopConfig.scaleTo || 0.5 },
+                            duration: symbolPopConfig.duration || 150,
+                            ease: symbolPopConfig.ease || 'Power2',
                             onComplete: () => {
-                                if (symbol.active) symbol.setVisible(false); // Hide after pop
+                                if (symbol.active) symbol.setVisible(false);
                             }
                         });
                     } else {
-                        // For non-cascading slots, ensure symbol is reset to normal state
                         if (symbol && symbol.active) {
                             symbol.setScale(1);
                             symbol.setDisplaySize(this.symbolSize.width, this.symbolSize.height);
@@ -695,8 +756,11 @@ export default class GameScene extends Phaser.Scene {
                 }
             });
             this.activeWinTweens.push({ symbol, tween });
+            const particleConfig = this.animationConfigs.particleWin;
             const worldPos = this.getSymbolWorldPosition(col, row);
-            if (worldPos) this.winEmitter?.explode(10, worldPos.x, worldPos.y);
+            if (worldPos && this.winEmitter) {
+                 this.winEmitter.explode(particleConfig.quantity || 10, worldPos.x, worldPos.y);
+            }
         }
     };
 
@@ -740,13 +804,25 @@ export default class GameScene extends Phaser.Scene {
             });
         }
         if (linePoints.length > 1) {
-            const lineColor = this.getPaylineColor(winData.line_id || 0); // Use line_id or default
-            this.paylineGraphics.lineStyle(5, lineColor, 0.9);
-            this.paylineGraphics.fillStyle(lineColor, 0.8);
+            const paylineStyle = this.styleConfigs.paylines;
+            let lineColor = paylineStyle.color || 0xffd700; // Default to single color
+            if (Array.isArray(paylineStyle.colors) && paylineStyle.colors.length > 0) {
+                lineColor = paylineStyle.colors[(winData.line_id || 0) % paylineStyle.colors.length];
+            } else if (typeof paylineStyle.color === 'number') {
+                lineColor = paylineStyle.color;
+            }
+
+            this.paylineGraphics.lineStyle(paylineStyle.width || 5, lineColor, paylineStyle.alpha || 0.9);
+            // fillStyle is not typically used for drawing lines, but keeping if intended for points
+            this.paylineGraphics.fillStyle(lineColor, (paylineStyle.alpha || 0.9) * 0.8); // Slightly less alpha for fill
+
             for (let i = 0; i < linePoints.length - 1; i++) {
                 this.paylineGraphics.lineBetween(linePoints[i].x, linePoints[i].y, linePoints[i + 1].x, linePoints[i + 1].y);
             }
-            linePoints.forEach(p => this.paylineGraphics.fillCircle(p.x, p.y, 8));
+            // Optional: draw circles at points
+            if (paylineStyle.pointRadius && paylineStyle.pointRadius > 0) {
+                 linePoints.forEach(p => this.paylineGraphics.fillCircle(p.x, p.y, paylineStyle.pointRadius));
+            }
         }
     }
 }
@@ -844,10 +920,10 @@ clearWinAnimations(clearTotalWinText = true) { // H
       });
   }
 
-  getPaylineColor(lineId) {
-      const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffa500, 0x800080];
-      return colors[lineId % colors.length] || 0xffffff;
-  }
+  // getPaylineColor(lineId) { // Now handled by styleConfigs.paylines
+  //     const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffa500, 0x800080];
+  //     return colors[lineId % colors.length] || 0xffffff;
+  // }
 
   // Sound methods
   playSound(soundKey) {

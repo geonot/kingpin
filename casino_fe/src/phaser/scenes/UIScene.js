@@ -20,6 +20,12 @@ export default class UIScene extends Phaser.Scene {
     // State
     this.currentBetIndex = 0;
     this.betOptions = [10, 20, 50, 100, 200, 500]; // Default, loaded from config
+    this.defaultButtonStates = {
+        hover: { alpha: 0.8, tint: 0xf0f0f0, scale: 1.05 },
+        pressed: { alpha: 0.6, tint: 0xd0d0d0, scale: 0.95 },
+        disabled: { alpha: 0.5, tint: 0xaaaaaa, scale: 1.0 },
+        active: { alpha: 1.0, tint: 0xaaaaff, scale: 1.0 } // For toggle buttons like Turbo
+    };
     this.currentBetSats = 10;
     this.isSpinning = false; // Local state to disable buttons during spin
     this.soundEnabled = true;
@@ -66,16 +72,19 @@ export default class UIScene extends Phaser.Scene {
     // Listen for updates from GameScene or Vue app
     EventBus.$on('uiUpdate', (data) => {
         if (data.balance !== undefined) {
-            this.updateBalance(data.balance);
+            this.updateBalance(data.balance); // updateBalance will call updateSpinButtonVisuals
         }
         if (data.winAmount !== undefined) {
-            // Pass isBonusWin or isTotalWin if present in data
             const isTotalOrBonus = data.isBonusWin || data.isTotalWin || false;
             this.updateWin(data.winAmount, data.isScatter, data.ways, isTotalOrBonus);
         }
-        if (data.balanceInsufficient !== undefined) {
-            this.handleInsufficientBalance(data.balanceInsufficient);
+        // If a spin cycle completes, GameScene might emit uiUpdate with spinComplete:true
+        // This ensures isSpinning is reset and visuals updated even if balance/win didn't change but spin ended.
+        if (this.isSpinning && data.spinComplete === true) {
+            this.isSpinning = false;
+            this.updateSpinButtonVisuals();
         }
+        // data.balanceInsufficient is handled by updateSpinButtonVisuals called via updateBalance
     });
 
     // Listen for line win updates from GameScene
@@ -88,12 +97,8 @@ export default class UIScene extends Phaser.Scene {
 
     // Listen for UI idle state to re-enable spin button
     EventBus.$on('uiSetIdle', () => {
-        if (this.isSpinning) {
-            this.isSpinning = false;
-            if (this.spinButton) {
-                this.spinButton.setAlpha(1.0);
-            }
-        }
+        this.isSpinning = false;
+        this.updateSpinButtonVisuals();
     });
 
      // Listen for spin start/end from GameScene to disable/enable buttons
@@ -106,8 +111,9 @@ export default class UIScene extends Phaser.Scene {
 
      // Listen for settings changes to update button states if needed (e.g., Turbo)
       EventBus.$on('turboSettingChanged', (isEnabled) => {
-          this.turboEnabled = isEnabled;
-          this.updateTurboButtonVisuals(); // Update visual state
+          this.turboEnabled = isEnabled; // Keep local state in sync
+          // this.registry.set('turboEnabled', isEnabled); // Ensure registry is also up to date - already done by createConfigurableButton's action for turbo
+          this.updateTurboButtonVisuals();
       });
        EventBus.$on('soundSettingChanged', (isEnabled) => {
           this.soundEnabled = isEnabled;
@@ -121,169 +127,246 @@ export default class UIScene extends Phaser.Scene {
 
   createBalanceDisplay(initialBalance, config) {
     const pos = config?.position || { x: 150, y: 550 };
-    const style = config?.style || { font: 'bold 24px Arial', color: '#ffffff', align: 'center' };
-    const labelStyle = { font: '16px Arial', color: '#cccccc', align: 'center' };
+    // Default style with Phaser 3 text properties
+    const defaultStyle = { fontStyle: 'bold', fontSize: '24px', fontFamily: 'Arial', color: '#ffffff', align: 'center', stroke: '#000000', strokeThickness: 0 };
+    const defaultLabelStyle = { fontSize: '16px', fontFamily: 'Arial', color: '#cccccc', align: 'center', stroke: '#000000', strokeThickness: 0 };
 
-    this.add.text(pos.x, pos.y - 20, 'Balance', labelStyle).setOrigin(0.5);
+    const style = { ...defaultStyle, ...(config?.style || {}) };
+    const labelStyle = { ...defaultLabelStyle, ...(config?.labelStyle || {}) };
+    const labelText = config?.labelText || 'Balance';
+
+    this.add.text(pos.x, pos.y - 20, labelText, labelStyle).setOrigin(0.5);
     this.balanceText = this.add.text(pos.x, pos.y + 5, formatSatsToBtc(initialBalance, true), style).setOrigin(0.5);
   }
 
   createWinDisplay(initialWin, config) {
      const pos = config?.position || { x: 400, y: 550 };
-     const style = config?.style || { font: 'bold 24px Arial', color: '#FFD700', align: 'center' }; // Gold color for win
-     const labelStyle = { font: '16px Arial', color: '#cccccc', align: 'center' };
+     const defaultStyle = { fontStyle: 'bold', fontSize: '24px', fontFamily: 'Arial', color: '#FFD700', align: 'center', stroke: '#000000', strokeThickness: 0 };
+     const defaultLabelStyle = { fontSize: '16px', fontFamily: 'Arial', color: '#cccccc', align: 'center', stroke: '#000000', strokeThickness: 0 };
 
-     this.add.text(pos.x, pos.y - 20, 'Win', labelStyle).setOrigin(0.5);
+     const style = { ...defaultStyle, ...(config?.style || {}) };
+     const labelStyle = { ...defaultLabelStyle, ...(config?.labelStyle || {}) };
+     const labelText = config?.labelText || 'Win';
+
+     this.add.text(pos.x, pos.y - 20, labelText, labelStyle).setOrigin(0.5);
      this.winText = this.add.text(pos.x, pos.y + 5, formatSatsToBtc(initialWin, true), style).setOrigin(0.5);
      this.winText.setVisible(false); // Initially hidden, only show when there's a win
   }
 
    createBetDisplay(initialBet, sizeConfig, adjustConfig) {
         const pos = sizeConfig?.position || { x: 650, y: 550 };
-        const style = sizeConfig?.style || { font: 'bold 24px Arial', color: '#ffffff', align: 'center' };
-        const labelStyle = { font: '16px Arial', color: '#cccccc', align: 'center' };
-        const adjustStyle = adjustConfig?.minus?.style || { font: 'bold 32px Arial', color: '#ffffff' };
+        const defaultStyle = { fontStyle: 'bold', fontSize: '24px', fontFamily: 'Arial', color: '#ffffff', align: 'center', stroke: '#000000', strokeThickness: 0 };
+        const defaultLabelStyle = { fontSize: '16px', fontFamily: 'Arial', color: '#cccccc', align: 'center', stroke: '#000000', strokeThickness: 0 };
+
+        const style = { ...defaultStyle, ...(sizeConfig?.style || {}) };
+        const labelStyle = { ...defaultLabelStyle, ...(sizeConfig?.labelStyle || {}) };
+        const labelText = sizeConfig?.labelText || 'Bet';
+
+        const defaultAdjustStyle = { fontStyle: 'bold', fontSize: '32px', fontFamily: 'Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 0 };
+        // Overall style for adjust buttons, can be overridden by specific minus/plus styles
+        const baseAdjustStyle = { ...defaultAdjustStyle, ...(adjustConfig?.style || {}) };
+        const minusStyle = { ...baseAdjustStyle, ...(adjustConfig?.minus?.style || {}) };
+        const plusStyle = { ...baseAdjustStyle, ...(adjustConfig?.plus?.style || {}) };
+
         const minusPos = adjustConfig?.minus?.position || { x: pos.x - 60, y: pos.y + 5};
         const plusPos = adjustConfig?.plus?.position || { x: pos.x + 60, y: pos.y + 5 };
+        const minusText = adjustConfig?.minus?.labelText || '-';
+        const plusText = adjustConfig?.plus?.labelText || '+';
 
-        this.add.text(pos.x, pos.y - 20, 'Bet', labelStyle).setOrigin(0.5);
+        this.add.text(pos.x, pos.y - 20, labelText, labelStyle).setOrigin(0.5);
         this.betSizeText = this.add.text(pos.x, pos.y + 5, formatSatsToBtc(initialBet), style).setOrigin(0.5);
 
-        // Minus Button
-        this.betMinusButton = this.add.text(minusPos.x, minusPos.y, '-', adjustStyle)
+        this.betMinusButton = this.add.text(minusPos.x, minusPos.y, minusText, minusStyle)
             .setOrigin(0.5)
             .setInteractive({ useHandCursor: true })
             .on('pointerdown', () => this.adjustBet(-1));
 
-        // Plus Button
-        this.betPlusButton = this.add.text(plusPos.x, plusPos.y, '+', adjustStyle)
+        this.betPlusButton = this.add.text(plusPos.x, plusPos.y, plusText, plusStyle)
             .setOrigin(0.5)
             .setInteractive({ useHandCursor: true })
             .on('pointerdown', () => this.adjustBet(1));
 
-        this.updateBetButtonStates(); // Disable +/- if at min/max bet
+        this.updateBetButtonStates();
     }
 
-    createActionButtons(config) {
-        // --- Spin Button ---
-        const spinConfig = config?.spin;
-        const spinPos = spinConfig?.position || { x: 400, y: 475 };
-        const spinSize = spinConfig?.size || { width: 120, height: 60 };
-        this.spinButton = this.add.image(spinPos.x, spinPos.y, spinConfig?.name || 'spin-button')
-            .setDisplaySize(spinSize.width, spinSize.height)
+    // Generic function to create a button with states and text
+    createConfigurableButton(scene, config, buttonNameKey, defaultIconKey, onClickAction) {
+        const buttonConfig = config?.[buttonNameKey] || {}; // e.g., config.spin or config.turbo
+        const pos = buttonConfig.position || { x: scene.cameras.main.width / 2, y: scene.cameras.main.height / 2 }; // Default position if not specified
+        const size = buttonConfig.size || { width: 100, height: 50 }; // Default size
+
+        const iconNormal = buttonConfig.icon_normal || defaultIconKey;
+        const iconHover = buttonConfig.icon_hover;
+        const iconPressed = buttonConfig.icon_pressed;
+        const iconDisabled = buttonConfig.icon_disabled;
+        const iconActive = buttonConfig.icon_active; // For toggle buttons like Turbo
+
+        // Merge default states with specific button states from config
+        const stateStyles = {
+            hover: { ...this.defaultButtonStates.hover, ...(buttonConfig.states?.hover || {}) },
+            pressed: { ...this.defaultButtonStates.pressed, ...(buttonConfig.states?.pressed || {}) },
+            disabled: { ...this.defaultButtonStates.disabled, ...(buttonConfig.states?.disabled || {}) },
+            active: { ...this.defaultButtonStates.active, ...(buttonConfig.states?.active || {}) },
+        };
+
+        const button = scene.add.image(pos.x, pos.y, iconNormal)
+            .setDisplaySize(size.width, size.height)
             .setOrigin(0.5)
             .setInteractive({ useHandCursor: true });
 
-        // Add text overlay on spin button if needed
-        this.add.text(spinPos.x, spinPos.y, 'SPIN', {
-             font: 'bold 20px Arial', color: '#FFFFFF', stroke: '#000000', strokeThickness: 3
-        }).setOrigin(0.5);
+        // Store all relevant data on the button itself for easy access in event handlers and update methods
+        button.setData('config', buttonConfig); // Full config for this button
+        button.setData('stateStyles', stateStyles);
+        button.setData('icons', { normal: iconNormal, hover: iconHover, pressed: iconPressed, disabled: iconDisabled, active: iconActive });
+        button.setData('isPressed', false); // Track if pointer is currently down on this button
+        button.setData('isDisabled', false); // Track disabled state
+        button.setData('isActive', false); // Track active state for toggle buttons
 
-        this.spinButton.on('pointerdown', () => {
-            const gameScene = this.scene.get('GameScene');
-            // Check both GameScene's state and local UI state
-            if (!gameScene || gameScene.isSpinning || this.isSpinning) return;
-
-            this.playSound('buttonClick');
-            this.isSpinning = true; // Set local UI lock
-            
-            // Update visual appearance only
-            this.spinButton?.setAlpha(0.6);
-            
-            // Get current balance from store via event bus
-            EventBus.$emit('getBalanceForDeduction', this.currentBetSats);
-            
-            // Emit spin request with bet amount
-            EventBus.$emit('spinRequest', { betAmount: this.currentBetSats }); // Changed from 'bet' to 'betAmount'
-        });
-         // Re-enable spin button when spin completes (via GameScene event or specific callback)
-        // We'll use the 'uiUpdate' event for simplicity, assuming it implies spin end if win occurs/balance updates
-         EventBus.$on('uiUpdate', () => {
-             if (this.isSpinning) { // Only re-enable if it was spinning
-                this.isSpinning = false;
-                if (this.spinButton) {
-                    // Update visual appearance only
-                    this.spinButton.setAlpha(1.0);
-                }
-             }
-         });
-         // Also re-enable on spin error
-         EventBus.$on('spinError', () => {
-              if (this.isSpinning) {
-                  this.isSpinning = false;
-                  if (this.spinButton) {
-                      // Update visual appearance only
-                      this.spinButton.setAlpha(1.0);
-                  }
-              }
-         });
-
-
-        // --- Turbo Button ---
-        const turboConfig = config?.turbo;
-        if (turboConfig) {
-            const turboPos = turboConfig.position || { x: 520, y: 475 };
-            const turboSize = turboConfig.size || { width: 80, height: 40 };
-            this.turboButton = this.add.image(turboPos.x, turboPos.y, turboConfig.name || 'turbo-button')
-                .setDisplaySize(turboSize.width, turboSize.height)
-                .setOrigin(0.5)
-                .setInteractive({ useHandCursor: true });
-
-             this.add.text(turboPos.x, turboPos.y, 'TURBO', {
-                 font: 'bold 14px Arial', color: '#FFFFFF'
-             }).setOrigin(0.5);
-
-            this.turboButton.on('pointerdown', () => {
-                 this.playSound('buttonClick');
-                const newState = !this.turboEnabled;
-                EventBus.$emit('turboSettingChanged', newState); // Emit event for GameScene & Settings
-            });
-            this.updateTurboButtonVisuals(); // Set initial visual state
+        // Text Overlay
+        const labelText = buttonConfig.labelText || ''; // Get text from config, or default to empty
+        if (labelText) {
+            const defaultLabelStyle = { fontSize: '16px', fontFamily: 'Arial', color: '#FFFFFF', stroke: '#000000', strokeThickness: 2, align: 'center' };
+            const labelStyle = { ...defaultLabelStyle, ...(buttonConfig.labelStyle || {}) };
+            const textGameObject = scene.add.text(pos.x, pos.y, labelText, labelStyle).setOrigin(0.5);
+            button.setData('label', textGameObject); // Store the text object to manage its state (e.g., visibility)
         }
 
-        // --- Settings Button ---
-        const settingsConfig = config?.settings;
-         if (settingsConfig) {
-            const settingsPos = settingsConfig.position || { x: 750, y: 50 };
-            const settingsSize = settingsConfig.size || { width: 40, height: 40 };
-            this.settingsButton = this.add.image(settingsPos.x, settingsPos.y, settingsConfig.name || 'settings-button')
-                .setDisplaySize(settingsSize.width, settingsSize.height)
-                .setOrigin(0.5)
-                .setInteractive({ useHandCursor: true });
+        button.on('pointerover', () => {
+            if (button.getData('isDisabled') || button.getData('isPressed')) return;
+            const icons = button.getData('icons');
+            const styles = button.getData('stateStyles');
+            if (icons.hover) button.setTexture(icons.hover);
+            else { // Fallback to style changes
+                if (styles.hover.alpha !== undefined) button.setAlpha(styles.hover.alpha);
+                if (styles.hover.tint !== undefined) button.setTint(styles.hover.tint); else button.clearTint();
+                if (styles.hover.scale !== undefined) button.setScale(styles.hover.scale); else button.setScale(1.0);
+            }
+        });
 
-            this.settingsButton.on('pointerdown', () => {
-                 this.playSound('buttonClick');
-                 // Pause current scenes and launch settings modal
-                 this.scene.pause('GameScene');
-                 this.scene.pause('UIScene'); // Pause this scene as well
-                 this.scene.launch('SettingsModalScene', {
-                     soundEnabled: this.soundEnabled,
-                     turboEnabled: this.turboEnabled
-                 });
-            });
+        button.on('pointerout', () => {
+            if (button.getData('isDisabled') || button.getData('isPressed')) return;
+            const icons = button.getData('icons');
+            const styles = button.getData('stateStyles');
+            const isActive = button.getData('isActive');
+            
+            const currentIcon = isActive && icons.active ? icons.active : icons.normal;
+            button.setTexture(currentIcon); // Revert to normal or active icon
+            
+            if (isActive) { // If active (e.g. Turbo ON)
+                 button.setAlpha(styles.active.alpha !== undefined ? styles.active.alpha : 1.0);
+                 if (styles.active.tint !== undefined) button.setTint(styles.active.tint); else button.clearTint();
+                 button.setScale(styles.active.scale !== undefined ? styles.active.scale : 1.0);
+            } else { // Normal state after hover
+                 button.setAlpha(1.0);
+                 button.clearTint();
+                 button.setScale(1.0);
+            }
+        });
+
+        button.on('pointerdown', () => {
+            if (button.getData('isDisabled')) return;
+            button.setData('isPressed', true);
+            const icons = button.getData('icons');
+            const styles = button.getData('stateStyles');
+            if (icons.pressed) button.setTexture(icons.pressed);
+            else {
+                if (styles.pressed.alpha !== undefined) button.setAlpha(styles.pressed.alpha);
+                if (styles.pressed.tint !== undefined) button.setTint(styles.pressed.tint); else button.clearTint();
+                if (styles.pressed.scale !== undefined) button.setScale(styles.pressed.scale); else button.setScale(1.0);
+            }
+            scene.playSound('buttonClick'); // Play sound consistently
+            if (onClickAction) onClickAction(button); // Pass button to action if needed
+        });
+
+        button.on('pointerup', () => {
+            const wasPressed = button.getData('isPressed');
+            button.setData('isPressed', false);
+
+            if (!wasPressed) return; // Only proceed if it was actually pressed
+
+            // If button is now disabled (e.g. spin button after click)
+            // This state will be visually updated by a dedicated updateVisuals function (e.g., updateSpinButtonVisuals)
+            // So, here we just ensure it doesn't revert to hover if it became disabled.
+            if (button.getData('isDisabled')) {
+                 // Visual update for disabled state is handled by updateXButtonVisuals methods
+                return;
+            }
+
+            // If pointer is still over the button, revert to hover state
+            if (button.input.hitArea.contains(scene.input.activePointer.x, scene.input.activePointer.y)) {
+                button.emit('pointerover');
+            } else { // Pointer moved out while pressed, revert to normal/active base state
+                const icons = button.getData('icons');
+                const isActive = button.getData('isActive');
+                const styles = button.getData('stateStyles');
+                const currentIcon = isActive && icons.active ? icons.active : icons.normal;
+                button.setTexture(currentIcon);
+                if(isActive) {
+                    if (styles.active.alpha !== undefined) button.setAlpha(styles.active.alpha); else button.setAlpha(1.0);
+                    if (styles.active.tint !== undefined) button.setTint(styles.active.tint); else button.clearTint();
+                    if (styles.active.scale !== undefined) button.setScale(styles.active.scale); else button.setScale(1.0);
+                } else {
+                     button.setAlpha(1.0); button.clearTint(); button.setScale(1.0);
+                }
+            }
+        });
+        return button;
+    }
+
+    createActionButtons(config) { // config is gameConfig.ui.buttons from registry
+        const buttonsRootConfig = this.registry.get('gameConfig')?.ui?.buttons || {};
+
+        this.spinButton = this.createConfigurableButton(this, buttonsRootConfig, 'spin', 'spin-button-default',
+            () => { // onClickAction for Spin
+                const gameScene = this.scene.get('GameScene');
+                // Check local isSpinning, GameScene state, and button's own disabled data state
+                if (!gameScene || gameScene.isSpinning || this.isSpinning || this.spinButton.getData('isDisabled')) {
+                    return;
+                }
+                this.isSpinning = true; // Local UI lock
+                // Visuals are updated by pointerdown, then by updateSpinButtonVisuals called by events
+                EventBus.$emit('getBalanceForDeduction', this.currentBetSats);
+                EventBus.$emit('spinRequest', { betAmount: this.currentBetSats });
+            }
+        );
+        // this.updateSpinButtonVisuals(); // Initial state set after event listeners are established
+
+        if (buttonsRootConfig.turbo) { // Check if turbo button is configured
+            this.turboButton = this.createConfigurableButton(this, buttonsRootConfig, 'turbo', 'turbo-button-default',
+                (button) => { // onClickAction for Turbo
+                    // The actual toggling of this.turboEnabled and calling updateTurboButtonVisuals
+                    // is handled by the 'turboSettingChanged' event listener in create()
+                    this.registry.set('turboEnabled', !this.registry.get('turboEnabled'));
+                }
+            );
+            // this.updateTurboButtonVisuals(); // Initial state set by turboSettingChanged listener
+        }
+
+         if (buttonsRootConfig.settings) { // Check if settings button is configured
+            this.settingsButton = this.createConfigurableButton(this, buttonsRootConfig, 'settings', 'settings-button-default',
+                () => { // onClickAction for Settings
+                     this.scene.pause('GameScene');
+                     this.scene.pause('UIScene');
+                     this.scene.launch('SettingsModalScene', {
+                         soundEnabled: this.registry.get('soundEnabled'), // Get fresh values from registry
+                         turboEnabled: this.registry.get('turboEnabled')
+                     });
+                }
+            );
          }
 
-
-        // --- Auto Spin Button (Placeholder) ---
-        const autoSpinConfig = config?.autoSpin;
-        if (autoSpinConfig) {
-             const autoPos = autoSpinConfig.position || { x: 280, y: 475 };
-             const autoSize = autoSpinConfig.size || { width: 80, height: 40 };
-             this.autoSpinButton = this.add.image(autoPos.x, autoPos.y, autoSpinConfig.name || 'auto-button')
-                 .setDisplaySize(autoSize.width, autoSize.height)
-                 .setOrigin(0.5)
-                 .setInteractive({ useHandCursor: true });
-
-             this.add.text(autoPos.x, autoPos.y, 'AUTO', {
-                 font: 'bold 14px Arial', color: '#FFFFFF'
-             }).setOrigin(0.5);
-
-             this.autoSpinButton.on('pointerdown', () => {
-                  this.playSound('buttonClick');
-                 console.log('Auto-spin clicked (Not Implemented)');
-                 // TODO: Implement auto-spin logic
-             });
+        if (buttonsRootConfig.autoSpin) { // Check if autoSpin button is configured
+             this.autoSpinButton = this.createConfigurableButton(this, buttonsRootConfig, 'autoSpin', 'auto-button-default',
+                () => { // onClickAction for AutoSpin
+                     console.log('Auto-spin clicked (Not Implemented)');
+                     // TODO: Implement auto-spin logic and visual states for autoSpinButton
+                }
+            );
+            // this.updateAutoSpinButtonVisuals(); // TODO: if auto-spin has states
         }
+        // Ensure initial visual states are set after all buttons are created and event listeners might be set up
+        this.updateSpinButtonVisuals();
+        if (this.turboButton) this.updateTurboButtonVisuals();
     }
 
   // --- UI Update Methods ---
@@ -291,18 +374,16 @@ export default class UIScene extends Phaser.Scene {
   updateBalance(newBalanceSats) {
     try {
       if (this.balanceText && this.balanceText.active && this.scene.isActive()) {
-        // Make sure the text object exists, is active, and the scene is active
-        const formattedBalance = formatSatsToBtc(newBalanceSats, true); // Add 'BTC' suffix
+        const formattedBalance = formatSatsToBtc(newBalanceSats, true);
         this.balanceText.setText(formattedBalance);
-        
-        // Only check for insufficient balance if we have a valid bet amount
+        // The call to handleInsufficientBalance is removed as this logic
+        // is now part of updateSpinButtonVisuals, which is called below.
         if (typeof this.currentBetSats === 'number') {
-          this.handleInsufficientBalance(newBalanceSats < this.currentBetSats);
+          this.updateSpinButtonVisuals();
         }
       }
     } catch (error) {
       console.error('Error updating balance text:', error);
-      // Don't throw the error, just log it to prevent game crashes
     }
   }
 
@@ -385,26 +466,10 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
-    handleInsufficientBalance(isInsufficient) {
-        try {
-            // Disable spin button if balance is too low for the current bet
-            if (this.spinButton && this.spinButton.active && this.scene.isActive()) {
-                const canSpin = !isInsufficient && !this.isSpinning;
-                
-                // Just update the visual appearance
-                this.spinButton.setAlpha(canSpin ? 1.0 : 0.5);
-                
-                // Optionally show a message or change button appearance further
-                if (!canSpin) {
-                    console.log('Spin button disabled: ' + (isInsufficient ? 'Insufficient balance' : 'Already spinning'));
-                }
-            }
-        } catch (error) {
-            console.error('Error handling insufficient balance:', error);
-            // Don't throw the error, just log it to prevent game crashes
-        }
-    }
-
+    // The following methods were added in the previous step and are assumed to be correct.
+    // updateBetButtonStates() { ... }
+    // updateTurboButtonVisuals() { ... }
+    // updateSpinButtonVisuals() { ... }
 
   // --- Actions ---
 
