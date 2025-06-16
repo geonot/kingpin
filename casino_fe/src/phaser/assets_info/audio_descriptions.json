@@ -1,0 +1,77 @@
+{
+  "info": "Descriptions for audio assets (sound effects and background music) to be used for the Crystal Garden scene.",
+  "generalStyleNotes": {
+    "sfx": "Sound effects should be clear, relatively short, and thematically aligned with a magical garden/crystal theme. Avoid overly harsh or realistic sounds; lean towards slightly stylized, pleasant, or magical tones.",
+    "bgm": "Background music should be calm, atmospheric, and suitable for a relaxing simulation or light strategy game with magical elements. It should loop seamlessly."
+  },
+  "soundEffects": [
+    {
+      "key": "sfx_seed_purchase",
+      "description": "A gentle, positive 'cha-ching' or a soft 'pop' with a subtle magical shimmer. Indicates a successful transaction. Should be short and satisfying.",
+      "category": "UI/Transaction",
+      "emotion": "Rewarding, success"
+    },
+    {
+      "key": "sfx_plant_seed",
+      "description": "A soft 'thud' or 'plop' as a seed enters the earth, possibly followed by a very quick, gentle rustling or magical 'shooom' sound. Should feel earthy and like a new beginning.",
+      "category": "Gameplay/Action",
+      "emotion": "Earthy, satisfying, initiating"
+    },
+    {
+      "key": "sfx_growth_stage",
+      "description": "A magical, ascending 'twinkle' or 'sparkle' sound, like a quick harp arpeggio or bell tree. Signifies growth or transformation of a crystal.",
+      "category": "Gameplay/Event",
+      "emotion": "Magical, progress, wondrous"
+    },
+    {
+      "key": "sfx_appraisal",
+      "description": "A short sequence: a 'scanning' or 'examining' sound (soft hum/clicks), then a positive 'ding' or 'chime' revealing value.",
+      "category": "Gameplay/Action",
+      "emotion": "Evaluative, revealing, rewarding"
+    },
+    {
+      "key": "sfx_crystal_sale",
+      "description": "Similar to seed purchase but more substantial: a 'ker-ching' with a crystal 'clink' or a resonant positive chime.",
+      "category": "UI/Transaction",
+      "emotion": "Rewarding, profitable"
+    },
+    {
+      "key": "sfx_ui_click",
+      "description": "A short, crisp, and satisfying click. Could be a soft 'tick', 'pop', or a gentle, modern UI click. Should be fairly neutral and not too loud.",
+      "category": "UI/Interaction",
+      "emotion": "Responsive, clean"
+    },
+    {
+      "key": "sfx_apply_powerup",
+      "description": "A magical 'whoosh' or 'infusion' sound, like a quick surge of energy. Could have a subtle sparkle or shimmer overlayed.",
+      "category": "Gameplay/Action",
+      "emotion": "Empowering, magical transformation"
+    },
+    {
+      "key": "sfx_panel_open",
+      "description": "A soft, smooth 'swoosh' or 'slide' sound, like a UI panel appearing on screen. Should be brief and unobtrusive.",
+      "category": "UI/Interaction",
+      "emotion": "Smooth, informative"
+    },
+    {
+      "key": "sfx_panel_close",
+      "description": "Similar to panel open, but perhaps slightly shorter or in reverse; a soft 'swoosh' or gentle 'click' indicating closure.",
+      "category": "UI/Interaction",
+      "emotion": "Smooth, dismissive"
+    },
+    {
+      "key": "sfx_error_notify",
+      "description": "A distinct but not overly alarming 'buzz', 'thunk', or short, slightly dissonant chime. Indicates an error or invalid action.",
+      "category": "UI/Notification",
+      "emotion": "Warning, attention, negative feedback"
+    }
+  ],
+  "backgroundMusic": [
+    {
+      "key": "bgm_crystal_garden",
+      "description": "A calm, serene, and slightly magical looping track (2-3 minutes). Evokes peace, growth, and wonder. Instruments: gentle strings (harp, pizzicato), soft flutes/woodwinds, ambient pads, subtle chimes/bells. Relaxed tempo. No sudden loud changes.",
+      "category": "Music",
+      "emotion": "Peaceful, relaxing, magical, meditative"
+    }
+  ]
+}

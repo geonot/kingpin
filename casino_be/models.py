@@ -607,13 +607,19 @@ class CrystalCodexEntry(db.Model):
     clarity = db.Column(Float, nullable=False)
     special_type = db.Column(db.String, nullable=True)
     first_discovered_at = db.Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    notes = db.Column(db.String, nullable=True)  # Player's personal notes or game-generated lore
+    notes = db.Column(db.String(500), nullable=True)  # Player's personal notes or game-generated lore, increased length
+    signature = db.Column(db.String(255), nullable=False) # Made non-nullable, app must provide
 
     # Relationships
     user = db.relationship("User", back_populates="codex_entries")
 
+    __table_args__ = (
+        UniqueConstraint('user_id', 'signature', name='uq_user_id_signature'),
+        Index('ix_crystal_codex_entry_user_id_signature', 'user_id', 'signature'),
+    )
+
     def __repr__(self):
-        return f"<CrystalCodexEntry {self.crystal_name} for User {self.user_id}>"
+        return f"<CrystalCodexEntry {self.crystal_name} (Sig: {self.signature}) for User {self.user_id}>"
 
     def to_dict(self):
         return {
@@ -625,5 +631,6 @@ class CrystalCodexEntry(db.Model):
             'clarity': self.clarity,
             'special_type': self.special_type,
             'first_discovered_at': self.first_discovered_at.isoformat() if self.first_discovered_at else None,
-            'notes': self.notes
+            'notes': self.notes,
+            'signature': self.signature
         }

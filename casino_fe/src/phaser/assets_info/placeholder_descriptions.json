@@ -1,0 +1,275 @@
+{
+  "info": "Descriptions for placeholder graphics to be used for generating actual game assets.",
+  "generalStyleNotes": {
+    "gameElements": "2D game assets, slightly stylized, vibrant, magical, suitable for a top-down or isometric casual farming/crafting game. Icons and sprites should have transparent backgrounds.",
+    "uiElements": "Clean, slightly stylized game UI. Friendly and inviting. Main panels semi-transparent dark colors. Buttons with clear hover/pressed states."
+  },
+  "gardenPlotStates": [
+    {
+      "id": "gfx_plot_empty",
+      "description": "An empty garden plot. Rich, dark brown fertile soil. Square or slightly rounded shape, suitable for a grid. Clear outline. Simple, ambient lighting. Represents a tilled, ready-to-plant spot.",
+      "details": {
+        "subject": "Empty garden plot / tilled earth square",
+        "style": "2D game asset, stylized, top-down or isometric",
+        "composition": "Single plot, grid-suitable",
+        "colorPalette": "Rich dark brown soil, subtle texture",
+        "features": "Square/rounded-square, clear outline, slight indentation",
+        "lighting": "Simple, ambient",
+        "background": "Transparent",
+        "emotion": "Fertile, ready"
+      }
+    },
+    {
+      "id": "gfx_seed_planted",
+      "description": "A garden plot with a seed recently planted. Dark brown soil, with a tiny generic seed (small bean/sphere) partially visible or a small mound of disturbed earth in the center. Represents the 'Seeded' stage.",
+      "details": {
+        "subject": "Garden plot with planted seed",
+        "style": "2D game asset, stylized, top-down or isometric",
+        "composition": "Single plot, grid-suitable",
+        "colorPalette": "Dark brown soil, dark small seed",
+        "features": "Disturbed earth or tiny visible part of a generic seed in the center",
+        "lighting": "Simple, ambient",
+        "background": "Transparent",
+        "emotion": "Anticipation, new life"
+      }
+    },
+    {
+      "id": "gfx_sprout",
+      "description": "A small, young green sprout emerging from the garden plot. Dark brown soil with a vibrant, fresh green sprout (two small leaves, short stem) in the center. Represents the 'Sprouting' stage.",
+      "details": {
+        "subject": "Small green sprout in plot",
+        "style": "2D game asset, stylized, top-down or isometric",
+        "composition": "Single plot, grid-suitable",
+        "colorPalette": "Dark brown soil, vibrant fresh green sprout",
+        "features": "Tiny sprout with two small leaves and stem",
+        "lighting": "Simple, ambient",
+        "background": "Transparent",
+        "emotion": "Growth, new beginnings"
+      }
+    },
+    {
+      "id": "gfx_flower_blooming",
+      "description": "Generic crystal flower in bloom. Stylized, magical, crystalline appearance. Composed of multiple facets, perhaps crystalline 'petals'. Should be suitable for runtime tinting (e.g., base of white/light grey or soft iridescent color). Subtle glow or sparkle. Represents a generic 'Blooming' stage.",
+      "details": {
+        "subject": "Generic crystal flower",
+        "style": "2D game asset, stylized, magical, crystalline",
+        "composition": "Fills plot square, top-down or slightly isometric",
+        "colorPalette": "Neutral white/light grey for tinting, or soft iridescent magical color",
+        "features": "Faceted crystal structure, crystalline petals, subtle glow/sparkle",
+        "lighting": "Internally lit or catches light",
+        "background": "Transparent",
+        "emotion": "Magical, beautiful, precious"
+      }
+    }
+  ],
+  "seedIcons": [
+    {
+      "id": "seed_rock_gfx",
+      "name": "Common Rock Seed Icon",
+      "description": "Icon for a 'Common Rock Seed'. Earthy, simple. A small, unassuming grey or brown seed, perhaps with a slight rock-like texture. Placeholder color: Brown.",
+      "details": {
+        "subject": "Simple, common seed",
+        "style": "2D game icon, small",
+        "colorPalette": "Greys, browns",
+        "features": "Slight rock-like texture or very plain",
+        "background": "Transparent",
+        "emotion": "Common, basic"
+      }
+    },
+    {
+      "id": "seed_geode_gfx",
+      "name": "Geode Seed Icon",
+      "description": "Icon for a 'Geode Seed'. A rough, spherical seed that looks like a miniature geode. Colors: Light purples, blues, with a crystalline sparkle. Placeholder color: Orchid.",
+      "details": {
+        "subject": "Miniature geode seed",
+        "style": "2D game icon, small",
+        "colorPalette": "Light purples, blues, crystalline whites",
+        "features": "Rough exterior, hint of inner sparkle or crystal formation",
+        "background": "Transparent",
+        "emotion": "Mysterious, promising"
+      }
+    },
+    {
+      "id": "seed_star_gfx",
+      "name": "Star Shard Seed Icon",
+      "description": "Icon for a 'Star Shard Seed'. A glowing, golden seed shaped like a small, stylized star fragment. Colors: Golds, bright yellows. Radiates a soft light. Placeholder color: Gold.",
+      "details": {
+        "subject": "Glowing star fragment seed",
+        "style": "2D game icon, small, magical",
+        "colorPalette": "Golds, bright yellows, white highlights",
+        "features": "Star-like shape, glowing, possibly with sparkles",
+        "background": "Transparent",
+        "emotion": "Rare, magical, brilliant"
+      }
+    },
+    {
+      "id": "seed_shadow_gfx",
+      "name": "Shadowvein Seed Icon",
+      "description": "Icon for a 'Shadowvein Seed'. A dark, pulsating seed, perhaps with faint purple or red veins. Colors: Dark slate blue, black, deep purple. Ominous but alluring. Placeholder color: DarkSlateBlue.",
+      "details": {
+        "subject": "Dark, veined seed",
+        "style": "2D game icon, small, mysterious",
+        "colorPalette": "Black, deep purple, dark red, dark slate blue",
+        "features": "Dark surface with subtle glowing veins, slight pulsating effect (if possible for static icon, imply it)",
+        "background": "Transparent",
+        "emotion": "Mysterious, potent, slightly ominous"
+      }
+    },
+    {
+      "id": "seed_sun_gfx",
+      "name": "Sunstone Seed Icon",
+      "description": "Icon for a 'Sunstone Seed'. A warm, orange-yellow seed that seems to radiate heat. Smooth and ovoid. Colors: Oranges, yellows, hints of red. Placeholder color: Orange.",
+      "details": {
+        "subject": "Warm, sun-like seed",
+        "style": "2D game icon, small, radiant",
+        "colorPalette": "Oranges, yellows, reds",
+        "features": "Smooth, ovoid, emitting a gentle warmth or light lines like sun rays",
+        "background": "Transparent",
+        "emotion": "Warm, energetic, positive"
+      }
+    },
+    {
+      "id": "seed_river_gfx",
+      "name": "Rivergem Seed Icon",
+      "description": "Icon for a 'Rivergem Seed'. A smooth, polished seed like a river stone. Colors: Turquoise, light blues, cool greys. Serene and clear. Placeholder color: Turquoise.",
+      "details": {
+        "subject": "Smooth river stone-like seed",
+        "style": "2D game icon, small, polished",
+        "colorPalette": "Turquoise, light blues, cool greys",
+        "features": "Very smooth, polished, perhaps with a slight watery sheen or a gentle swirl pattern",
+        "background": "Transparent",
+        "emotion": "Serene, clear, natural"
+      }
+    },
+    {
+      "id": "seed_heart_gfx",
+      "name": "Heartwood Seed Icon",
+      "description": "Icon for a 'Heartwood Seed'. An old, gnarled seed that looks like a tiny piece of dark, rich wood. Colors: Forest green, rich browns. Resilient and ancient. Placeholder color: ForestGreen.",
+      "details": {
+        "subject": "Ancient wooden seed",
+        "style": "2D game icon, small, organic",
+        "colorPalette": "Forest green, rich browns, hints of dark amber",
+        "features": "Gnarled, woody texture, possibly a tiny leaf symbol or spiral growth ring pattern",
+        "background": "Transparent",
+        "emotion": "Ancient, resilient, natural"
+      }
+    }
+  ],
+  "powerUpIcons": [
+    {
+      "id": "powerup_fertilizer_gfx",
+      "name": "Fertilizer Icon",
+      "description": "Icon for 'Fertilizer'. A small bag or pile of rich, dark compost or magical growth pellets. Colors: Earthy browns, vibrant greens. Suggests growth and nourishment. Placeholder color: Green.",
+      "details": {
+        "subject": "Bag or pile of fertilizer/growth pellets",
+        "style": "2D game icon, small",
+        "colorPalette": "Earthy browns, vibrant greens",
+        "features": "Small sack tied at top, or a few distinct pellets, maybe a green plus (+) symbol or leaf",
+        "background": "Transparent",
+        "emotion": "Nourishing, growth-boosting"
+      }
+    },
+    {
+      "id": "powerup_moonglow_gfx",
+      "name": "Moon Glow Icon",
+      "description": "Icon for 'Moon Glow'. A softly glowing crescent moon or a vial of shimmering, ethereal liquid. Colors: Lavender, soft blues, silver. Mystical and gentle. Placeholder color: Lavender.",
+      "details": {
+        "subject": "Crescent moon or vial of glowing liquid",
+        "style": "2D game icon, small, magical",
+        "colorPalette": "Lavender, soft blues, silver, white highlights",
+        "features": "Stylized crescent moon with soft aura, or a small potion bottle with shimmering liquid",
+        "background": "Transparent",
+        "emotion": "Mystical, enhancing, gentle"
+      }
+    },
+    {
+      "id": "powerup_azure_dye_gfx",
+      "name": "Azure Dye Icon",
+      "description": "Icon for 'Azure Dye'. A small pot or vial of vibrant azure blue liquid, perhaps with a brush or dropper. Colors: Bright azure blue, sapphire blue. Intense and specific. Placeholder color: Azure.",
+      "details": {
+        "subject": "Pot or vial of azure dye",
+        "style": "2D game icon, small",
+        "colorPalette": "Vibrant azure blue, sapphire blue",
+        "features": "Small container with intensely blue liquid, maybe a droplet icon or brush nearby",
+        "background": "Transparent",
+        "emotion": "Color-changing, specific, potent"
+      }
+    },
+    {
+      "id": "powerup_clarity_elixir_gfx",
+      "name": "Clarity Elixir Icon",
+      "description": "Icon for 'Clarity Elixir'. A small, sparkling potion bottle with clear or light blue, translucent liquid. Bubbles or sparkles within. Colors: Light blue, clear, silver. Suggests purity. Placeholder color: LightBlue.",
+      "details": {
+        "subject": "Sparkling potion bottle",
+        "style": "2D game icon, small, magical",
+        "colorPalette": "Light blue, clear, silver highlights",
+        "features": "Translucent liquid with visible sparkles or bubbles, clean-looking bottle",
+        "background": "Transparent",
+        "emotion": "Purifying, enhancing"
+      }
+    },
+    {
+      "id": "powerup_sparkle_infusion_gfx",
+      "name": "Sparkle Infusion Icon",
+      "description": "Icon for 'Sparkle Infusion'. A vial containing swirling, glittering dust or a concentrated point of light. Colors: Gold, bright white, iridescent sparkles. Suggests rarity and magic. Placeholder color: Gold.",
+      "details": {
+        "subject": "Vial of glittering dust or concentrated light",
+        "style": "2D game icon, small, very magical",
+        "colorPalette": "Gold, bright white, iridescent rainbow sparkles",
+        "features": "Swirling particles or a bright, star-like point of light in a container",
+        "background": "Transparent",
+        "emotion": "Rare, potent, magical enhancement"
+      }
+    }
+  ],
+  "uiElements": [
+    {
+      "id": "ui_panel_background",
+      "name": "Main UI Panel Background",
+      "description": "Background for the main UI panel. A vertical rectangle with slightly rounded corners. Semi-transparent dark color (e.g., dark grey/blue/brown). Could have a very subtle border or inner shadow for depth.",
+      "details": {
+        "subject": "UI panel background",
+        "style": "Clean, simple UI element",
+        "composition": "Vertical rectangle",
+        "colorPalette": "Semi-transparent dark grey/blue/brown",
+        "features": "Slightly rounded corners, subtle border/shadow (optional)"
+      }
+    },
+    {
+      "id": "ui_styled_button",
+      "name": "General Styled Button",
+      "description": "A UI button with a clean design. Slightly rounded rectangular shape. Base color (e.g., vibrant green) with a slightly darker/brighter shade for hover/pressed states. Text label centered. Optional subtle gradient or border.",
+      "details": {
+        "subject": "UI button",
+        "style": "Clean, slightly stylized",
+        "composition": "Rectangle, suitable for text",
+        "colorPalette": "Base color (e.g., green), hover/pressed variants. Contrasting text color.",
+        "features": "Rounded corners, centered text label"
+      }
+    },
+    {
+      "id": "ui_flower_info_panel_background",
+      "name": "Flower Info Panel Background",
+      "description": "Background for the contextual flower information panel. Similar style to the main UI panel, possibly a bit more opaque. Dark color (e.g., `0x222222` with `0.9` alpha).",
+      "details": {
+        "subject": "Contextual info panel background",
+        "style": "Clean UI element",
+        "composition": "Rectangle",
+        "colorPalette": "Dark, slightly opaque (e.g. dark grey)",
+        "features": "Rounded corners, consistent with main UI theme"
+      }
+    },
+    {
+      "id": "ui_codex_panel_background",
+      "name": "Codex Panel Background",
+      "description": "Background for the Codex modal/overlay. Large rectangle, potentially more ornate or book-like if desired, but can be consistent with other dark panels (e.g., `0x111111` with `0.95` alpha).",
+      "details": {
+        "subject": "Modal/overlay panel background",
+        "style": "UI panel, potentially more thematic (book-like)",
+        "composition": "Large rectangle",
+        "colorPalette": "Very dark, highly opaque (e.g., dark charcoal)",
+        "features": "Space for title, content, close button"
+      }
+    }
+  ]
+}
