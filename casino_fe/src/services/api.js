@@ -148,5 +148,34 @@ export default {
   },
   fetchAdminUsers(page = 1, perPage = 20) { // Default values match store
     return apiClient.get(`/admin/users?page=${page}&per_page=${perPage}`);
+  },
+
+  // Crystal Garden API Methods
+  getGardenState() {
+    return apiClient.get('/crystal-garden/garden-state');
+  },
+  buyCrystalSeed(seedId) {
+    return apiClient.post('/crystal-garden/buy-seed', { seed_id: seedId });
+  },
+  plantCrystalSeed(payload) { // { seed_id, position_x, position_y }
+    return apiClient.post('/crystal-garden/plant-seed', payload);
+  },
+  processGardenCycle(gardenId) { // Backend expects garden_id in payload for POST, but GET might be more RESTful if no body needed. Sticking to current POST.
+    // The backend route for process-cycle in crystal_garden_bp doesn't explicitly take garden_id from payload.
+    // It uses current_user.id to find the garden. So, an empty POST or specific user garden ID might be intended.
+    // For now, assuming the backend can derive garden_id from user or a default garden_id if not passed.
+    // Let's send an empty payload as the current route doesn't specify one.
+    // The backend route for /process-cycle in this project actually gets garden_id from current_user.
+    // So, this API method does not need to send garden_id.
+    return apiClient.post('/crystal-garden/process-cycle', {});
+  },
+  appraiseCrystal(flowerId) {
+    return apiClient.post('/crystal-garden/appraise-crystal', { flower_id: flowerId });
+  },
+  sellCrystal(flowerId) {
+    return apiClient.post('/crystal-garden/sell-crystal', { flower_id: flowerId });
+  },
+  activatePowerUp(payload) { // { flower_id, power_up_type }
+    return apiClient.post('/crystal-garden/activate-powerup', payload);
   }
 };
