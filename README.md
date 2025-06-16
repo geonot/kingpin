@@ -1,86 +1,98 @@
-# Casino Application
+# Slot Theme Asset Generator Utility
 
-This project contains the backend and frontend for a casino application.
+## 1. Purpose
 
-## IMPORTANT: Prerequisites
+This utility generates a set of assets for a new slot game based on a provided theme description. It creates:
+- Placeholder image files for standard symbols, thematic symbols, special symbols (WILD, SCATTER, COIN), UI buttons, and backgrounds. (Actual image generation via Google Gemini API is currently simulated).
+- A `gameConfig.json` file detailing the game's configuration, symbols, paylines, UI layout, etc.
+- An Alembic/SQLAlchemy database migration script for PostgreSQL to add the new slot game's data to the database.
 
-**Before you begin, ensure you have the following installed AND RUNNING:**
--   **PostgreSQL Server**: The backend requires a running PostgreSQL server. The bootstrap script will check for its availability and will not proceed with backend setup if it's not accessible.
--   **Python 3.x** (and pip)
--   **Node.js** (and npm)
--   **OpenSSL** (for generating JWT secret if needed)
--   **postgresql-client** (provides `pg_isready` utility, often installed separately, e.g., `sudo apt-get install postgresql-client`)
+The generated files are organized into a directory named after the processed theme.
 
-## Setup
+## 2. Requirements
 
-This project includes a bootstrap script (`bootstrap.sh`) to automate the initial setup process.
+- Python 3.7+
+- Pillow library (`pip install Pillow`)
+- Google Generative AI library (`pip install google-generativeai`)
+- A valid Google Gemini API Key for actual image generation.
 
-**It is highly recommended to have your PostgreSQL server running and configured before executing the bootstrap script.**
+## 3. Setup
 
-1.  **Clone the repository (if you haven't already):**
-    ```bash
-    git clone <repository-url>
-    cd <repository-directory>
-    ```
+### Gemini API Key
+To enable actual image generation (currently simulated in the script):
+1. Obtain a Gemini API Key from Google AI Studio.
+2. You can provide the API key in one of two ways:
+   - **Command-line argument:** Use the `--api_key YOUR_API_KEY` option when running the script.
+   - **Environment variable:** Set the `GEMINI_API_KEY` environment variable:
+     ```bash
+     export GEMINI_API_KEY="YOUR_API_KEY_HERE"
+     ```
 
-2.  **Make the bootstrap script executable (if needed):**
-    ```bash
-    chmod +x bootstrap.sh
-    ```
+## 4. Usage
 
-3.  **Run the bootstrap script:**
-    ```bash
-    ./bootstrap.sh
-    ```
-    The script will guide you through the setup process, including:
-    - Checking for all prerequisites.
-    - Installing backend Python dependencies.
-    - Installing frontend Node.js dependencies.
-    - Prompting for PostgreSQL database credentials (user, password, database name).
-    - Prompting for a JWT secret key (or generating one if you don't provide one).
-    - Saving backend configurations (like DB connection string, JWT key, Flask settings) to a `.env` file in the `casino_be` directory.
-    - Initializing the database schema (running `flask db init`, `flask db migrate`, `flask db upgrade`).
-    - Creating an initial admin user for the backend.
-    - Performing a basic health check on the backend API.
+Run the script from the command line using `python slot_generator_util.py`:
 
-    Please follow the on-screen prompts carefully. If the script encounters issues (e.g., PostgreSQL not being available), it will provide an error message and may exit.
-
-## Running the Application
-
-After successfully running the bootstrap script:
-
-**Backend:**
-1.  Navigate to the backend directory:
-    ```bash
-    cd casino_be
-    ```
-2.  Ensure environment variables are set. The bootstrap script creates a `.env` file in this directory. You can load it by running:
-    ```bash
-    source .env
-    ```
-    Alternatively, ensure `DATABASE_URL`, `JWT_SECRET_KEY`, `FLASK_APP`, and `FLASK_ENV` are set in your current shell session if you didn't use the `.env` file.
-3.  Start the Flask development server:
-    ```bash
-    flask run --host=0.0.0.0
-    ```
-    The backend will typically run on `http://127.0.0.1:5000`.
-
-**Frontend:**
-1.  Navigate to the frontend directory (from the root or `casino_be`):
-    ```bash
-    cd ../casino_fe  # If in casino_be
-    # OR
-    cd casino_fe     # If in root
-    ```
-2.  Start the Vue.js development server:
-    ```bash
-    npm run serve
-    ```
-    The frontend will typically run on `http://localhost:8080` and is configured to proxy API requests to the backend (usually `http://localhost:5000`).
-
-## Project Structure
-
--   `casino_be/`: Contains the Flask backend application.
--   `casino_fe/`: Contains the Vue.js frontend application.
--   `bootstrap.sh`: Automated setup script.
+```bash
+python slot_generator_util.py "Your Theme Description Here" [OPTIONS]
 ```
+
+### Arguments:
+- **`theme_description`** (required): A textual description of the slot game theme (e.g., "Ancient Egypt Treasures", "Sci-Fi Robots Attack"). This will be used for directory naming and in prompts for image generation.
+
+### Options:
+- **`--output_base_dir DIRECTORY`**: Specifies the base directory where the theme-specific output folder will be created. Defaults to `"generated_slots"`.
+  Example: `--output_base_dir my_slot_projects`
+- **`--api_key YOUR_API_KEY`**: Your Google Gemini API key. Overrides the environment variable if set.
+- **`--slot_id ID`**: A placeholder Slot ID (integer) to use in the generated `gameConfig.json` and migration script. Defaults to `0`.
+  Example: `--slot_id 101`
+
+### Example Command:
+```bash
+python slot_generator_util.py "Mystical Dragon's Hoard" --output_base_dir ./slot_builds --slot_id 5 --api_key YOUR_ACTUAL_API_KEY
+```
+
+## 5. Input
+
+- **Theme Description**: A string describing the desired theme. This influences the (simulated) image prompts and naming conventions. Keep it concise but descriptive.
+
+## 6. Output
+
+The utility creates a new directory structure: `<output_base_dir>/<processed_theme_name>/`.
+For example, if `output_base_dir` is `generated_slots` and the theme is "Jungle Adventure", it creates `generated_slots/jungle_adventure/`.
+
+Inside this directory, you will find:
+- **`images/`**: Contains the generated (currently placeholder) PNG image files.
+  - `symbol_10.png`, `symbol_j.png`, etc.
+  - `thematic_symbol_1.png`, etc.
+  - `wild_symbol.png`, `scatter_symbol.png`, `coin_symbol.png`
+  - `background.png`, `bonus_background.png`
+  - `button_play.png`, `button_settings.png`, etc.
+- **`gameConfig.json`**: The main configuration file for the slot game, structured in JSON format. Includes paths to the generated images.
+- **`<timestamp>_add_<theme_name>_slot.py`**: The database migration script.
+
+## 7. Simulation Mode (Current Status)
+
+**Important:** The current version of `slot_generator_util.py` **simulates** image generation. Instead of calling the Google Gemini API, it creates simple placeholder PNG files.
+
+To enable **actual image generation**:
+1. Ensure you have a valid Gemini API key set up (see Section 3).
+2. In `slot_generator_util.py`, locate the `generate_slot_assets` function.
+3. Uncomment the lines related to `genai.configure(api_key=api_key_to_use)` and `model_to_pass = genai.GenerativeModel(...)`.
+4. In the `_generate_single_image` function, replace the Pillow placeholder image creation logic with the actual `model.generate_content(...)` call and image processing logic (refer to the initial Gemini API Python snippet provided in the issue).
+
+The script will still function and generate the config and migration files when in simulation mode, using the placeholder images.
+
+## 8. Customization
+
+The generated `gameConfig.json` and migration script are intended as **starting points**. You will likely need to customize them:
+- **`gameConfig.json`**:
+    - Review and adjust symbol values, payouts, paylines.
+    - Fine-tune UI element positions and styles.
+    - Update animation and sound settings.
+    - Modify bonus game parameters.
+- **Migration Script (`*_add_<theme_name>_slot.py`)**:
+    - Update the `down_revision` variable to point to the actual previous migration ID in your Alembic setup.
+    - The `slot_id` used in the script is based on the `--slot_id` argument (default 0). Ensure this ID is unique and appropriate for your database before applying the migration.
+    - Review default values for RTP, volatility, etc., in the `slot_table` insertion.
+
+This utility aims to bootstrap the initial asset creation process, not to produce a production-ready game out of the box.
