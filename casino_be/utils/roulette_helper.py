@@ -93,10 +93,38 @@ def get_bet_type_multiplier(bet_type: str, bet_value, winning_number: int) -> in
         except ValueError:
             return 0
 
-    # TODO: Implement other bet types like split, street, corner, six_line.
-    # These are more complex as they depend on the layout and specific numbers chosen.
-    # For now, we'll return 0 for unimplemented types.
-    # A more robust system might involve passing the specific numbers bet on.
+    # Bet types requiring a list of numbers in bet_value
+    elif bet_type == "split":
+        if not (isinstance(bet_value, list) and len(bet_value) == 2 and all(isinstance(n, int) for n in bet_value)):
+            current_app.logger.error(f"Invalid bet_value for split bet: {bet_value}. Expected list of 2 integers.")
+            return 0
+        return PAYOUTS["split"] if winning_number in bet_value else 0
+    elif bet_type == "street":
+        if not (isinstance(bet_value, list) and len(bet_value) == 3 and all(isinstance(n, int) for n in bet_value)):
+            current_app.logger.error(f"Invalid bet_value for street bet: {bet_value}. Expected list of 3 integers.")
+            return 0
+        # Additional validation for street might be needed, e.g. numbers are consecutive or form a valid street.
+        # For now, just checking if winning_number is in the list.
+        return PAYOUTS["street"] if winning_number in bet_value else 0
+    elif bet_type == "corner":
+        if not (isinstance(bet_value, list) and len(bet_value) == 4 and all(isinstance(n, int) for n in bet_value)):
+            current_app.logger.error(f"Invalid bet_value for corner bet: {bet_value}. Expected list of 4 integers.")
+            return 0
+        # Additional validation for corner might be needed, e.g. numbers form a valid square on the board.
+        return PAYOUTS["corner"] if winning_number in bet_value else 0
+    elif bet_type == "six_line":
+        if not (isinstance(bet_value, list) and len(bet_value) == 6 and all(isinstance(n, int) for n in bet_value)):
+            current_app.logger.error(f"Invalid bet_value for six_line bet: {bet_value}. Expected list of 6 integers.")
+            return 0
+        # Additional validation for six_line might be needed.
+        return PAYOUTS["six_line"] if winning_number in bet_value else 0
+    # End of newly added bet types. TODO comment updated.
+    # Bet types like split, street, corner, six_line implemented above.
+    # These complex bet types depend on the layout and specific numbers chosen,
+    # and assume bet_value is a list of numbers for these types.
+    # Further validation of the bet_value list against actual roulette layout rules
+    # (e.g., numbers in a split are adjacent, numbers in a street are consecutive)
+    # is not implemented here but may be necessary for a full robust system.
 
     current_app.logger.warning(f"Unhandled bet_type '{bet_type}' or invalid bet_value '{bet_value}'.")
     return 0

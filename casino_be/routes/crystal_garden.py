@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_login import login_required, current_user # Assuming flask_login for current_user
+from flask_jwt_extended import jwt_required, current_user
 
 from casino_be.models import db # For db session if service doesn't handle all commits
 from casino_be.services.crystal_garden_service import CrystalGardenService, ServiceError, ItemNotFoundError # Import service and custom errors
@@ -21,7 +21,7 @@ def handle_service_error(error: ServiceError):
 
 
 @crystal_garden_bp.route('/buy-seed', methods=['POST'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 def buy_seed_route(): # Renamed to avoid conflict with service method name
     data = request.get_json()
@@ -48,7 +48,7 @@ def buy_seed_route(): # Renamed to avoid conflict with service method name
 
 
 @crystal_garden_bp.route('/plant-seed', methods=['POST'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 def plant_seed_route(): # Renamed
     data = request.get_json()
@@ -78,7 +78,7 @@ def plant_seed_route(): # Renamed
         return jsonify({'message': 'An unexpected error occurred planting seed.'}), 500
 
 @crystal_garden_bp.route('/garden-state', methods=['GET'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 def get_garden_state_route(): # Renamed
     try:
@@ -91,7 +91,7 @@ def get_garden_state_route(): # Renamed
         return jsonify({'message': 'An unexpected error occurred fetching garden state.'}), 500
 
 @crystal_garden_bp.route('/codex', methods=['GET'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 def get_codex_route(): # Renamed
     try:
@@ -104,7 +104,7 @@ def get_codex_route(): # Renamed
         return jsonify({'message': 'An unexpected error occurred fetching codex.'}), 500
 
 @crystal_garden_bp.route('/activate-powerup', methods=['POST'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 def activate_powerup_route(): # Renamed
     data = request.get_json()
@@ -133,7 +133,7 @@ def activate_powerup_route(): # Renamed
         return jsonify({'message': 'An unexpected error occurred activating power-up.'}), 500
 
 @crystal_garden_bp.route('/appraise-crystal', methods=['POST'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 def appraise_crystal_route(): # Renamed
     data = request.get_json()
@@ -157,7 +157,7 @@ def appraise_crystal_route(): # Renamed
         return jsonify({'message': 'An unexpected error occurred appraising crystal.'}), 500
 
 @crystal_garden_bp.route('/sell-crystal', methods=['POST'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 def sell_crystal_route(): # Renamed
     data = request.get_json()
@@ -182,7 +182,7 @@ def sell_crystal_route(): # Renamed
         return jsonify({'message': 'An unexpected error occurred selling crystal.'}), 500
 
 @crystal_garden_bp.route('/process-cycle', methods=['POST'])
-@login_required
+@jwt_required()
 @feature_flag_required('CRYSTAL_GARDEN_ENABLED')
 # Potentially an admin-only or rate-limited endpoint in a real scenario
 def process_cycle_route(): # Renamed

@@ -3,6 +3,7 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone
+from flask import current_app # Ensure current_app is imported
 from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserBonus
 
 # --- Configuration ---
@@ -35,30 +36,30 @@ def load_game_config(slot_short_name):
         # Fallback path for alternative project structures (e.g., during development)
         alt_base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'casino_fe', 'public', 'slots'))
         alt_file_path = os.path.join(alt_base_dir, slot_short_name, "gameConfig.json")
-        # NOTE_LOG: LOG_INFO: f"Configuration for '{slot_short_name}' not found at primary path '{file_path}', trying fallback: {alt_file_path}"
+        current_app.logger.info(f"Configuration for '{slot_short_name}' not found at primary path '{file_path}', trying fallback: {alt_file_path}")
         if os.path.exists(alt_file_path):
             file_path = alt_file_path
         else:
-            # NOTE_LOG: LOG_ERROR: f"Configuration file critical error: Not found for slot '{slot_short_name}' at primary '{file_path}' or fallback '{alt_file_path}'"
+            current_app.logger.error(f"Configuration file critical error: Not found for slot '{slot_short_name}' at primary '{file_path}' or fallback '{alt_file_path}'")
             raise FileNotFoundError(f"Configuration file not found for slot '{slot_short_name}' at {file_path} (also checked {alt_file_path})")
 
     try:
         with open(file_path, 'r') as f:
             config = json.load(f)
         _validate_game_config(config, slot_short_name)
-        # NOTE_LOG: LOG_INFO: f"Successfully loaded and validated config for '{slot_short_name}' from {file_path}"
+        current_app.logger.info(f"Successfully loaded and validated config for '{slot_short_name}' from {file_path}")
         return config
     except FileNotFoundError:
-        # NOTE_LOG: LOG_ERROR: f"Game config file not found at {file_path} for slot '{slot_short_name}' (re-throw after path resolution)"
+        current_app.logger.error(f"Game config file not found at {file_path} for slot '{slot_short_name}' (re-throw after path resolution)")
         raise # Re-raise the FileNotFoundError if it somehow occurs after path checks
     except json.JSONDecodeError as e:
-        # NOTE_LOG: LOG_ERROR: f"JSON decode error for {file_path} (slot '{slot_short_name}'): {e.msg} at line {e.lineno} col {e.colno}"
+        current_app.logger.error(f"JSON decode error for {file_path} (slot '{slot_short_name}'): {e.msg} at line {e.lineno} col {e.colno}")
         raise ValueError(f"Invalid JSON in {file_path}: {e.msg} (line {e.lineno}, col {e.colno})")
     except ValueError as e: # Catch validation errors from _validate_game_config
-        # NOTE_LOG: LOG_ERROR: f"Configuration validation error for slot '{slot_short_name}': {str(e)}"
+        current_app.logger.error(f"Configuration validation error for slot '{slot_short_name}': {str(e)}")
         raise # Re-raise validation errors
     except Exception as e:
-        # NOTE_LOG: LOG_ERROR: f"Unexpected error loading game config for '{slot_short_name}' from {file_path}: {type(e).__name__} - {str(e)}"
+        current_app.logger.error(f"Unexpected error loading game config for '{slot_short_name}' from {file_path}: {type(e).__name__} - {str(e)}")
         raise RuntimeError(f"Could not load game config for slot '{slot_short_name}': {str(e)}")
 
 
@@ -242,12 +243,12 @@ def _update_wagering_progress(user_id, bet_amount_sats, game_session):
         if active_bonus:
             active_bonus.wagering_progress_sats += bet_amount_sats
             active_bonus.updated_at = datetime.now(timezone.utc)
-            # NOTE_LOG: LOG_INFO: f"User {user_id} wagering progress for bonus {active_bonus.id}: {active_bonus.wagering_progress_sats}/{active_bonus.wagering_requirement_sats}"
+            current_app.logger.info(f"User {user_id} wagering progress for bonus {active_bonus.id}: {active_bonus.wagering_progress_sats}/{active_bonus.wagering_requirement_sats}")
             if active_bonus.wagering_progress_sats >= active_bonus.wagering_requirement_sats:
                 active_bonus.is_active = False
                 active_bonus.is_completed = True
                 active_bonus.completed_at = datetime.now(timezone.utc)
-                # NOTE_LOG: LOG_INFO: f"User {user_id} completed wagering for UserBonus {active_bonus.id}."
+                current_app.logger.info(f"User {user_id} completed wagering for UserBonus {active_bonus.id}.")
 
 def _process_bet_deduction_and_type(user, game_session, bet_amount_sats, slot_name):
     """
@@ -268,7 +269,7 @@ def _process_bet_deduction_and_type(user, game_session, bet_amount_sats, slot_na
         current_spin_multiplier = game_session.bonus_multiplier
         game_session.bonus_spins_remaining -= 1
         actual_bet_this_spin = 0
-        # NOTE_LOG: LOG_INFO: f"User {user.id} using bonus spin for slot {slot_name}. Spins remaining: {game_session.bonus_spins_remaining}"
+        current_app.logger.info(f"User {user.id} using bonus spin for slot {slot_name}. Spins remaining: {game_session.bonus_spins_remaining}")
     else:
         is_bonus_spin = False
         current_spin_multiplier = 1.0
@@ -310,7 +311,7 @@ def _calculate_initial_and_cascading_wins(initial_spin_grid, slot_symbols_db, co
     max_cascade_multiplier_level_achieved = 0
 
     if config_params['is_cascading'] and initial_raw_win_sats > 0 and current_winning_coords:
-        # NOTE_LOG: LOG_INFO: f"Cascade initiated. Initial win: {initial_raw_win_sats}, Bet: {bet_amount_sats_for_calc}"
+        current_app.logger.info(f"Cascade initiated. Initial win: {initial_raw_win_sats}, Bet: {bet_amount_sats_for_calc}")
         cascade_level_counter = 0
         while current_raw_win_for_cascade_loop > 0 and current_winning_coords:
             current_grid_state = handle_cascade_fill(
@@ -340,7 +341,7 @@ def _calculate_initial_and_cascading_wins(initial_spin_grid, slot_symbols_db, co
 
                 total_win_for_entire_spin_sequence += int(new_raw_win_this_cascade * cascade_multiplier)
                 current_raw_win_for_cascade_loop = new_raw_win_this_cascade
-                # NOTE_LOG: LOG_INFO: f"Cascade level {cascade_level_counter} win: {new_raw_win_this_cascade}, multiplier: {cascade_multiplier}. Cumulative raw: {total_win_for_entire_spin_sequence}"
+                current_app.logger.info(f"Cascade level {cascade_level_counter} win: {new_raw_win_this_cascade}, multiplier: {cascade_multiplier}. Cumulative raw: {total_win_for_entire_spin_sequence}")
             else:
                 current_raw_win_for_cascade_loop = 0
                 current_winning_coords = []
@@ -395,17 +396,17 @@ def _check_and_apply_bonus_trigger(game_session, initial_spin_grid_for_record, c
                 game_session.bonus_active = True
                 game_session.bonus_spins_remaining = newly_awarded_spins
                 game_session.bonus_multiplier = new_bonus_multiplier
-                # NOTE_LOG: LOG_INFO: f"Bonus activated for session {game_session.id}. Awarded spins: {newly_awarded_spins}, Multiplier: {new_bonus_multiplier}"
+                current_app.logger.info(f"Bonus activated for session {game_session.id}. Awarded spins: {newly_awarded_spins}, Multiplier: {new_bonus_multiplier}")
             else:
                 game_session.bonus_spins_remaining += newly_awarded_spins
                 if new_bonus_multiplier != game_session.bonus_multiplier and newly_awarded_spins > 0 :
                      game_session.bonus_multiplier = new_bonus_multiplier
-                # NOTE_LOG: LOG_INFO: f"Bonus re-triggered/extended for session {game_session.id}. Spins added: {newly_awarded_spins}. Total remaining: {game_session.bonus_spins_remaining}."
+                current_app.logger.info(f"Bonus re-triggered/extended for session {game_session.id}. Spins added: {newly_awarded_spins}. Total remaining: {game_session.bonus_spins_remaining}.")
 
     if game_session.bonus_active and game_session.bonus_spins_remaining <= 0:
         game_session.bonus_active = False
         game_session.bonus_multiplier = 1.0
-        # NOTE_LOG: LOG_INFO: f"Bonus round ended for session {game_session.id}."
+        current_app.logger.info(f"Bonus round ended for session {game_session.id}.")
 
     return bonus_triggered_this_spin
 
@@ -493,7 +494,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
     Orchestrates the slot spin process using helper functions.
     (Full docstring from original file)
     """
-    # NOTE_LOG: LOG_INFO: f"User {user.id}, Slot {slot.id}, Session {game_session.id}: Starting handle_spin with bet {bet_amount_sats} sats."
+    current_app.logger.info(f"User {user.id}, Slot {slot.id}, Session {game_session.id}: Starting handle_spin with bet {bet_amount_sats} sats.")
     try:
         config = _load_and_prepare_config(slot.short_name)
         config['bet_amount_sats'] = bet_amount_sats
@@ -524,7 +525,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             config, # Contains bet_amount_sats
             bet_amount_sats # Explicitly pass bet_amount_sats for win calculation base
         )
-        # NOTE_LOG: LOG_DEBUG: f"User {user.id}, Slot {slot.id}: Cascade results: {cascade_results}"
+        current_app.logger.debug(f"User {user.id}, Slot {slot.id}: Cascade results: {cascade_results}")
 
         final_win_amount_for_session_and_tx = _apply_bonus_spin_multiplier(
             cascade_results['total_win_for_entire_spin_sequence'],
@@ -533,7 +534,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         )
 
         if config['is_cascading'] and cascade_results['max_cascade_multiplier_level_achieved'] > 0:
-            # NOTE_LOG: LOG_INFO: f"User {user.id}, Slot {slot.id}: Cascade occurred. Max level: {cascade_results['max_cascade_multiplier_level_achieved']}, Initial raw: {cascade_results['initial_raw_win_sats']}, Total sequence raw: {cascade_results['total_win_for_entire_spin_sequence']}"
+            current_app.logger.info(f"User {user.id}, Slot {slot.id}: Cascade occurred. Max level: {cascade_results['max_cascade_multiplier_level_achieved']}, Initial raw: {cascade_results['initial_raw_win_sats']}, Total sequence raw: {cascade_results['total_win_for_entire_spin_sequence']}")
             pass
 
         bonus_triggered_this_spin = _check_and_apply_bonus_trigger(
@@ -541,7 +542,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             config['scatter_symbol_id'], config['bonus_features'], is_bonus_spin
         )
         if bonus_triggered_this_spin:
-            # NOTE_LOG: LOG_INFO: f"User {user.id}, Slot {slot.id}: Bonus triggered. Spins remaining: {game_session.bonus_spins_remaining}, Multiplier: {game_session.bonus_multiplier}"
+            current_app.logger.info(f"User {user.id}, Slot {slot.id}: Bonus triggered. Spins remaining: {game_session.bonus_spins_remaining}, Multiplier: {game_session.bonus_multiplier}")
             pass
 
         _update_session_aggregates(game_session, actual_bet_this_spin, final_win_amount_for_session_and_tx, is_bonus_spin)
@@ -554,7 +555,7 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             current_spin_multiplier, wager_tx
         )
 
-        # NOTE_LOG: LOG_INFO: f"User {user.id}, Slot {slot.id}, Session {game_session.id}: Spin processed successfully. Spin ID: {new_spin_id}, Final Win: {final_win_amount_for_session_and_tx} sats."
+        current_app.logger.info(f"User {user.id}, Slot {slot.id}, Session {game_session.id}: Spin processed successfully. Spin ID: {new_spin_id}, Final Win: {final_win_amount_for_session_and_tx} sats.")
         return {
             "spin_id": new_spin_id,
             "spin_result": initial_spin_grid_for_record,
@@ -572,15 +573,15 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             }
         }
     except FileNotFoundError as e:
-        # NOTE_LOG: LOG_ERROR: f"User {user.id if user else 'UnknownUser'}, Slot {slot.short_name if slot else 'UnknownSlot'}: Configuration file not found. Error: {str(e)}"
+        current_app.logger.error(f"User {user.id if user else 'UnknownUser'}, Slot {slot.short_name if slot else 'UnknownSlot'}: Configuration file not found. Error: {str(e)}")
         db.session.rollback()
         raise ValueError(str(e))
     except ValueError as e:
-        # NOTE_LOG: LOG_WARNING: f"User {user.id if user else 'UnknownUser'}, Slot {slot.short_name if slot else 'UnknownSlot'}: Validation error during spin (bet: {bet_amount_sats}). Error: {str(e)}"
+        current_app.logger.warning(f"User {user.id if user else 'UnknownUser'}, Slot {slot.short_name if slot else 'UnknownSlot'}: Validation error during spin (bet: {bet_amount_sats}). Error: {str(e)}")
         db.session.rollback()
         raise e
     except Exception as e:
-        # NOTE_LOG: LOG_ERROR: f"User {user.id if user else 'UnknownUser'}, Slot {slot.short_name if slot else 'UnknownSlot'}: Unexpected error during spin (bet: {bet_amount_sats}). Error: {type(e).__name__} - {str(e)}"
+        current_app.logger.error(f"User {user.id if user else 'UnknownUser'}, Slot {slot.short_name if slot else 'UnknownSlot'}: Unexpected error during spin (bet: {bet_amount_sats}). Error: {type(e).__name__} - {str(e)}")
         db.session.rollback()
         raise RuntimeError(f"An unexpected error occurred during the spin: {str(e)}")
 
@@ -592,7 +593,7 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
     """
     if not db_symbols:
         s_ids = list(config_symbols_map.keys())
-        # NOTE_LOG: LOG_WARNING: "db_symbols is empty in generate_spin_grid. Falling back to a default symbol grid using first config symbol."
+        current_app.logger.warning("db_symbols is empty in generate_spin_grid. Falling back to a default symbol grid using first config symbol.")
         return [[int(s_ids[0]) if s_ids else 1 for _ in range(columns)] for _ in range(rows)]
 
     secure_random = secrets.SystemRandom()
@@ -604,33 +605,33 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
             all_strips_valid = True
             for i, strip in enumerate(reel_strips):
                 if not isinstance(strip, list) or not strip:
-                    # NOTE_LOG: LOG_WARNING: f"Reel strip at index {i} is not a list or is empty. Invalidating reel_strips usage."
+                    current_app.logger.warning(f"Reel strip at index {i} is not a list or is empty. Invalidating reel_strips usage.")
                     all_strips_valid = False; break
                 for symbol_id in strip:
                     if not isinstance(symbol_id, int):
-                        # NOTE_LOG: LOG_WARNING: f"Reel strip at index {i} contains non-integer symbol ID '{symbol_id}'. Invalidating reel_strips usage."
+                        current_app.logger.warning(f"Reel strip at index {i} contains non-integer symbol ID '{symbol_id}'. Invalidating reel_strips usage.")
                         all_strips_valid = False; break
                 if not all_strips_valid: break
             if all_strips_valid: use_reel_strips = True
-        # else: # NOTE_LOG: LOG_WARNING: "reel_strips configuration is invalid (not a list or length mismatch). Falling back."
+        # else: current_app.logger.warning("reel_strips configuration is invalid (not a list or length mismatch). Falling back.")
             pass
-    # else: # NOTE_LOG: LOG_INFO: "reel_strips not found. Using weighted random generation."
+    # else: current_app.logger.info("reel_strips not found. Using weighted random generation.")
         pass
 
     if use_reel_strips:
-        # NOTE_LOG: LOG_INFO: "Using reel_strips for grid generation."
+        current_app.logger.info("Using reel_strips for grid generation.")
         for c_idx in range(columns):
             current_reel_strip = reel_strips[c_idx]
             strip_len = len(current_reel_strip)
             if strip_len == 0:
-                # NOTE_LOG: LOG_ERROR: f"Reel strip {c_idx} is empty. Cannot generate grid from it."
+                current_app.logger.error(f"Reel strip {c_idx} is empty. Cannot generate grid from it.")
                 raise ValueError(f"Reel strip {c_idx} is empty.")
             start_index = secure_random.randrange(strip_len)
             for r_idx in range(rows):
                 grid[r_idx][c_idx] = current_reel_strip[(start_index + r_idx) % strip_len]
         return grid
     else:
-        # NOTE_LOG: LOG_INFO: "Using weighted random symbol generation for grid."
+        current_app.logger.info("Using weighted random symbol generation for grid.")
         for r_idx in range(rows):
             grid[r_idx] = _generate_weighted_random_symbols(
                 columns, config_symbols_map, db_symbols, secure_random,
@@ -656,7 +657,8 @@ def get_symbol_payout(symbol_id, count, config_symbols_map, is_scatter=False):
     try:
         if multiplier is None or str(multiplier).strip() == "": return 0.0
         return float(multiplier)
-    except ValueError: # NOTE_LOG: LOG_WARNING: f"Invalid multiplier value '{multiplier}' for symbol {symbol_id}, count {count}. Defaulting to 0.0."
+    except ValueError:
+        current_app.logger.warning(f"Invalid multiplier value '{multiplier}' for symbol {symbol_id}, count {count}. Defaulting to 0.0.")
         return 0.0
 
 
@@ -684,7 +686,7 @@ def _calculate_payline_wins_for_grid(grid, config_paylines, config_symbols_map, 
                 line_symbols_on_grid.append(grid[r][c])
                 actual_positions_on_line.append([r,c])
             else:
-                # NOTE_LOG: LOG_WARNING: f"Invalid coordinate [{r},{c}] in payline {payline_id} for grid size {num_rows}x{num_cols}."
+                current_app.logger.warning(f"Invalid coordinate [{r},{c}] in payline {payline_id} for grid size {num_rows}x{num_cols}.")
                 line_symbols_on_grid.append(None)
                 actual_positions_on_line.append(None)
         
@@ -972,7 +974,7 @@ def handle_cascade_fill(current_grid, winning_coords_to_clear, cascade_type, db_
             for i, (r_coord, c_coord) in enumerate(coords_to_fill):
                 new_grid[r_coord][c_coord] = new_symbols[i]
     else:
-        # NOTE_LOG: LOG_WARNING: f"Unknown or unimplemented cascade_type: {cascade_type}. Grid will only have symbols removed."
+        current_app.logger.warning(f"Unknown or unimplemented cascade_type: {cascade_type}. Grid will only have symbols removed.")
         pass
 
     return new_grid
@@ -1033,12 +1035,12 @@ def _generate_weighted_random_symbols(count, config_symbols_map, db_symbols, sec
 
 
     if not spinable_config_symbol_ids:
-        # NOTE_LOG: LOG_WARNING: "No DB-validated spinable symbols during weighted generation. Attempting fallback."
+        current_app.logger.warning("No DB-validated spinable symbols during weighted generation. Attempting fallback.")
         spinable_config_symbol_ids = [int(s_id_str) for s_id_str in config_symbols_map.keys() if isinstance(s_id_str, (int, str)) and str(s_id_str).isdigit()]
         if not spinable_config_symbol_ids:
-            # NOTE_LOG: LOG_ERROR: "No numeric symbol IDs available in config_symbols_map for generation."
+            current_app.logger.error("No numeric symbol IDs available in config_symbols_map for generation.")
             raise ValueError("No numeric symbol IDs available in config_symbols_map for generation.")
-        # NOTE_LOG: LOG_WARNING: f"Using all numeric-keyed config symbols for weighted generation. Count: {len(spinable_config_symbol_ids)}"
+        current_app.logger.warning(f"Using all numeric-keyed config symbols for weighted generation. Count: {len(spinable_config_symbol_ids)}")
 
 
     weights = []
@@ -1046,7 +1048,7 @@ def _generate_weighted_random_symbols(count, config_symbols_map, db_symbols, sec
     for s_id in spinable_config_symbol_ids:
         symbol_config = config_symbols_map.get(s_id) or config_symbols_map.get(str(s_id))
         if not symbol_config:
-            # NOTE_LOG: LOG_WARNING: f"Symbol ID {s_id} not found in config_symbols_map during weighted generation. Skipping."
+            current_app.logger.warning(f"Symbol ID {s_id} not found in config_symbols_map during weighted generation. Skipping.")
             continue
 
         current_weight = 1.0
@@ -1059,21 +1061,21 @@ def _generate_weighted_random_symbols(count, config_symbols_map, db_symbols, sec
             is_scatter = symbol_config.get('is_scatter', False) or (scatter_symbol_config_id is not None and s_id == scatter_symbol_config_id)
             if is_wild and current_weight == 1.0: current_weight = 0.5
             elif is_scatter and current_weight == 1.0: current_weight = 0.4
-            # else: NOTE_LOG: LOG_DEBUG: f"Symbol ID {s_id} has invalid/missing weight '{raw_weight}'. Defaulting to 1.0 if not wild/scatter."
+            # else: current_app.logger.debug(f"Symbol ID {s_id} has invalid/missing weight '{raw_weight}'. Defaulting to 1.0 if not wild/scatter.")
 
         weights.append(current_weight)
         symbols_for_choice.append(s_id)
 
     if not symbols_for_choice:
-        # NOTE_LOG: LOG_ERROR: "Cannot generate symbols: No symbols available for choice after filtering/weighting."
+        current_app.logger.error("Cannot generate symbols: No symbols available for choice after filtering/weighting.")
         raise ValueError("Cannot generate symbols: No symbols available for choice after filtering and weighting.")
 
     total_weight = sum(weights)
     if total_weight <= 0:
         if not symbols_for_choice:
-             # NOTE_LOG: LOG_ERROR: "No symbols to choose from for uniform random generation (total_weight is <= 0)."
+             current_app.logger.error("No symbols to choose from for uniform random generation (total_weight is <= 0).")
              raise ValueError("No symbols to choose from for uniform random generation (total_weight is <= 0).")
-        # NOTE_LOG: LOG_WARNING: f"Total weight is {total_weight}. Using uniform distribution for {count} symbols."
+        current_app.logger.warning(f"Total weight is {total_weight}. Using uniform distribution for {count} symbols.")
         return secure_random_instance.choices(symbols_for_choice, k=count)
     else:
         return secure_random_instance.choices(symbols_for_choice, weights=weights, k=count)
