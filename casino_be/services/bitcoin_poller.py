@@ -27,15 +27,30 @@ BLOCKCHAIN_EXPLORER_API_BASE_URL = os.getenv('BLOCKCHAIN_EXPLORER_API_URL', "htt
 NETWORK = os.getenv('NETWORK', 'testnet')
 
 # --- Logging Setup ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-        # TODO: Add FileHandler for production
-    ]
-)
+# Get FLASK_ENV, default to 'development' if not set
+FLASK_ENV = os.getenv('FLASK_ENV', 'development')
+POLLER_LOG_FILE = os.getenv('POLLER_LOG_FILE', '/var/log/casino_be_poller.log')
+
+log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Configure StreamHandler (console output)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(log_formatter)
+logger.addHandler(stream_handler)
+
+# Configure FileHandler for production
+if FLASK_ENV == 'production':
+    try:
+        file_handler = logging.FileHandler(POLLER_LOG_FILE)
+        file_handler.setFormatter(log_formatter)
+        logger.addHandler(file_handler)
+        logger.info(f"Production logging enabled. Log file: {POLLER_LOG_FILE}")
+    except Exception as e:
+        logger.error(f"Failed to configure FileHandler for production: {e}", exc_info=True)
+        # Fallback to console logging only if file handler setup fails
 
 # --- Globals ---
 # In a production system, this should be persistent (e.g., Redis, database table)

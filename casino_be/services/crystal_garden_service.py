@@ -211,11 +211,24 @@ class CrystalGardenService:
             # For SQLAlchemy to detect change in JSON mutable type
             flower.active_power_ups = list(flower.active_power_ups)
 
-            # Placeholder for actual effects:
-            # if power_up_type == 'fertilizer':
-            #   flower.growth_modifier += 0.1
-            # elif power_up_type == 'moon_glow':
-            #   flower.clarity_modifier += 0.05
+            if flower.details is None:
+                flower.details = {}
+
+            if power_up_type == 'fertilizer':
+                current_growth_mod = flower.details.get('growth_modifier', 1.0)
+                flower.details['growth_modifier'] = round(current_growth_mod + 0.1, 3) # Using round for float precision
+            elif power_up_type == 'moon_glow':
+                current_clarity_mod = flower.details.get('clarity_modifier', 1.0)
+                flower.details['clarity_modifier'] = round(current_clarity_mod + 0.05, 3) # Using round
+
+            # Mark 'details' as modified for SQLAlchemy if it's a JSON field
+            # This is often handled automatically if the top-level assignment flower.details = new_dict occurs,
+            # but explicit marking is safer with nested modifications if not reassigning the whole dict.
+            # However, since we are potentially reassigning (if flower.details was None) or directly setting keys
+            # on an existing dict, SQLAlchemy's default tracking should detect this.
+            # If issues arise, uncomment:
+            # from sqlalchemy.orm.attributes import flag_modified
+            # flag_modified(flower, "details")
 
             db.session.commit()
         except Exception as e:
@@ -351,25 +364,35 @@ class CrystalGardenService:
             user.balance += sold_value
 
             # Create Codex Entry
-            # A more descriptive name could be generated based on attributes.
             crystal_name = f"{flower.size:.1f} {flower.color or 'Unknown Color'} Crystal ({flower.special_type or 'Standard'})"
 
-            # Check for existing similar codex entry (simplified: just add new one for now)
-            # existing_codex = CrystalCodexEntry.query.filter_by(user_id=user_id, crystal_name=crystal_name).first()
-            # if existing_codex:
-            #    pass # update notes or count
-            # else:
-            new_codex_entry = CrystalCodexEntry(
+            existing_codex_entry = CrystalCodexEntry.query.filter_by(
                 user_id=user_id,
-                crystal_name=crystal_name,
-                color=flower.color or 'N/A',
-                size=flower.size or 0.0,
-                clarity=flower.clarity or 0.0,
-                special_type=flower.special_type,
-                first_discovered_at=datetime.now(timezone.utc)
-                # notes field can be used for player notes or game lore
-            )
-            db.session.add(new_codex_entry)
+                crystal_name=crystal_name
+            ).first()
+
+            current_time = datetime.now(timezone.utc)
+            if existing_codex_entry:
+                # Update existing entry
+                existing_codex_entry.discovery_count = (existing_codex_entry.discovery_count or 1) + 1
+                existing_codex_entry.last_discovered_at = current_time
+                # existing_codex_entry.notes = "Discovered again." # Optional: update notes
+                db.session.add(existing_codex_entry)
+            else:
+                # Create new entry
+                new_codex_entry = CrystalCodexEntry(
+                    user_id=user_id,
+                    crystal_name=crystal_name,
+                    color=flower.color or 'N/A',
+                    size=flower.size or 0.0,
+                    clarity=flower.clarity or 0.0, # Include clarity
+                    special_type=flower.special_type or 'N/A',
+                    first_discovered_at=current_time,
+                    last_discovered_at=current_time,
+                    discovery_count=1
+                    # notes field can be used for player notes or game lore
+                )
+                db.session.add(new_codex_entry)
 
             db.session.delete(flower)
             db.session.commit()

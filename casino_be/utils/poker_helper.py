@@ -440,7 +440,7 @@ def handle_stand_up(user_id: int, table_id: int):
     - Adds player's stack from PokerPlayerState back to User.balance.
     - Creates a Transaction.
     - Removes/deactivates the PokerPlayerState.
-    - Folds the player from any active hand (TODO).
+    - If active in a hand, folds the player and updates game state.
     """
     session = db.session
     player_state = session.query(PokerPlayerState).filter_by(user_id=user_id, table_id=table_id).first()
@@ -452,34 +452,50 @@ def handle_stand_up(user_id: int, table_id: int):
     if not user: # Should not happen if player_state exists with user_id
         return {"error": "User associated with player state not found."}
 
-    # TODO: Handle folding from active hand if player is_active_in_hand
-    # This might involve calling handle_fold logic or directly updating hand state.
     if player_state.is_active_in_hand:
-        player_state.last_action = "auto_fold_stand_up"
-        # Find the current active hand for this table to log the fold
+        player_state.is_active_in_hand = False # Mark as folded first
+        player_state.last_action = "auto_fold_on_stand_up"
+
+        # Find the current active hand for this table
         current_poker_hand = session.query(PokerHand).filter(
             PokerHand.table_id == table_id,
-            PokerHand.status.notin_(['completed', 'showdown']) # Active hand statuses
+            PokerHand.status.notin_(['completed', 'showdown'])
         ).order_by(PokerHand.start_time.desc()).first()
 
         if current_poker_hand:
-            if current_poker_hand.hand_history is None: # Should be initialized
+            if current_poker_hand.hand_history is None: # Ensure history list exists
                 current_poker_hand.hand_history = []
+
             current_poker_hand.hand_history.append({
-                "action": "auto_fold_stand_up",
+                "action": "auto_fold", # Consistent with handle_fold action string
                 "user_id": user_id,
                 "seat_id": player_state.seat_id,
+                "reason": "stood_up",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
-            session.add(current_poker_hand)
-            # Note: _check_betting_round_completion will be called by the *next* player's action normally.
-            # Or, if this player was current_turn_user_id, a more complex game manager would advance turn.
-            # For now, this logs the event. The player is marked inactive below.
 
-        player_state.is_active_in_hand = False # Mark as folded essentially
-        # Chips in pot are lost for this hand.
-        current_app.logger.info(f"Player {user_id} stood up and auto-folded from active hand {current_poker_hand.id if current_poker_hand else 'unknown'}.")
+            # Clear any pending timer for this player on their player_state,
+            # as _check_betting_round_completion will set new timer for next player.
+            player_state.time_to_act_ends = None
 
+            session.add(current_poker_hand) # Add hand to session before calling check
+            session.add(player_state)       # Add player_state to session before calling check
+
+            # Call _check_betting_round_completion to correctly advance game state
+            # user_id here is the one who is folding/standing up.
+            game_flow_result = _check_betting_round_completion(current_poker_hand.id, user_id, session)
+            current_app.logger.info(f"Game flow result after user {user_id} auto-folded due to stand_up: {game_flow_result}")
+            # _check_betting_round_completion may modify current_poker_hand (e.g. status, next turn)
+            # and other player_states (e.g. next player's timer), and adds them to session.
+        else:
+            current_app.logger.info(f"Player {user_id} stood up, was active, but no current poker hand found for table {table_id} to record auto-fold against.")
+
+        # Log that the player was auto-folded. is_active_in_hand is already set to False.
+        current_app.logger.info(f"Player {user_id} (seat {player_state.seat_id}) stood up and was auto-folded from hand {current_poker_hand.id if current_poker_hand else 'N/A'}.")
+        # player_state is already added to session if modified
+
+    # Chips in pot from this hand are considered lost/part of the pot.
+    # Stack to return is what's left in player_state.stack_sats AFTER any game actions.
     amount_to_return = player_state.stack_sats
     user.balance += amount_to_return
     
@@ -2318,79 +2334,106 @@ def get_table_state(table_id: int, hand_id: int | None, user_id: int):
     Returns:
         A dictionary containing the table state, or an error dictionary.
     """
-    # TODO: Implement actual logic to fetch and format table state.
-    # This should include:
-    # - PokerTable details (name, blinds, limits, etc.)
-    # - Current PokerHand details (pot size, board cards, current turn, last action, etc.)
-    # - List of PokerPlayerState for all players at the table:
-    #   - For each player: user_id, username, seat_id, stack_sats, status (active, sitting out), last_action.
-    #   - CRUCIALLY: Only include hole_cards for the requesting user (user_id). Others should be masked or omitted.
-    # - Game-specific state like current bet to match, dealer position, etc.
-
     session = db.session
     table = session.query(PokerTable).options(
-        joinedload(PokerTable.player_states).joinedload(PokerPlayerState.user) # Eager load player states and their users
+        joinedload(PokerTable.player_states).joinedload(PokerPlayerState.user)
     ).get(table_id)
 
     if not table:
-        return {"error": f"Table {table_id} not found."}
+        return {"error": "Table not found."}
 
     current_hand = None
     if hand_id:
         current_hand = session.query(PokerHand).filter_by(id=hand_id, table_id=table_id).first()
-        # if not current_hand: # It's okay if a hand_id is passed that doesn't exist or isn't current
-            # current_app.logger.warning(f"Hand {hand_id} not found for table {table_id}, but returning table state.")
-
-    player_states_serializable = []
-    for ps in table.player_states: # Use eager-loaded player_states
-        player_data = {
-            "user_id": ps.user_id,
-            "username": ps.user.username if ps.user else "Unknown", 
-            "seat_id": ps.seat_id,
-            "stack_sats": ps.stack_sats,
-            "is_sitting_out": ps.is_sitting_out,
-            "is_active_in_hand": ps.is_active_in_hand,
-            "last_action": ps.last_action,
-            "hole_cards": None # Default to None
-        }
-        if ps.user_id == user_id: # Requesting user
-            player_data["hole_cards"] = ps.hole_cards 
-        elif ps.hole_cards: # Other players with cards
-            player_data["hole_cards"] = ["X", "X"] # Masked cards
-        # If ps.hole_cards is None (e.g. player not in hand or cards not revealed yet), it remains None
-
-        player_states_serializable.append(player_data)
     
-    # Placeholder response
-    response_data = {
-        "table_id": table.id,
-        "table_name": table.name,
+    if not current_hand: # If specific hand_id not found or not provided, try to get latest active hand
+        current_hand = session.query(PokerHand).filter(
+            PokerHand.table_id == table_id,
+            PokerHand.status.notin_(['completed', 'showdown'])
+        ).order_by(PokerHand.start_time.desc()).first()
+
+    # Table Information
+    table_info = {
+        "id": table.id,
+        "name": table.name,
         "game_type": table.game_type,
         "limit_type": table.limit_type,
         "small_blind": table.small_blind,
         "big_blind": table.big_blind,
         "max_seats": table.max_seats,
         "is_active": table.is_active,
-        "player_states": player_states_serializable,
-        "last_updated": datetime.now(timezone.utc).isoformat()
+        "current_dealer_seat_id": table.current_dealer_seat_id
     }
 
-    if current_hand:
-        response_data.update({
-            "current_hand_id": current_hand.id,
-            "pot_size_sats": current_hand.pot_size_sats,
-            "board_cards": current_hand.board_cards,
-            "hand_history_preview": current_hand.hand_history[-5:] if current_hand.hand_history else [],
-            # TODO: Add current_turn_user_id, current_bet_to_match, dealer_seat_id from hand/table state cache
-        })
-    else:
-         response_data.update({
-            "current_hand_id": None,
-            "pot_size_sats": 0,
-            "board_cards": [],
+    # Player States
+    player_states_info = []
+    for ps in table.player_states: # Assuming player_states are all relevant states at the table
+        hole_cards_display = None
+        if ps.hole_cards: # Player has cards
+            if ps.user_id == user_id: # Requesting user sees their own cards
+                hole_cards_display = ps.hole_cards
+            elif current_hand and current_hand.status == 'showdown' and ps.is_active_in_hand:
+                # Other players' cards at showdown if they were active
+                hole_cards_display = ps.hole_cards
+            else: # Other players, hand not in showdown or they folded
+                hole_cards_display = ["X", "X"] # Masked
+
+        time_to_act_ends_iso = None
+        if current_hand and current_hand.current_turn_user_id == ps.user_id and ps.time_to_act_ends:
+            time_to_act_ends_iso = ps.time_to_act_ends.isoformat()
+
+        player_states_info.append({
+            "user_id": ps.user_id,
+            "username": ps.user.username if ps.user else "Unknown",
+            "seat_id": ps.seat_id,
+            "stack_sats": ps.stack_sats,
+            "is_sitting_out": ps.is_sitting_out,
+            "is_active_in_hand": ps.is_active_in_hand,
+            "last_action": ps.last_action,
+            "hole_cards": hole_cards_display,
+            "total_invested_this_hand": ps.total_invested_this_hand or 0,
+            "time_to_act_ends": time_to_act_ends_iso
         })
 
-    return response_data
+    # Current Hand Information
+    hand_info = None
+    if current_hand:
+        hand_history_preview = []
+        if current_hand.hand_history and isinstance(current_hand.hand_history, list):
+            hand_history_preview = current_hand.hand_history[-10:] # Last 10 entries as a preview
+
+        hand_info = {
+            "hand_id": current_hand.id,
+            "pot_size_sats": current_hand.pot_size_sats or 0,
+            "board_cards": current_hand.board_cards or [],
+            "status": current_hand.status,
+            "current_turn_user_id": current_hand.current_turn_user_id,
+            "current_bet_to_match": current_hand.current_bet_to_match or 0,
+            "min_next_raise_amount": current_hand.min_next_raise_amount or 0,
+            "last_raiser_user_id": current_hand.last_raiser_user_id,
+            "player_street_investments": current_hand.player_street_investments or {},
+            "hand_history_preview": hand_history_preview
+        }
+    else: # Default values if no active hand
+        hand_info = {
+            "hand_id": None,
+            "pot_size_sats": 0,
+            "board_cards": [],
+            "status": "no_active_hand",
+            "current_turn_user_id": None,
+            "current_bet_to_match": 0,
+            "min_next_raise_amount": 0,
+            "last_raiser_user_id": None,
+            "player_street_investments": {},
+            "hand_history_preview": []
+        }
+
+    return {
+        "table": table_info,
+        "players": player_states_info,
+        "current_hand": hand_info,
+        "last_updated": datetime.now(timezone.utc).isoformat()
+    }
 
 # - `handle_stand_up` returns stack to balance. This is typical. If game has specific rules about leaving mid-game with winnings not yet "banked", that's more complex.
 # - Added `session.flush()` in `start_new_hand` to get `new_hand.id` if it were immediately needed for linking transactions,
