@@ -16,6 +16,11 @@ check_command() {
 echo ""
 echo "=== Setting up Backend ==="
 
+# Clean up previous test database file, if any
+echo "Removing old test database file if it exists..."
+rm -f casino_be/test_casino_be_isolated.db
+echo "Old test database file removed."
+
 # Check prerequisites
 check_command python3
 check_command pip
