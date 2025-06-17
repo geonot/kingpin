@@ -52,11 +52,11 @@ class User(db.Model):
 class GameSession(db.Model):
     __tablename__ = 'game_session'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    slot_id = db.Column(db.Integer, db.ForeignKey('slot.id'), nullable=True, index=True)
-    table_id = db.Column(db.Integer, db.ForeignKey('blackjack_table.id'), nullable=True, index=True)
-    poker_table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id'), nullable=True, index=True)
-    baccarat_table_id = db.Column(db.Integer, db.ForeignKey('baccarat_table.id'), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    slot_id = db.Column(db.Integer, db.ForeignKey('slot.id', ondelete='SET NULL'), nullable=True, index=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('blackjack_table.id', ondelete='SET NULL'), nullable=True, index=True)
+    poker_table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id', ondelete='SET NULL'), nullable=True, index=True)
+    baccarat_table_id = db.Column(db.Integer, db.ForeignKey('baccarat_table.id', ondelete='SET NULL'), nullable=True, index=True)
     game_type = db.Column(db.String(50), nullable=False, index=True)
     bonus_active = db.Column(db.Boolean, default=False, nullable=False)
     bonus_spins_remaining = db.Column(db.Integer, default=0, nullable=False)
@@ -81,7 +81,7 @@ class GameSession(db.Model):
 class SlotSpin(db.Model):
     __tablename__ = 'slot_spin'
     id = db.Column(db.Integer, primary_key=True)
-    game_session_id = db.Column(db.Integer, db.ForeignKey('game_session.id'), nullable=False, index=True)
+    game_session_id = db.Column(db.Integer, db.ForeignKey('game_session.id', ondelete='CASCADE'), nullable=False, index=True) # If a game session is deleted, its spins go too.
     spin_result = db.Column(JSON, nullable=False)
     win_amount = db.Column(BigInteger, nullable=False)
     bet_amount = db.Column(BigInteger, nullable=False)
@@ -97,22 +97,22 @@ class SlotSpin(db.Model):
 class Transaction(db.Model):
     __tablename__ = 'transaction'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True, index=True) # Changed nullable to True
     amount = db.Column(BigInteger, nullable=False)
     transaction_type = db.Column(db.String(50), nullable=False, index=True)
     status = db.Column(db.String(50), default='pending', nullable=False, index=True)
     details = db.Column(JSON, nullable=True)
-    slot_spin_id = db.Column(db.Integer, db.ForeignKey('slot_spin.id'), nullable=True, index=True)
-    blackjack_hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id'), nullable=True, index=True)
-    plinko_drop_id = db.Column(db.Integer, db.ForeignKey('plinko_drop_log.id'), nullable=True, index=True)
+    slot_spin_id = db.Column(db.Integer, db.ForeignKey('slot_spin.id', ondelete='SET NULL'), nullable=True, index=True)
+    blackjack_hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id', ondelete='SET NULL'), nullable=True, index=True)
+    plinko_drop_id = db.Column(db.Integer, db.ForeignKey('plinko_drop_log.id', ondelete='SET NULL'), nullable=True, index=True)
 
     # Relationships to game events
     slot_spin = db.relationship('SlotSpin', backref=db.backref('transactions', lazy='dynamic'))
     blackjack_hand = db.relationship('BlackjackHand', backref=db.backref('transactions', lazy='dynamic'))
     plinko_drop_log = db.relationship('PlinkoDropLog', backref=db.backref('transactions', lazy='dynamic'))
-    poker_hand_id = db.Column(db.Integer, db.ForeignKey('poker_hand.id'), nullable=True, index=True)
+    poker_hand_id = db.Column(db.Integer, db.ForeignKey('poker_hand.id', ondelete='SET NULL'), nullable=True, index=True)
     poker_hand = db.relationship('PokerHand', backref=db.backref('transactions', lazy='dynamic'))
-    baccarat_hand_id = db.Column(db.Integer, db.ForeignKey('baccarat_hand.id'), nullable=True, index=True)
+    baccarat_hand_id = db.Column(db.Integer, db.ForeignKey('baccarat_hand.id', ondelete='SET NULL'), nullable=True, index=True)
     baccarat_hand = db.relationship('BaccaratHand', backref=db.backref('transactions', lazy='dynamic'))
 
     def __repr__(self):
@@ -174,7 +174,7 @@ class Slot(db.Model):
 class SlotSymbol(db.Model):
     __tablename__ = 'slot_symbol'
     id = db.Column(db.Integer, primary_key=True)
-    slot_id = db.Column(db.Integer, db.ForeignKey('slot.id'), nullable=False, index=True)
+    slot_id = db.Column(db.Integer, db.ForeignKey('slot.id', ondelete='CASCADE'), nullable=False, index=True)
     symbol_internal_id = db.Column(db.Integer, nullable=False)
     name = db.Column(db.String(50), nullable=False)
     img_link = db.Column(db.String(255), nullable=False)
@@ -189,7 +189,7 @@ class SlotSymbol(db.Model):
 class SlotBet(db.Model):
     __tablename__ = 'slot_bet'
     id = db.Column(db.Integer, primary_key=True)
-    slot_id = db.Column(db.Integer, db.ForeignKey('slot.id'), nullable=False, index=True)
+    slot_id = db.Column(db.Integer, db.ForeignKey('slot.id', ondelete='CASCADE'), nullable=False, index=True)
     bet_amount = db.Column(BigInteger, nullable=False)
 
     __table_args__ = (Index('ix_slot_bet_slot_id_amount', 'slot_id', 'bet_amount', unique=True),)
@@ -218,9 +218,9 @@ class BlackjackTable(db.Model):
 class BlackjackHand(db.Model):
     __tablename__ = 'blackjack_hand'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    table_id = db.Column(db.Integer, db.ForeignKey('blackjack_table.id'), nullable=False, index=True)
-    session_id = db.Column(db.Integer, db.ForeignKey('game_session.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('blackjack_table.id', ondelete='RESTRICT'), nullable=False, index=True) # Prevent table deletion if hands exist
+    session_id = db.Column(db.Integer, db.ForeignKey('game_session.id', ondelete='CASCADE'), nullable=False, index=True) # Hands are part of a session
     initial_bet = db.Column(BigInteger, nullable=False)
     total_bet = db.Column(BigInteger, nullable=False)
     win_amount = db.Column(BigInteger, default=0, nullable=False)
@@ -244,7 +244,7 @@ class BlackjackHand(db.Model):
 class BlackjackAction(db.Model):
     __tablename__ = 'blackjack_action'
     id = db.Column(db.Integer, primary_key=True)
-    hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id'), nullable=False, index=True)
+    hand_id = db.Column(db.Integer, db.ForeignKey('blackjack_hand.id', ondelete='CASCADE'), nullable=False, index=True)
     action_type = db.Column(db.String(20), nullable=False)
     hand_index = db.Column(db.Integer, nullable=False)
     card_dealt = db.Column(db.String(10), nullable=True)
@@ -257,8 +257,8 @@ class BlackjackAction(db.Model):
 class UserBonus(db.Model):
     __tablename__ = 'user_bonus'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    bonus_code_id = db.Column(db.Integer, db.ForeignKey('bonus_code.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    bonus_code_id = db.Column(db.Integer, db.ForeignKey('bonus_code.id', ondelete='RESTRICT'), nullable=False, index=True)
     bonus_amount_awarded_sats = db.Column(BigInteger, nullable=False)
     wagering_requirement_sats = db.Column(BigInteger, nullable=False)
     wagering_progress_sats = db.Column(BigInteger, default=0, nullable=False)
@@ -299,8 +299,8 @@ class SpacecrashGame(db.Model):
 class SpacecrashBet(db.Model):
     __tablename__ = 'spacecrash_bet'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    game_id = db.Column(db.Integer, db.ForeignKey('spacecrash_game.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    game_id = db.Column(db.Integer, db.ForeignKey('spacecrash_game.id', ondelete='CASCADE'), nullable=False, index=True) # If game is deleted, bets are too
     bet_amount = db.Column(BigInteger, nullable=False)
     auto_eject_at = db.Column(db.Float, nullable=True)
     ejected_at = db.Column(db.Float, nullable=True)
@@ -344,7 +344,7 @@ class PokerTable(db.Model):
 class PokerHand(db.Model):
     __tablename__ = 'poker_hand'
     id = db.Column(db.Integer, primary_key=True)
-    table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id'), nullable=False, index=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id', ondelete='CASCADE'), nullable=False, index=True) # If table is deleted, hands are too
     hand_history = db.Column(JSON, nullable=False)
     board_cards = db.Column(JSON, nullable=True)
     pot_size_sats = db.Column(BigInteger, nullable=False, default=0)
@@ -356,11 +356,11 @@ class PokerHand(db.Model):
     deck_state = db.Column(db.JSON, nullable=True)
 
     # Fields for tracking betting state within a hand
-    current_turn_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    current_turn_user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
     current_bet_to_match = db.Column(db.BigInteger, default=0, nullable=False)
     player_street_investments = db.Column(JSON, nullable=True, default=lambda: {}) # Tracks {user_id: amount} for current street
     min_next_raise_amount = db.Column(db.BigInteger, nullable=True) # Minimum valid increment for the next raise
-    last_raiser_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # Tracks the last player who bet/raised
+    last_raiser_user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True) # Tracks the last player who bet/raised
 
     # Relationships for ForeignKey fields
     current_turn_player = db.relationship('User', foreign_keys=[current_turn_user_id], backref=db.backref('poker_hands_current_turn', lazy='dynamic'))
@@ -373,8 +373,8 @@ class PokerHand(db.Model):
 class PokerPlayerState(db.Model):
     __tablename__ = 'poker_player_state'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('poker_table.id', ondelete='CASCADE'), nullable=False, index=True) # If table is deleted, player states are too
     seat_id = db.Column(db.Integer, nullable=False)
     stack_sats = db.Column(BigInteger, nullable=False)
     is_sitting_out = db.Column(db.Boolean, default=False, nullable=False)
@@ -401,7 +401,7 @@ class PlinkoDropLog(db.Model):
     __tablename__ = 'plinko_drop_log'
     
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
     stake_amount = db.Column(db.BigInteger, nullable=False)  # In satoshis
     chosen_stake_label = db.Column(db.String(50), nullable=False)
     slot_landed_label = db.Column(db.String(50), nullable=False)
@@ -426,7 +426,7 @@ class TokenBlacklist(db.Model):
 class RouletteGame(db.Model):
     __tablename__ = 'roulette_game'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
     bet_amount = db.Column(db.BigInteger, nullable=False)
     bet_type = db.Column(db.String(50), nullable=False)  # e.g., 'straight_up_0', 'red', 'even', 'column_1', 'dozen_1'
     winning_number = db.Column(db.Integer, nullable=True) # Nullable until wheel spins
@@ -461,9 +461,9 @@ class BaccaratTable(db.Model):
 class BaccaratHand(db.Model):
     __tablename__ = 'baccarat_hand'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    table_id = db.Column(db.Integer, db.ForeignKey('baccarat_table.id'), nullable=False, index=True)
-    game_session_id = db.Column(db.Integer, db.ForeignKey('game_session.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    table_id = db.Column(db.Integer, db.ForeignKey('baccarat_table.id', ondelete='RESTRICT'), nullable=False, index=True) # Prevent table deletion if hands exist
+    game_session_id = db.Column(db.Integer, db.ForeignKey('game_session.id', ondelete='CASCADE'), nullable=False, index=True) # Hands are part of a session
     initial_bet_player = db.Column(BigInteger, default=0, nullable=False)
     initial_bet_banker = db.Column(BigInteger, default=0, nullable=False)
     initial_bet_tie = db.Column(BigInteger, default=0, nullable=False)
@@ -492,8 +492,8 @@ class BaccaratHand(db.Model):
 class BaccaratAction(db.Model):
     __tablename__ = 'baccarat_action'
     id = db.Column(db.Integer, primary_key=True)
-    baccarat_hand_id = db.Column(db.Integer, db.ForeignKey('baccarat_hand.id'), nullable=False, index=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True) # User performing the action
+    baccarat_hand_id = db.Column(db.Integer, db.ForeignKey('baccarat_hand.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True) # User performing the action
     action_type = db.Column(db.String(50), nullable=False) # e.g., "place_bet", "player_draw", "banker_draw"
     bet_on_player = db.Column(BigInteger, nullable=True)
     bet_on_banker = db.Column(BigInteger, nullable=True)
@@ -533,7 +533,7 @@ class CrystalSeed(db.Model):
 class PlayerGarden(db.Model):
     __tablename__ = 'player_garden'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)  # One garden per user
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), unique=True, nullable=False)  # One garden per user
     grid_size_x = db.Column(db.Integer, default=5, nullable=False)
     grid_size_y = db.Column(db.Integer, default=5, nullable=False)
     last_cycle_time = db.Column(DateTime, nullable=True)  # To track sun/moon cycle progression
@@ -557,9 +557,9 @@ class PlayerGarden(db.Model):
 class CrystalFlower(db.Model):
     __tablename__ = 'crystal_flower'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    crystal_seed_id = db.Column(db.Integer, db.ForeignKey('crystal_seed.id'), nullable=False)
-    player_garden_id = db.Column(db.Integer, db.ForeignKey('player_garden.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    crystal_seed_id = db.Column(db.Integer, db.ForeignKey('crystal_seed.id', ondelete='RESTRICT'), nullable=False) # Prevent seed deletion if flowers exist
+    player_garden_id = db.Column(db.Integer, db.ForeignKey('player_garden.id', ondelete='CASCADE'), nullable=False)
     planted_at = db.Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     growth_stage = db.Column(db.String, nullable=False)  # e.g., 'seeded', 'sprouting', 'blooming', 'withered'
     color = db.Column(db.String, nullable=True)
@@ -600,7 +600,7 @@ class CrystalFlower(db.Model):
 class CrystalCodexEntry(db.Model):
     __tablename__ = 'crystal_codex_entry'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
     crystal_name = db.Column(db.String, nullable=False)  # e.g., "Large Blue Sapphire"
     color = db.Column(db.String, nullable=False)
     size = db.Column(Float, nullable=False)

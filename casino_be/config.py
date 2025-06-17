@@ -52,9 +52,9 @@ class Config:
 
 class TestingConfig(Config):
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = 'postgresql:///./test_casino_be_isolated.db' # File-based for test isolation
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///./test_casino_be_isolated.db' # File-based for test isolation using SQLite
     # Define a key to store the database file path for easy cleanup
-    DATABASE_FILE_PATH = SQLALCHEMY_DATABASE_URI.replace('postgresql:///', '')
+    DATABASE_FILE_PATH = SQLALCHEMY_DATABASE_URI.replace('sqlite:///', '') # Adjusted for SQLite
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = 'test-jwt-secret-key'
     # Disable CSRF protection for tests if applicable (e.g., if using Flask-WTF)

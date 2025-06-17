@@ -95,6 +95,7 @@ def login():
 
     user = User.query.filter_by(username=validated_data['username']).first()
     if not user or not User.verify_password(user.password, validated_data['password']):
+        current_app.logger.warning(f"Login attempt failed for username: {validated_data['username']}")
         return jsonify({'status': False, 'status_message': 'Invalid credentials.'}), 401
 
     # Update last login time

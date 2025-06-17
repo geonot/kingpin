@@ -2,7 +2,9 @@ import os
 import time
 import requests
 import logging
+import uuid # Added for cycle_id
 from dotenv import load_dotenv
+from pythonjsonlogger import jsonlogger # Added for JSON logging
 
 # Load environment variables from .env file first
 # This is important so that create_app() sees the DB URI if poller is run standalone
@@ -29,28 +31,38 @@ NETWORK = os.getenv('NETWORK', 'testnet')
 # --- Logging Setup ---
 # Get FLASK_ENV, default to 'development' if not set
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')
-POLLER_LOG_FILE = os.getenv('POLLER_LOG_FILE', '/var/log/casino_be_poller.log')
-
-log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+POLLER_LOG_FILE = os.getenv('POLLER_LOG_FILE', '/var/log/casino_be_poller.log') # Ensure this path is writable by the poller process
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+logger.handlers = [] # Clear existing handlers if any from basicConfig or re-runs
 
-# Configure StreamHandler (console output)
-stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(log_formatter)
-logger.addHandler(stream_handler)
-
-# Configure FileHandler for production
 if FLASK_ENV == 'production':
+    # JSON Formatter for production
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(levelname)s %(name)s %(module)s %(funcName)s %(lineno)d %(message)s'
+    )
+    # Console handler with JSON
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+    # File handler with JSON
     try:
         file_handler = logging.FileHandler(POLLER_LOG_FILE)
-        file_handler.setFormatter(log_formatter)
+        file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-        logger.info(f"Production logging enabled. Log file: {POLLER_LOG_FILE}")
+        logger.info(f"Production JSON logging enabled. Log file: {POLLER_LOG_FILE}")
     except Exception as e:
-        logger.error(f"Failed to configure FileHandler for production: {e}", exc_info=True)
-        # Fallback to console logging only if file handler setup fails
+        logger.error(f"Failed to configure FileHandler for production JSON logging: {e}", exc_info=True)
+        # StreamHandler is already added, so logs will still go to console
+else:
+    # Standard text formatter for development
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+    logger.info("Development logging enabled (text format to console).")
+
 
 # --- Globals ---
 # In a production system, this should be persistent (e.g., Redis, database table)
@@ -159,151 +171,129 @@ def update_player_balance_api(user_id: int, amount_sats: int, original_tx_id: st
         logger.error(f"API call to update balance failed for user {user_id}, tx {original_tx_id}: {e}", exc_info=True)
         return False
 
-def check_address_for_transactions(deposit_address: str, user_id: int):
+def check_address_for_transactions(deposit_address: str, user_id: int, cycle_id: str):
     """
     Checks a given deposit address for new transactions using a blockchain explorer API.
     Processes confirmed deposits by attempting to sweep to hot wallet and updating balance.
+    Includes a cycle_id for log correlation.
     """
     if not deposit_address:
-        logger.warning(f"Skipping check for user {user_id} due to missing deposit address.")
+        logger.warning(f"Skipping check for user {user_id} due to missing deposit address. Cycle: {cycle_id}")
         return
 
     explorer_url = f"{BLOCKCHAIN_EXPLORER_API_BASE_URL}/address/{deposit_address}/txs"
-    logger.info(f"Checking for transactions for address: {deposit_address} (User ID: {user_id})")
+    logger.info(f"Checking for transactions for address: {deposit_address} (User ID: {user_id}, Cycle: {cycle_id})")
 
     try:
         response = requests.get(explorer_url, timeout=20) # Increased timeout for explorer API
         response.raise_for_status()  # Raise HTTPError for bad responses (4XX or 5XX)
         transactions = response.json()
     except requests.RequestException as e:
-        logger.error(f"Could not fetch transactions for {deposit_address}: {e}", exc_info=True)
+        logger.error(f"Could not fetch transactions for {deposit_address} (User ID: {user_id}, Cycle: {cycle_id}): {e}", exc_info=True)
         return
     except ValueError as e: # Includes JSONDecodeError
-        logger.error(f"Could not decode JSON response for {deposit_address}: {e}. Response text: {response.text[:200]}")
+        logger.error(f"Could not decode JSON response for {deposit_address} (User ID: {user_id}, Cycle: {cycle_id}): {e}. Response text: {response.text[:200]}")
         return
 
 
     if not transactions:
-        logger.info(f"No transactions found for address: {deposit_address}")
+        logger.info(f"No transactions found for address: {deposit_address} (User ID: {user_id}, Cycle: {cycle_id})")
         return
 
-    logger.info(f"Found {len(transactions)} transactions for address {deposit_address}.")
+    logger.info(f"Found {len(transactions)} transactions for address {deposit_address} (User ID: {user_id}, Cycle: {cycle_id}).")
 
     for tx in transactions:
         txid = tx.get('txid')
         if not txid:
-            logger.warning(f"Found a transaction without a txid for address {deposit_address}. Skipping. TX: {tx}")
+            logger.warning(f"Found a transaction without a txid for address {deposit_address} (User ID: {user_id}, Cycle: {cycle_id}). Skipping. TX: {tx}")
             continue
 
         if txid in PROCESSED_TX_IDS:
-            logger.debug(f"Transaction {txid} already processed. Skipping.")
+            logger.debug(f"Transaction {txid} already processed. Skipping. (User ID: {user_id}, Cycle: {cycle_id})")
             continue
 
         # Check confirmations (structure depends on Blockstream API)
-        # status = {'confirmed': True, 'block_height': 700000, 'block_hash': '...', 'block_time': ...}
         status = tx.get('status')
         if not status or not status.get('confirmed'):
-            logger.info(f"Transaction {txid} for address {deposit_address} is not confirmed yet. Skipping.")
+            logger.info(f"Transaction {txid} for address {deposit_address} is not confirmed yet. Skipping. (User ID: {user_id}, Cycle: {cycle_id})")
             continue
 
-        # Simplified confirmation check (Blockstream API provides block_height)
-        # For more robust confirmation counting, you'd need current block height.
-        # Assuming if 'confirmed' is true and block_height exists, it meets MIN_CONFIRMATIONS for this example.
-        # A real implementation would compare status.block_height with (current_block_height - MIN_CONFIRMATIONS + 1)
-        if status.get('block_height') is None : # If confirmed but no block height, something is odd.
-             logger.warning(f"Transaction {txid} is confirmed but has no block_height. Skipping for safety.")
+        if status.get('block_height') is None :
+             logger.warning(f"Transaction {txid} is confirmed but has no block_height. Skipping for safety. (User ID: {user_id}, Cycle: {cycle_id})")
              continue
 
-        # Calculate amount sent to the deposit_address
-        # This requires iterating through outputs (vout)
         amount_received_sats = 0
         for vout in tx.get('vout', []):
             if vout.get('scriptpubkey_address') == deposit_address:
                 amount_received_sats += vout.get('value', 0)
 
         if amount_received_sats <= 0:
-            logger.info(f"No amount found for deposit_address {deposit_address} in tx {txid}. Skipping.")
+            logger.info(f"No amount found for deposit_address {deposit_address} in tx {txid}. Skipping. (User ID: {user_id}, Cycle: {cycle_id})")
             continue
 
-        logger.info(f"Confirmed transaction {txid} for address {deposit_address} with {amount_received_sats} sats.")
+        logger.info(f"Confirmed transaction {txid} for address {deposit_address} with {amount_received_sats} sats. (User ID: {user_id}, Cycle: {cycle_id})")
 
         private_key_wif = get_private_key_for_address(deposit_address)
         if not private_key_wif:
             logger.error(
                 f"CRITICAL: Could not retrieve private key for address {deposit_address} (User ID: {user_id}) for tx {txid}. "
-                "Cannot attempt sweep. Manual intervention likely required if this is not the KNOWN_TESTNET_ADDRESS."
+                f"Cannot attempt sweep. Manual intervention likely required if this is not the KNOWN_TESTNET_ADDRESS. Cycle: {cycle_id}"
             )
-            # Depending on policy, you might add txid to PROCESSED_TX_IDS to avoid retrying a non-sweepable TX,
-            # or leave it for manual check. For now, we skip adding to processed if sweep prep fails.
             continue
 
-        # Simulate sweeping the entire received amount (minus a placeholder fee)
-        # A real sweep needs to manage UTXOs for the deposit_address.
-        # The `send_to_hot_wallet` in bitcoin.py is a placeholder.
-        # For simplicity, assume fee is small or handled by send_to_hot_wallet.
-        # The `amount_received_sats` is what we want to credit. The sweep function would handle the actual balance.
-
-        # For simulation, we assume the sweep function will attempt to send `amount_received_sats`.
-        # A more realistic sweep would get the total balance of `deposit_address` and send that.
-        # Let's assume `send_to_hot_wallet` is smart enough to sweep the UTXO corresponding to `amount_received_sats`
-        # or the entire balance of the address if that's how it's designed.
-        # The placeholder `send_to_hot_wallet` just logs, so we pass `amount_received_sats`.
-
-        # Placeholder fee for simulation. A real system calculates this based on tx size and fee rate.
-        simulated_fee_sats = 1000
+        simulated_fee_sats = 1000 # Placeholder fee
 
         sweep_txid = send_to_hot_wallet(
             private_key_wif=private_key_wif,
-            amount_sats=amount_received_sats, # This is the amount to credit. The sweep should ideally take total balance.
+            amount_sats=amount_received_sats,
             hot_wallet_address=HOT_WALLET_ADDRESS,
-            fee_sats=simulated_fee_sats # Placeholder fee
+            fee_sats=simulated_fee_sats
         )
 
-        if sweep_txid: # If simulated sweep is successful
-            logger.info(f"Successfully simulated sweep of {amount_received_sats} sats from {deposit_address} to {HOT_WALLET_ADDRESS}. Sweep TXID: {sweep_txid}")
-            if update_player_balance_api(user_id, amount_received_sats, txid):
-                logger.info(f"Successfully processed deposit {txid} for user {user_id}, amount {amount_received_sats}.")
+        if sweep_txid:
+            logger.info(f"Successfully simulated sweep of {amount_received_sats} sats from {deposit_address} to {HOT_WALLET_ADDRESS}. Sweep TXID: {sweep_txid}. (User ID: {user_id}, Cycle: {cycle_id})")
+            # Pass cycle_id to update_player_balance_api if it were enhanced to log it or include in API call
+            if update_player_balance_api(user_id, amount_received_sats, txid): # cycle_id could be logged inside this func if modified
+                logger.info(f"Successfully processed deposit {txid} for user {user_id}, amount {amount_received_sats}. (Cycle: {cycle_id})")
                 PROCESSED_TX_IDS.add(txid)
             else:
                 logger.error(
-                    f"Failed to update balance via API for user {user_id} after successful sweep of tx {txid}. "
+                    f"Failed to update balance via API for user {user_id} after successful sweep of tx {txid}. Cycle: {cycle_id}. "
                     "This is a critical issue requiring manual reconciliation."
                 )
-                # Do NOT add to PROCESSED_TX_IDS if API update fails, so it can be retried.
         else:
             logger.error(
-                f"Failed to simulate sweep for tx {txid} from address {deposit_address} (User ID: {user_id}). "
+                f"Failed to simulate sweep for tx {txid} from address {deposit_address} (User ID: {user_id}). Cycle: {cycle_id}. "
                 "Deposit will not be credited automatically at this time."
             )
-            # Do not add to PROCESSED_TX_IDS if sweep fails.
 
 def poll_deposits():
     """
     Main polling function to check for new deposits.
     Runs within a Flask app context.
     """
+    cycle_id = str(uuid.uuid4())
+    logger.info(f"Starting polling cycle ID: {cycle_id}")
+
     app = create_app()
     with app.app_context():
-        logger.info("Polling for new Bitcoin deposits...")
+        logger.info(f"Polling for new Bitcoin deposits... Cycle: {cycle_id}")
         try:
             users_with_wallets = User.query.filter(User.deposit_wallet_address.isnot(None)).all()
             if not users_with_wallets:
-                logger.info("No users with deposit wallets found to poll.")
+                logger.info(f"No users with deposit wallets found to poll. Cycle: {cycle_id}")
                 return
 
-            logger.info(f"Found {len(users_with_wallets)} users with deposit wallets.")
+            logger.info(f"Found {len(users_with_wallets)} users with deposit wallets. Cycle: {cycle_id}")
             for user in users_with_wallets:
-                if user.deposit_wallet_address: # Redundant check, but good practice
-                    check_address_for_transactions(user.deposit_wallet_address, user.id)
+                if user.deposit_wallet_address:
+                    check_address_for_transactions(user.deposit_wallet_address, user.id, cycle_id)
                 else:
-                    logger.warning(f"User ID {user.id} listed with wallets but has no deposit_wallet_address. Skipping.")
+                    logger.warning(f"User ID {user.id} listed with wallets but has no deposit_wallet_address. Skipping. Cycle: {cycle_id}")
         except Exception as e:
-            logger.error(f"Error during polling cycle: {e}", exc_info=True)
+            logger.error(f"Error during polling cycle {cycle_id}: {e}", exc_info=True)
         finally:
-            # Explicitly close the database session if using SQLAlchemy session directly
-            # For Flask-SQLAlchemy, db.session is typically managed per request or app context.
-            # db.session.remove() # Or db.session.close() if appropriate
-            logger.info("Polling cycle finished.")
+            logger.info(f"Polling cycle {cycle_id} finished.")
 
 
 if __name__ == '__main__':
