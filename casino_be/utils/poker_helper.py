@@ -29,13 +29,10 @@ def _create_deck() -> list[str]:
 
 def _shuffle_deck(deck: list[str]) -> None:
     """Shuffles the deck in place using secrets.SystemRandom for better randomness."""
-    # secrets.SystemRandom().shuffle(deck) # This is the preferred way if secrets.SystemRandom has shuffle
-    # random.shuffle uses Mersenne Twister which is fine for most simulations but not cryptographically secure
-    # For card games, especially involving real money, stronger shuffling is good practice.
-    # Python's default random.shuffle is usually sufficient for non-critical applications.
-    # Let's use random.shuffle for now for simplicity as secrets.SystemRandom().shuffle isn't a direct method.
-    # A more robust shuffle could involve multiple shuffles or a CSPRNG.
-    random.shuffle(deck)
+    # Use cryptographically secure shuffling for real money games
+    # secrets.SystemRandom provides cryptographically secure randomness
+    secure_random = secrets.SystemRandom()
+    secure_random.shuffle(deck)
 
 
 def _deal_card_from_deck_list(deck_list: list[str]) -> str | None:

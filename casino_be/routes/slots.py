@@ -1,11 +1,16 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
+from functools import wraps
+import time
 
 from models import db, User, GameSession, Slot, SlotBet # SlotBet imported
 from schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
 from utils.spin_handler import handle_spin
 from utils.multiway_helper import handle_multiway_spin
+from utils.game_config_manager import GameConfigManager
+from utils.security_logger import SecurityLogger, audit_financial_operation, audit_game_operation
+from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
 
 slots_bp = Blueprint('slots', __name__, url_prefix='/api/slots')
 
@@ -20,19 +25,83 @@ def get_slots_list(): # Renamed from get_slots to avoid conflict if any other ge
         current_app.logger.error(f"Failed to retrieve slots list: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Could not retrieve slot information.'}), 500
 
+@slots_bp.route('/<int:slot_id>/config', methods=['GET'])
+@jwt_required()
+@rate_limit_by_ip("60 per minute")  # Allow more frequent config requests
+def get_slot_config(slot_id):
+    """
+    Get sanitized slot configuration for client-side use
+    This replaces direct access to gameConfig.json files
+    """
+    try:
+        # Validate slot exists and user has access
+        slot = Slot.query.get(slot_id)
+        if not slot:
+            return jsonify({'status': False, 'status_message': 'Slot not found'}), 404
+        
+        # Get sanitized configuration for client
+        client_config = GameConfigManager.get_client_config(slot_id)
+        if not client_config:
+            current_app.logger.error(f"Failed to load client config for slot {slot_id}")
+            return jsonify({'status': False, 'status_message': 'Configuration not available'}), 500
+        
+        # Add allowed bet amounts from database
+        allowed_bets = [bet.bet_amount for bet in slot.bets]
+        if allowed_bets:
+            client_config["game"]["settings"]["betOptions"] = sorted(allowed_bets)
+        
+        return jsonify({
+            'status': True,
+            'config': client_config,
+            'slot_info': {
+                'id': slot.id,
+                'name': slot.name,
+                'short_name': slot.short_name,
+                'is_multiway': slot.is_multiway
+            }
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error serving slot config {slot_id}: {str(e)}", exc_info=True)
+        return jsonify({'status': False, 'status_message': 'Configuration error'}), 500
+
 @slots_bp.route('/spin', methods=['POST'])
 @jwt_required()
+@require_csrf_token
+@rate_limit_by_ip("30 per minute")  # Max 30 spins per minute per user
 def spin():
-    data = request.get_json()
+    # Enhanced input validation and security checks
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': False, 'status_message': 'Invalid JSON data'}), 400
+    except Exception as e:
+        current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - Invalid JSON in spin request: {str(e)}")
+        return jsonify({'status': False, 'status_message': 'Invalid request format'}), 400
+
+    # Validate against schema
     errors = SpinRequestSchema().validate(data)
     if errors:
+        current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - Spin validation errors: {errors}")
         return jsonify({'status': False, 'status_message': errors}), 400
 
     user = current_user
     bet_amount_sats = data['bet_amount']
 
-    if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
-        return jsonify({'status': False, 'status_message': 'Invalid bet amount.'}), 400
+    # Additional security validations
+    if not isinstance(bet_amount_sats, int):
+        current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - Non-integer bet amount from user {user.id}: {bet_amount_sats}")
+        return jsonify({'status': False, 'status_message': 'Bet amount must be an integer'}), 400
+    
+    if bet_amount_sats <= 0:
+        current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - Non-positive bet amount from user {user.id}: {bet_amount_sats}")
+        return jsonify({'status': False, 'status_message': 'Bet amount must be positive'}), 400
+    
+    # Check for potential overflow attacks
+    if bet_amount_sats > 2**31 - 1:
+        log_security_event('OVERFLOW_ATTACK_ATTEMPT', user.id, {'bet_amount': bet_amount_sats})
+        current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - Overflow attack attempt from user {user.id}: {bet_amount_sats}")
+        return jsonify({'status': False, 'status_message': 'Bet amount exceeds maximum allowed value'}), 400
 
     # Ensure there's an active game session for a slot game
     game_session = GameSession.query.filter_by(user_id=user.id, game_type='slot', session_end=None).order_by(GameSession.session_start.desc()).first()
@@ -58,22 +127,80 @@ def spin():
     if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0):
         return jsonify({'status': False, 'status_message': 'Insufficient balance'}), 400
 
+    # Log the spin attempt for security auditing
+    SecurityLogger.log_game_event(
+        event_type='spin_attempt',
+        user_id=user.id,
+        game_type='slot',
+        bet_amount=bet_amount_sats,
+        game_session_id=game_session.id,
+        details={
+            'slot_id': slot.id,
+            'slot_name': slot.name,
+            'is_multiway': slot.is_multiway,
+            'bonus_active': game_session.bonus_active
+        }
+    )
+
     spin_result_data = None
+    balance_before = user.balance
+    
     try:
         if slot.is_multiway:
             if not slot.reel_configurations:
+                SecurityLogger.log_security_event(
+                    event_type='invalid_slot_configuration',
+                    severity='high',
+                    user_id=user.id,
+                    details={'slot_id': slot.id, 'issue': 'missing_reel_configurations'}
+                )
                 current_app.logger.error(f"Spin attempt on multiway slot {slot.id} without reel_configurations by user {user.id}")
                 return jsonify({"status": False, "status_message": "Slot is configured as multiway but lacks essential reel configurations."}), 400
 
-            if not slot.symbols: # Make sure symbols are loaded for multiway slot
-                 current_app.logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}")
-                 return jsonify({"status": False, "status_message": "Slot configuration incomplete (symbols missing)."}), 400
+            if not slot.symbols:
+                SecurityLogger.log_security_event(
+                    event_type='invalid_slot_configuration',
+                    severity='high',
+                    user_id=user.id,
+                    details={'slot_id': slot.id, 'issue': 'missing_symbols'}
+                )
+                current_app.logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}")
+                return jsonify({"status": False, "status_message": "Slot configuration incomplete (symbols missing)."}), 400
 
             spin_result_data = handle_multiway_spin(user, slot, game_session, bet_amount_sats)
         else:
             spin_result_data = handle_spin(user, slot, game_session, bet_amount_sats)
 
         db.session.commit()
+        
+        # Log successful spin with financial details
+        SecurityLogger.log_financial_event(
+            event_type='slot_spin',
+            user_id=user.id,
+            amount=-bet_amount_sats,  # Negative for bet
+            balance_before=balance_before,
+            balance_after=user.balance,
+            details={
+                'slot_id': slot.id,
+                'win_amount': spin_result_data['win_amount_sats'],
+                'game_session_id': game_session.id
+            }
+        )
+        
+        if spin_result_data['win_amount_sats'] > 0:
+            SecurityLogger.log_financial_event(
+                event_type='slot_win',
+                user_id=user.id,
+                amount=spin_result_data['win_amount_sats'],
+                balance_before=balance_before,
+                balance_after=user.balance,
+                details={
+                    'slot_id': slot.id,
+                    'bet_amount': bet_amount_sats,
+                    'winning_lines': len(spin_result_data.get('winning_lines', [])),
+                    'bonus_triggered': spin_result_data.get('bonus_triggered', False)
+                }
+            )
 
         return jsonify({
             'status': True,
@@ -85,14 +212,37 @@ def spin():
             'bonus_spins_remaining': spin_result_data['bonus_spins_remaining'],
             'bonus_multiplier': spin_result_data['bonus_multiplier'],
             'game_session': GameSessionSchema().dump(game_session),
-            'user': UserSchema().dump(user) # Ensure user balance is up-to-date
+            'user': UserSchema().dump(user)
         }), 200
+        
     except ValueError as ve:
         db.session.rollback()
+        SecurityLogger.log_security_event(
+            event_type='spin_validation_error',
+            severity='medium',
+            user_id=user.id,
+            details={
+                'slot_id': slot.id,
+                'bet_amount': bet_amount_sats,
+                'error': str(ve)
+            }
+        )
         current_app.logger.warning(f"Spin ValueError for user {user.id} on slot {slot.id if slot else 'N/A'}: {str(ve)}")
         return jsonify({'status': False, 'status_message': str(ve)}), 400
+        
     except Exception as e:
         db.session.rollback()
+        SecurityLogger.log_security_event(
+            event_type='spin_system_error',
+            severity='high',
+            user_id=user.id,
+            details={
+                'slot_id': slot.id,
+                'bet_amount': bet_amount_sats,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+        )
         current_app.logger.error(f"Spin error: {str(e)}", exc_info=True)
         return jsonify({'status': False, 'status_message': 'Spin processing error.'}), 500
 

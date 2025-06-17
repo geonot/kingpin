@@ -1,0 +1,331 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for src/views/static/ResponsibleGamingPage.vue</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../../prettify.css" />
+    <link rel="stylesheet" href="../../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../../index.html">All files</a> / <a href="index.html">src/views/static</a> ResponsibleGamingPage.vue</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>0/9</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>0/2</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>0/1</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>0/9</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">&lt;template&gt;
+  &lt;div class="container mx-auto px-4 py-8"&gt;
+    &lt;h1 class="mb-6"&gt;Responsible Gaming&lt;/h1&gt;
+<span class="cstat-no" title="statement not covered" ></span>
+    &lt;div class="card prose dark:prose-invert max-w-none"&gt;
+      &lt;p class="mb-4"&gt;
+<span class="cstat-no" title="statement not covered" >        Kingpin Casino is </span>committed to responsible gaming and providing a safe and enjoyable experience for all our players. We understand that gambling can be addictive for some individuals, and we aim to provide resources and tools to help manage your play.
+      &lt;/p&gt;
+&nbsp;
+      &lt;h2 class="text-2xl font-semibold mt-6 mb-3"&gt;1. Our Commitment&lt;/h2&gt;
+      &lt;p class="mb-4"&gt;
+        We are dedicated to:
+      &lt;/p&gt;
+      &lt;ul class="list-disc list-inside mb-4"&gt;
+        &lt;li&gt;Preventing underage gambling.&lt;/li&gt;
+        &lt;li&gt;Providing tools for players to control their gambling habits.&lt;/li&gt;
+        &lt;li&gt;Offering resources for those who may need help with problem gambling.&lt;/li&gt;
+        &lt;li&gt;Ensuring a fair and transparent gaming environment.&lt;/li&gt;
+      &lt;/ul&gt;
+&nbsp;
+      &lt;h2 class="text-2xl font-semibold mt-6 mb-3"&gt;2. Tools to Help You Stay in Control&lt;/h2&gt;
+      &lt;p class="mb-4"&gt;
+        We plan to offer the following tools to help you manage your gaming activity (These tools are currently NOT implemented and are listed as examples of what a responsible gaming policy might include):
+<span class="cstat-no" title="statement not covered" >      &lt;/p&gt;</span>
+      &lt;ul class="list-disc list-inside mb-4"&gt;
+<span class="cstat-no" title="statement not covered" >        &lt;li&gt;&lt;strong&gt;Deposit Limits:&lt;/strong&gt; Set daily, weekly, or monthly limits on the amount you can deposit. (Placeholder - UI for this is not yet built)&lt;/li&gt;</span>
+        &lt;li&gt;&lt;strong&gt;Session Time Limits:&lt;/strong&gt; Set limits on how long you can play in a single session. (Placeholder)&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;Cool-Off Periods:&lt;/strong&gt; Take a short break from gambling for a specified period (e.g., 24 hours, 1 week, 1 month). (Placeholder)&lt;/li&gt;
+<span class="cstat-no" title="statement not covered" >        &lt;li&gt;&lt;strong&gt;Self-</span>Exclusion:&lt;/strong&gt; Exclude yourself from accessing our platform for a longer period (e.g., 6 months, 1 year, permanently). (Placeholder)&lt;/li&gt;
+      &lt;/ul&gt;<span class="cstat-no" title="statement not covered" ></span>
+      &lt;p class="mb-<span class="cstat-no" title="statement not covered" >4"&gt;</span>
+        To set any limits or to self-exclude, you will be able to access these options through your account settings page once implemented.
+      &lt;/p&gt;
+<span class="fstat-no" title="function not covered" ></span>
+<span class="cstat-no" title="statement not covered" >      &lt;h2 class="text-2xl font-semibold mt-6 mb-3"&gt;3. Understanding Problem Gambling&lt;/h2&gt;</span>
+<span class="cstat-no" title="statement not covered" >      &lt;p class="mb-4"&gt;</span>
+        Problem gambling can affect anyone. Some signs may include:
+      &lt;/p&gt;
+      &lt;ul class="list-disc list-inside mb-4"&gt;
+        &lt;li&gt;Spending more money or time gambling than you can afford.&lt;/li&gt;
+        &lt;li&gt;Chasing losses.&lt;/li&gt;
+        &lt;li&gt;Gambling interfering with personal relationships or work.&lt;/li&gt;
+        &lt;li&gt;Feeling anxious or stressed about your gambling.&lt;/li&gt;
+        &lt;li&gt;Borrowing money to gamble.&lt;/li&gt;
+      &lt;/ul&gt;
+&nbsp;
+      &lt;h2 class="text-2xl font-semibold mt-6 mb-3"&gt;4. Getting Help&lt;/h2&gt;
+      &lt;p class="mb-4"&gt;
+        If you feel you may have a problem with gambling, or know someone who does, confidential help and support are available from various organizations. Please consider reaching out to them:
+      &lt;/p&gt;
+      &lt;ul class="list-disc list-inside mb-4"&gt;
+        &lt;li&gt;&lt;strong&gt;Gamblers Anonymous:&lt;/strong&gt; (Link to relevant GA website - Placeholder)&lt;/li&gt;
+        &lt;li&gt;&lt;strong&gt;National Council on Problem Gambling:&lt;/strong&gt; (Link to relevant NCPG website - Placeholder)&lt;/li&gt;
+        &lt;li&gt;Local support groups and helplines.&lt;/li&gt;
+      &lt;/ul&gt;
+&nbsp;
+      &lt;h2 class="text-2xl font-semibold mt-6 mb-3"&gt;5. Preventing Underage Gambling&lt;/h2&gt;
+      &lt;p class="mb-4"&gt;
+        It is illegal for anyone under the age of 18 (or the legal gambling age in your jurisdiction) to open an account or to play on Kingpin Casino. We take our responsibilities in this regard very seriously and perform age verification checks.
+      &lt;/p&gt;
+&nbsp;
+      &lt;p class="mt-6 font-semibold"&gt;
+        This is a placeholder responsible gaming policy. It is crucial to implement the described tools and provide accurate information and resources before production launch.
+      &lt;/p&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/template&gt;
+&nbsp;
+&lt;script&gt;
+import { defineComponent } from 'vue';
+&nbsp;
+export default defineComponent({
+  name: 'ResponsibleGamingPage',
+  setup() {
+    return {};
+  },
+});
+&lt;/script&gt;
+&nbsp;
+&lt;style scoped&gt;
+/* Add specific styles if needed */
+&lt;/style&gt;
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2025-06-11T20:15:30.925Z
+            </div>
+        <script src="../../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../../sorter.js"></script>
+        <script src="../../../block-navigation.js"></script>
+    </body>
+</html>
+    

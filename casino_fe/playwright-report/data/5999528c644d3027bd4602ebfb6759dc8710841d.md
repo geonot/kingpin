@@ -1,0 +1,56 @@
+# Page snapshot
+
+```yaml
+- banner:
+  - navigation:
+    - link "Kingpin Casino":
+      - /url: /
+      - img "Kingpin Casino"
+    - link "Register":
+      - /url: /register
+    - button "Switch to Dark Mode"
+    - button "Open menu"
+- main:
+  - heading "Welcome to Kingpin Casino" [level=1]
+  - paragraph: Where Every Spin Could Be Legendary!
+  - link "Join the Action Now!":
+    - /url: /register
+  - heading "Why Play at Kingpin?" [level=2]
+  - paragraph: Experience the pinnacle of online casino gaming. We offer unique, custom-built games with high RTP, ensuring fair play and thrilling wins. Enjoy VIP treatment, instant withdrawals, and top-tier security.
+  - heading "Exclusive Games" [level=3]
+  - paragraph: Play innovative slots you won't find anywhere else, designed for maximum excitement.
+  - heading "High RTP & Big Wins" [level=3]
+  - paragraph: Benefit from industry-leading Return to Player rates and chase massive jackpots.
+  - heading "Secure & Private" [level=3]
+  - paragraph: Enjoy peace of mind with robust security, complete privacy, and instant crypto transactions.
+  - heading "Featured Games" [level=2]
+  - link "Hack the Planet Hack the Planet":
+    - /url: /slot/1
+    - img "Hack the Planet"
+    - heading "Hack the Planet" [level=3]
+  - link "Dragon Legend Dragon Legend":
+    - /url: /slot/2
+    - img "Dragon Legend"
+    - heading "Dragon Legend" [level=3]
+  - link "Synthwave Future Synthwave Future":
+    - /url: /slot/3
+    - img "Synthwave Future"
+    - heading "Synthwave Future" [level=3]
+  - link "Fruit and Cream Fruit and Cream":
+    - /url: /slot/4
+    - img "Fruit and Cream"
+    - heading "Fruit and Cream" [level=3]
+  - heading "Ready to Spin and Win?" [level=3]
+  - link "Create Your Account":
+    - /url: /register
+- contentinfo:
+  - paragraph: © 2025 Kingpin Casino. All rights reserved.
+  - paragraph: Please gamble responsibly. For help, visit BeGambleAware.org.
+  - navigation:
+    - link "Terms":
+      - /url: /terms
+    - link "Privacy Policy":
+      - /url: /privacy
+    - link "Responsible Gaming":
+      - /url: /responsible-gaming
+```

@@ -1,5 +1,10 @@
 import unittest
 import os # For BaseTestCase environment variable access
+import sys
+
+# Adjust path to import from casino_be.utils
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
 from casino_be.utils.bitcoin import generate_bitcoin_wallet # Will use dummy if bitcoinlib is not found
 from casino_be.utils.spin_handler import calculate_win
 from casino_be.utils.blackjack_helper import _calculate_hand_value, _determine_winner_for_hand, _create_player_hand_obj, _update_wagering_progress

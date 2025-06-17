@@ -1,0 +1,81 @@
+# Page snapshot
+
+```yaml
+- banner:
+  - navigation:
+    - link "Kingpin Casino Kingpin Casino":
+      - /url: /
+      - img "Kingpin Casino"
+      - text: Kingpin Casino
+    - link "Login":
+      - /url: /login
+    - link "Register":
+      - /url: /register
+    - button "Switch to Dark Mode"
+- complementary:
+  - heading "Main Menu" [level=3]
+  - navigation:
+    - link "Home":
+      - /url: /
+    - link "Slots":
+      - /url: /slots
+    - link "Blackjack":
+      - /url: /blackjack
+    - link "Plinko":
+      - /url: /plinko
+    - link "Spacecrash":
+      - /url: /spacecrash
+    - link "Poker":
+      - /url: /poker-tables
+  - heading "Player Area" [level=3]
+  - navigation:
+    - link "Deposit":
+      - /url: /deposit
+    - link "Withdraw":
+      - /url: /withdraw
+    - link "Transactions":
+      - /url: /transactions
+    - link "Bonuses":
+      - /url: /bonuses
+    - link "Promotions":
+      - /url: /promotions
+    - link "Settings":
+      - /url: /settings
+  - heading "Information" [level=3]
+  - navigation:
+    - link "Terms & Conditions":
+      - /url: /terms
+    - link "Privacy Policy":
+      - /url: /privacy
+    - link "Responsible Gaming":
+      - /url: /responsible-gaming
+- main:
+  - img "Kingpin Casino Logo"
+  - heading "Create your account" [level=2]
+  - text: Username
+  - textbox "Username": testuser1749670638910
+  - text: Email address
+  - textbox "Email address": test1749670638910@example.com
+  - text: Password
+  - textbox "Password": password123
+  - paragraph: "Password does not meet requirements:"
+  - list:
+    - listitem: An uppercase letter
+    - listitem: A special character
+  - text: Confirm Password
+  - textbox "Confirm Password": password123
+  - button "Register" [disabled]
+  - text: Already have an account?
+  - link "Sign in here":
+    - /url: /login
+- contentinfo:
+  - paragraph: © 2025 Kingpin Casino. All rights reserved.
+  - paragraph: Please gamble responsibly. For help, visit BeGambleAware.org.
+  - navigation:
+    - link "Terms":
+      - /url: /terms
+    - link "Privacy Policy":
+      - /url: /privacy
+    - link "Responsible Gaming":
+      - /url: /responsible-gaming
+```

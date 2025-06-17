@@ -8,7 +8,7 @@ const REEL_SPIN_DURATION_TURBO = 200;
 const REEL_START_DELAY = 150; // Stagger delay between starting each reel (ms)
 const REEL_STOP_DELAY = 250; // Additional delay between stopping each reel (ms)
 const SYMBOL_WIN_ANIM_DURATION = 250; // Duration for symbol scale/pulse animation
-const PAYLINE_SHOW_DURATION = 1500; // How long each winning payline is shown (ms)
+const PAYLINE_SHOW_DURATION = 5000; // How long each winning payline is shown (ms) - INCREASED FOR DEBUGGING
 const TOTAL_WIN_DISPLAY_DURATION = 3000; // How long the total win amount is shown prominently
 
 
@@ -62,7 +62,6 @@ export default class GameScene extends Phaser.Scene {
   create() {
     console.log('GameScene: Create');
     
-    // Fix: Use the correct registry keys that are set in BootScene
     const slotApiData = this.registry.get('slotApiData');
     const slotGameJsonConfig = this.registry.get('slotGameJsonConfig');
     
@@ -70,55 +69,44 @@ export default class GameScene extends Phaser.Scene {
     this.slotId = slotApiData?.id;
     this.turboSpinEnabled = this.registry.get('turboEnabled');
     this.soundEnabled = this.registry.get('soundEnabled');
-    // Apply initial sound setting
     this.sound.mute = !this.soundEnabled;
 
     if (!this.gameConfig || !this.slotId) {
         console.error("GameScene: Missing game configuration or Slot ID!");
-        console.error("slotApiData:", slotApiData);
-        console.error("slotGameJsonConfig:", slotGameJsonConfig);
         EventBus.$emit('phaserError', 'Game initialization failed: Missing configuration.');
         return;
     }
 
-    // Load cascade configurations from gameConfig
     this.isCascadingSlot = this.gameConfig.game?.is_cascading || false;
     this.cascadeWinMultipliers = this.gameConfig.game?.win_multipliers || [];
 
-    // A.3: Game Type and Grid Configuration
     this.isMultiwayGame = (this.gameConfig.type === 'multiway');
-    const { rows, columns } = this.gameConfig.game.layout; // Fix: layout is under game
+    const { rows, columns } = this.gameConfig.game.layout;
 
     this.gridConfig.cols = columns;
-
-    if (this.isMultiwayGame) {
-        this.gridConfig.initialRowsPerReel = this.gameConfig.game.layout.default_pane_counts || Array(columns).fill(rows || 3);
-        // Effective rows for initial grid height calculation (max of initial panes)
-        this.gridConfig.rows = Math.max(...this.gridConfig.initialRowsPerReel);
-        // Max possible rows any symbol could occupy across all reels for symbol map buffer
-        this.gridConfig.maxRowsForSymbolMap = Math.max(...(this.gameConfig.game.layout.possible_pane_counts || [[rows || 3]]).flat());
-    } else {
-        this.gridConfig.rows = rows || 3;
-        this.gridConfig.initialRowsPerReel = Array(columns).fill(this.gridConfig.rows);
-        this.gridConfig.maxRowsForSymbolMap = this.gridConfig.rows;
-    }
+    this.gridConfig.rows = rows;
+    this.gridConfig.initialRowsPerReel = Array(columns).fill(rows);
+    this.gridConfig.maxRowsForSymbolMap = rows;
     this.currentPanesPerReel = [...this.gridConfig.initialRowsPerReel];
-    this.gridConfig.currentActualMaxRows = Math.max(...this.currentPanesPerReel, this.gridConfig.rows);
-
+    this.gridConfig.currentActualMaxRows = rows;
 
     this.symbolSize = this.gameConfig.game.reel.symbolSize || { width: 100, height: 100 };
-    // Calculate totalReelWidth and totalReelHeight based on the effective gridConfig.rows for multiway
-    const totalReelWidth = this.gridConfig.cols * this.symbolSize.width + (this.gridConfig.cols - 1) * (this.gameConfig.game.reel.reelSpacing || 0);
-    const totalReelHeight = this.gridConfig.rows * this.symbolSize.height + (this.gridConfig.rows - 1) * (this.gameConfig.game.reel.symbolSpacing || 0);
-
-    const configStartX = this.gameConfig.game.reel.position?.x ?? (this.cameras.main.width - totalReelWidth) / 2;
-    const configStartY = this.gameConfig.game.reel.position?.y ?? 100;
-
-    // Update gridConfig with calculated dimensions
-    this.gridConfig.startX = configStartX;
-    this.gridConfig.startY = configStartY;
-    this.gridConfig.width = totalReelWidth;
-    this.gridConfig.height = totalReelHeight;
+    
+    // Perfect positioning for 3x3 grid with UI space
+    const reelSpacing = this.gameConfig.game.reel.reelSpacing || 0;
+    const symbolSpacing = this.gameConfig.game.reel.symbolSpacing || 0;
+    const totalGridWidth = columns * this.symbolSize.width + (columns - 1) * reelSpacing;
+    const totalGridHeight = rows * this.symbolSize.height + (rows - 1) * symbolSpacing;
+    
+    // Position grid in upper portion of screen, leaving space for UI
+    const screenWidth = this.cameras.main.width;
+    const screenHeight = this.cameras.main.height;
+    const uiReservedHeight = 150; // Reserve space for buttons at bottom
+    
+    this.gridConfig.startX = (screenWidth - totalGridWidth) / 2;
+    this.gridConfig.startY = (screenHeight - totalGridHeight - uiReservedHeight) / 2;
+    this.gridConfig.width = totalGridWidth;
+    this.gridConfig.height = totalGridHeight;
 
     this.createBackground();
     this.createReels(); // Creates reel containers and initial symbols
@@ -186,11 +174,26 @@ export default class GameScene extends Phaser.Scene {
   createBackground() {
     const { width, height } = this.cameras.main;
     const bg = this.add.image(width / 2, height / 2, 'background');
-    // Scale background to cover the whole game area
-    const scaleX = width / bg.width;
-    const scaleY = height / bg.height;
-    bg.setScale(Math.max(scaleX, scaleY)).setScrollFactor(0); // Cover and don't scroll
-    bg.setDepth(-1); // Ensure background is behind everything
+    
+    // Enhanced background scaling for Classic 3x3
+    const bgConfig = this.gameConfig.game.background;
+    if (bgConfig && bgConfig.scale) {
+      bg.setScale(bgConfig.scale.x, bgConfig.scale.y);
+    } else if (bgConfig && bgConfig.position) {
+      // Position-based centering
+      bg.setPosition(bgConfig.position.x, bgConfig.position.y);
+      // Smart scaling to fill viewport while maintaining aspect ratio
+      const scaleX = width / bg.width;
+      const scaleY = height / bg.height;
+      bg.setScale(Math.max(scaleX, scaleY));
+    } else {
+      // Default: scale to cover viewport
+      const scaleX = width / bg.width;
+      const scaleY = height / bg.height;
+      bg.setScale(Math.max(scaleX, scaleY));
+    }
+    
+    bg.setScrollFactor(0).setDepth(-1);
   }
 
  createReels() {
@@ -574,6 +577,7 @@ export default class GameScene extends Phaser.Scene {
 
   displayWinningLines(winningLines, totalWinAmountSats, currentCascadeLevel, isCascading) {
       // This function will now also handle updating the multiplier display after wins are shown.
+      
       const hasInitialWins = winningLines && winningLines.length > 0;
 
       if (!hasInitialWins) {
@@ -603,6 +607,7 @@ export default class GameScene extends Phaser.Scene {
       const displayNextLine = () => {
             this.clearWinAnimations(false); // Don't clear total win text yet
             if (currentLineIndex >= winningLines.length) { // All initial lines shown
+                 console.log('GameScene: All lines shown, showing total win amount:', totalWinAmountSats);
                  this.showTotalWinAmount(totalWinAmountSats);
                  if (isCascading) { // If cascading, update multiplier display after initial lines
                     EventBus.$emit('uiUpdateMultiplier', { level: currentCascadeLevel, multipliersConfig: this.cascadeWinMultipliers });
@@ -741,12 +746,21 @@ export default class GameScene extends Phaser.Scene {
         }
         if (linePoints.length > 1) {
             const lineColor = this.getPaylineColor(winData.line_id || 0); // Use line_id or default
+            console.log('GameScene: Drawing payline with', linePoints.length, 'points, color:', lineColor);
             this.paylineGraphics.lineStyle(5, lineColor, 0.9);
             this.paylineGraphics.fillStyle(lineColor, 0.8);
             for (let i = 0; i < linePoints.length - 1; i++) {
                 this.paylineGraphics.lineBetween(linePoints[i].x, linePoints[i].y, linePoints[i + 1].x, linePoints[i + 1].y);
             }
             linePoints.forEach(p => this.paylineGraphics.fillCircle(p.x, p.y, 8));
+            console.log('GameScene: Payline drawn successfully');
+            
+            // DEBUGGING: Don't clear paylines immediately - keep them visible
+            // this.time.delayedCall(PAYLINE_SHOW_DURATION, () => {
+            //     this.paylineGraphics.clear();
+            // });
+        } else {
+            console.log('GameScene: Not enough points to draw payline, points:', linePoints.length);
         }
     }
 }
@@ -851,8 +865,14 @@ clearWinAnimations(clearTotalWinText = true) { // H
 
   // Sound methods
   playSound(soundKey) {
-      if (this.soundEnabled && this.sound.get(soundKey)) {
+      if (!this.soundEnabled || !soundKey) return;
+      
+      // Check if the sound exists before trying to play it
+      const sound = this.sound.get(soundKey);
+      if (sound) {
           this.sound.play(soundKey);
+      } else {
+          console.warn(`GameScene: Sound key "${soundKey}" not found or not loaded.`);
       }
   }
 

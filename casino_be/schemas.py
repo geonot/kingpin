@@ -3,6 +3,7 @@ from marshmallow_sqlalchemy import SQLAlchemyAutoSchema, auto_field
 from marshmallow.validate import OneOf, Range, Length, Email, Regexp
 from datetime import datetime, timezone
 import re
+import html
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
 from models import (
@@ -14,19 +15,81 @@ from models import (
     BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
 )
 from utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Plinko specific imports
+from utils.security import validate_password_strength, sanitize_input
 
-# --- Helper ---
+# --- Enhanced Security Validators ---
+def validate_username(username):
+    """Enhanced username validation"""
+    if not username:
+        raise ValidationError('Username is required.')
+    
+    # Length check
+    if len(username) < 3 or len(username) > 30:
+        raise ValidationError('Username must be between 3 and 30 characters.')
+    
+    # Character validation - only alphanumeric and underscore
+    if not re.match(r'^[a-zA-Z0-9_]+$', username):
+        raise ValidationError('Username can only contain letters, numbers, and underscores.')
+    
+    # Prevent reserved usernames
+    reserved = ['admin', 'root', 'administrator', 'moderator', 'support', 'system', 'null', 'undefined']
+    if username.lower() in reserved:
+        raise ValidationError('This username is reserved.')
+    
+    return username
+
+def validate_email_enhanced(email):
+    """Enhanced email validation"""
+    if not email:
+        raise ValidationError('Email is required.')
+    
+    # Basic email format validation
+    email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_regex, email):
+        raise ValidationError('Invalid email format.')
+    
+    # Length check
+    if len(email) > 254:
+        raise ValidationError('Email address is too long.')
+    
+    # Domain validation
+    domain = email.split('@')[1]
+    if domain.startswith('.') or domain.endswith('.') or '..' in domain:
+        raise ValidationError('Invalid email domain.')
+    
+    return email.lower()
+
 def validate_password(password):
-    if len(password) < 8:
-        raise ValidationError('Password must be at least 8 characters long.')
-    if not re.search(r"[A-Z]", password):
-        raise ValidationError('Password must contain at least one uppercase letter.')
-    if not re.search(r"[a-z]", password):
-        raise ValidationError('Password must contain at least one lowercase letter.')
-    if not re.search(r"[0-9]", password):
-        raise ValidationError('Password must contain at least one digit.')
-    if not re.search(r"[!@#$%^&*()_+=\-[\]{};':\"\\|,.<>/?~`]", password):
-        raise ValidationError('Password must contain at least one special character.')
+    """Enhanced password validation using security utils"""
+    errors = validate_password_strength(password)
+    if errors:
+        raise ValidationError(errors)
+
+def validate_amount(amount):
+    """Validate monetary amounts (in satoshis)"""
+    if amount < 0:
+        raise ValidationError('Amount cannot be negative.')
+    
+    if amount > 21000000 * 100000000:  # Max 21M BTC in satoshis
+        raise ValidationError('Amount exceeds maximum allowed value.')
+    
+    return amount
+
+def sanitize_string_field(value):
+    """Sanitize string inputs to prevent XSS"""
+    if isinstance(value, str):
+        # HTML escape
+        value = html.escape(value)
+        # Remove potential script tags
+        value = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', value, flags=re.IGNORECASE)
+    return value
+
+# --- Custom Fields ---
+class SanitizedString(fields.String):
+    """String field with automatic sanitization"""
+    def _deserialize(self, value, attr, data, **kwargs):
+        value = super()._deserialize(value, attr, data, **kwargs)
+        return sanitize_string_field(value) if value else value
 
 # --- Base Schemas (for pagination etc.) ---
 class PaginationSchema(Schema):
@@ -71,17 +134,52 @@ class AdminUserSchema(UserSchema):
 
 
 class RegisterSchema(Schema):
-    username = fields.Str(required=True, validate=Length(min=3, max=50))
-    email = fields.Email(required=True)
+    username = SanitizedString(required=True, validate=validate_username)
+    email = fields.Email(required=True, validate=validate_email_enhanced)
     password = fields.Str(required=True, validate=validate_password)
+    
+    @validates_schema
+    def validate_registration_data(self, data, **kwargs):
+        # Additional cross-field validation
+        if 'username' in data and 'email' in data:
+            if data['username'].lower() in data['email'].lower():
+                raise ValidationError('Username cannot be part of email address.')
 
 class LoginSchema(Schema):
-    username = fields.Str(required=True)
-    password = fields.Str(required=True)
+    username = SanitizedString(required=True, validate=Length(min=1, max=50))
+    password = fields.Str(required=True, validate=Length(min=1, max=200))
+    
+    @pre_load
+    def sanitize_input(self, data, **kwargs):
+        """Sanitize login input data"""
+        return sanitize_input(data)
 
 class UpdateSettingsSchema(Schema):
-    email = fields.Email()
+    email = fields.Email(validate=validate_email_enhanced)
     password = fields.Str(validate=validate_password)
+    
+    @validates_schema
+    def validate_at_least_one_field(self, data, **kwargs):
+        if not any(data.values()):
+            raise ValidationError('At least one field must be provided.')
+
+class WithdrawSchema(Schema):
+    amount = fields.Int(required=True, validate=[validate_amount, Range(min=10000)])  # Min 0.0001 BTC
+    address = SanitizedString(required=True, validate=Length(min=26, max=62))
+    
+    @validates('address')
+    def validate_btc_address(self, address):
+        # Basic Bitcoin address validation
+        if not re.match(r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$|^bc1[a-z0-9]{39,59}$', address):
+            raise ValidationError('Invalid Bitcoin address format.')
+
+class DepositSchema(Schema):
+    amount = fields.Int(required=True, validate=[validate_amount, Range(min=1000)])  # Min 0.00001 BTC
+    
+class TransferSchema(Schema):
+    recipient_username = SanitizedString(required=True, validate=validate_username)
+    amount = fields.Int(required=True, validate=[validate_amount, Range(min=100)])  # Min 0.000001 BTC
+    note = SanitizedString(validate=Length(max=200))
 
 class UserListSchema(PaginationSchema):
     items = fields.Nested(UserSchema, many=True, attribute='items')
@@ -98,7 +196,64 @@ class GameSessionSchema(SQLAlchemyAutoSchema):
         sqla_session = db.session
 
 class SpinRequestSchema(Schema):
-    bet_amount = fields.Int(required=True, validate=Range(min=1))
+    bet_amount = fields.Int(
+        required=True,
+        validate=[
+            validate_amount,
+            Range(min=100, max=1000000, error="Bet amount must be between 100 and 1,000,000 satoshis")
+        ]
+    )
+    
+    @validates('bet_amount')
+    def validate_bet_reasonable(self, bet_amount):
+        # Additional validation for reasonable bet amounts
+        if bet_amount % 100 != 0:  # Must be multiple of 100 satoshis
+            raise ValidationError('Bet amount must be a multiple of 100 satoshis.')
+
+class BlackjackActionSchema(Schema):
+    action = fields.Str(required=True, validate=OneOf(['hit', 'stand', 'double', 'split']))
+    
+class BlackjackBetSchema(Schema):
+    bet_amount = fields.Int(
+        required=True,
+        validate=[
+            validate_amount,
+            Range(min=1000, max=5000000, error="Bet amount must be between 1,000 and 5,000,000 satoshis")
+        ]
+    )
+
+# --- Enhanced Game Validation Schemas ---
+class PlinkoDropSchema(Schema):
+    bet_amount = fields.Int(
+        required=True,
+        validate=[
+            validate_amount,
+            Range(min=100, max=1000000, error="Bet amount must be between 100 and 1,000,000 satoshis")
+        ]
+    )
+    risk_level = fields.Str(required=True, validate=OneOf(['low', 'medium', 'high']))
+    
+    @validates_schema
+    def validate_plinko_bet(self, data, **kwargs):
+        bet_amount = data.get('bet_amount')
+        risk_level = data.get('risk_level')
+        
+        if bet_amount and risk_level:
+            # Validate bet amount is valid for risk level
+            if risk_level in STAKE_CONFIG:
+                valid_amounts = STAKE_CONFIG[risk_level]
+                if bet_amount not in valid_amounts:
+                    raise ValidationError(f'Invalid bet amount for {risk_level} risk level.')
+
+class SpacecrashBetSchema(Schema):
+    bet_amount = fields.Int(
+        required=True,
+        validate=[
+            validate_amount,
+            Range(min=100, max=10000000, error="Bet amount must be between 100 and 10,000,000 satoshis")
+        ]
+    )
+    auto_cashout = fields.Float(validate=Range(min=1.01, max=1000.0))
 
 class SpinSchema(Schema):
     result = fields.Raw(required=True)

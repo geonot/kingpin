@@ -1,0 +1,42 @@
+# Page snapshot
+
+```yaml
+- banner:
+  - navigation:
+    - link "Kingpin Casino":
+      - /url: /
+      - img "Kingpin Casino"
+    - link "Register":
+      - /url: /register
+    - button "Switch to Dark Mode"
+    - button "Open menu"
+- main:
+  - img "Kingpin Casino Logo"
+  - heading "Create your account" [level=2]
+  - text: Username
+  - textbox "Username": testuser1749670908100
+  - text: Email address
+  - textbox "Email address": test1749670908100@example.com
+  - text: Password
+  - textbox "Password": password123
+  - paragraph: "Password does not meet requirements:"
+  - list:
+    - listitem: An uppercase letter
+    - listitem: A special character
+  - text: Confirm Password
+  - textbox "Confirm Password": password123
+  - button "Register" [disabled]
+  - text: Already have an account?
+  - link "Sign in here":
+    - /url: /login
+- contentinfo:
+  - paragraph: © 2025 Kingpin Casino. All rights reserved.
+  - paragraph: Please gamble responsibly. For help, visit BeGambleAware.org.
+  - navigation:
+    - link "Terms":
+      - /url: /terms
+    - link "Privacy Policy":
+      - /url: /privacy
+    - link "Responsible Gaming":
+      - /url: /responsible-gaming
+```

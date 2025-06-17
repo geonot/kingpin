@@ -1,0 +1,216 @@
+{
+  "game": {
+    "slot_id": "classic3x3",
+    "name": "Classic 3x3",
+    "short_name": "classic3x3",
+    "asset_dir": "/slots/classic3x3/",
+    "layout": {
+      "rows": 3,
+      "columns": 3
+    },
+    "symbol_count": 7,
+    "symbol_scatter": 6,
+    "symbol_wild": 7,
+    "symbol_bonus": 6,
+    "wild_symbol_id": 7,
+    "scatter_symbol_id": 6,
+    "symbols": [
+      {
+        "id": 1,
+        "icon": "/slots/classic3x3/cherry.png",
+        "value": 1.0,
+        "name": "Cherry",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "weight": 8.0,
+        "value_multipliers": {
+          "3": 5
+        }
+      },
+      {
+        "id": 2,
+        "icon": "/slots/classic3x3/lemon.png",
+        "value": 2.0,
+        "name": "Lemon",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "weight": 6.0,
+        "value_multipliers": {
+          "3": 10
+        }
+      },
+      {
+        "id": 3,
+        "icon": "/slots/classic3x3/orange.png",
+        "value": 3.0,
+        "name": "Orange",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "weight": 5.0,
+        "value_multipliers": {
+          "3": 15
+        }
+      },
+      {
+        "id": 4,
+        "icon": "/slots/classic3x3/plum.png",
+        "value": 4.0,
+        "name": "Plum",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "weight": 4.0,
+        "value_multipliers": {
+          "3": 20
+        }
+      },
+      {
+        "id": 5,
+        "icon": "/slots/classic3x3/bar.png",
+        "value": 10.0,
+        "name": "Bar",
+        "is_wild": false,
+        "is_scatter": false,
+        "is_bonus": false,
+        "weight": 2.0,
+        "value_multipliers": {
+          "3": 50
+        }
+      },
+      {
+        "id": 6,
+        "icon": "/slots/classic3x3/bell.png",
+        "value": null,
+        "name": "Bell",
+        "is_wild": false,
+        "is_scatter": true,
+        "is_bonus": true,
+        "weight": 1.0,
+        "scatter_payouts": {
+          "3": 10
+        }
+      },
+      {
+        "id": 7,
+        "icon": "/slots/classic3x3/seven.png",
+        "value": 50.0,
+        "name": "Seven",
+        "is_wild": true,
+        "is_scatter": false,
+        "is_bonus": false,
+        "weight": 1.5,
+        "value_multipliers": {
+          "3": 200
+        }
+      }
+    ],
+    "paylines": [
+      {
+        "id": 0,
+        "coords": [[0,0], [0,1], [0,2]]
+      },
+      {
+        "id": 1,
+        "coords": [[1,0], [1,1], [1,2]]
+      },
+      {
+        "id": 2,
+        "coords": [[2,0], [2,1], [2,2]]
+      },
+      {
+        "id": 3,
+        "coords": [[0,0], [1,1], [2,2]]
+      },
+      {
+        "id": 4,
+        "coords": [[2,0], [1,1], [0,2]]
+      }
+    ],
+    "ui": {
+      "buttons": {
+        "spin": {
+          "icon": "/slots/classic3x3/spin.png"
+        },
+        "autoSpin": {
+          "icon": "/slots/classic3x3/autospin.png"
+        },
+        "turbo": {
+          "icon": "/slots/classic3x3/turbo.png"
+        },
+        "settings": {
+          "icon": "/slots/classic3x3/settings.png"
+        }
+      }
+    },
+    "reel": {
+      "symbolSize": {
+        "width": 140,
+        "height": 140
+      },
+      "position": {
+        "x": 260,
+        "y": 180
+      },
+      "reelSpacing": 8,
+      "symbolSpacing": 8
+    },
+    "background": {
+      "image": "/slots/classic3x3/bg.png",
+      "scale": {
+        "x": 1.0,
+        "y": 1.0
+      },
+      "position": {
+        "x": 400,
+        "y": 300
+      }
+    },
+    "bonus_background": {
+      "image": "/slots/classic3x3/bbg.png"
+    },
+    "animations": {
+      "spin": {
+        "duration": 600
+      },
+      "winLine": {
+        "duration": 800
+      }
+    },
+    "bonus": {
+      "triggerSymbolId": 6,
+      "triggerCount": 3,
+      "spinsAwarded": 10,
+      "multiplier": 2.0
+    },
+    "sound": {
+      "spin": "/slots/classic3x3/spin.wav"
+    },
+    "settings": {
+      "betOptions": [10, 25, 50, 100, 250, 500]
+    },
+    "reel_strips": [
+      [1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 1, 2, 3, 1, 4, 5, 1, 2, 3, 4, 5, 6, 7],
+      [2, 1, 4, 3, 5, 6, 1, 7, 2, 3, 4, 1, 5, 2, 3, 1, 4, 6, 1, 2, 3, 4, 5, 1, 2],
+      [3, 2, 1, 4, 5, 1, 6, 2, 7, 3, 4, 5, 1, 2, 3, 4, 1, 5, 6, 1, 2, 3, 4, 1, 5]
+    ],
+    "is_cascading": false,
+    "cascade_type": null,
+    "min_symbols_to_match": null,
+    "win_multipliers": []
+  },
+  "assets": {
+    "background": "bg.png",
+    "bonus_background": "bbg.png",
+    "sounds": {
+      "spin": "spin.wav",
+      "reel_stop": "reel_stop.wav",
+      "win_small": "win_small.wav",
+      "win_medium": "win_medium.wav",
+      "win_large": "win_large.wav",
+      "bonus_trigger": "bonus_trigger.wav"
+    }
+  }
+}

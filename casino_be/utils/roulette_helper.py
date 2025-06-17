@@ -23,7 +23,9 @@ PAYOUTS = {
 
 def spin_wheel():
     """Simulates spinning the roulette wheel. Returns a random winning number (0-36)."""
-    return random.choice(ROULETTE_NUMBERS)
+    import secrets
+    secure_random = secrets.SystemRandom()
+    return secure_random.choice(ROULETTE_NUMBERS)
 
 def get_bet_type_multiplier(bet_type: str, bet_value, winning_number: int) -> int:
     """

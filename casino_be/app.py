@@ -19,6 +19,7 @@ from flask_jwt_extended import (
 from flask_jwt_extended.exceptions import NoAuthorizationError # For JWT specific errors
 from sqlalchemy.exc import SQLAlchemyError # For database errors
 from werkzeug.exceptions import HTTPException # For generic HTTP errors
+from flask_talisman import Talisman
 from datetime import datetime, timedelta, timezone
 import logging
 from pythonjsonlogger import jsonlogger
@@ -41,6 +42,7 @@ from models import (
     # Crystal Garden Models
     CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry
 )
+from utils.security import secure_headers, log_security_event
 from schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
@@ -87,14 +89,60 @@ def is_password_strong(password):
     return True, ""
 
 def create_app(config_class=Config):
-    """Application factory pattern."""
+    """Application factory pattern with enhanced security."""
     app = Flask(__name__)
     app.config.from_object(config_class)
 
-    # --- Logger Setup (early, so it's available for config warnings) ---
+    # --- Security Headers with Talisman ---
+    csp = {
+        'default-src': "'self'",
+        'script-src': "'self' 'unsafe-inline'",
+        'style-src': "'self' 'unsafe-inline'",
+        'img-src': "'self' data: https:",
+        'font-src': "'self'",
+        'connect-src': "'self'",
+        'frame-ancestors': "'none'"
+    }
+    
+    Talisman(app, 
+             force_https=not app.debug,
+             strict_transport_security=True,
+             content_security_policy=csp,
+             content_security_policy_nonce_in=['script-src', 'style-src'])
+
+    # --- Enhanced CORS Setup ---
+    allowed_origins = []
+    
+    # Development origins
+    if app.debug:
+        allowed_origins.extend([
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://localhost:8082",
+            "http://127.0.0.1:8082"
+        ])
+    
+    # Production origins from environment
+    production_origins = os.getenv('CORS_ORIGINS', '').split(',')
+    production_origins = [origin.strip() for origin in production_origins if origin.strip()]
+    allowed_origins.extend(production_origins)
+    
+    # Apply CORS with enhanced security
+    if allowed_origins:
+        CORS(app,
+             origins=allowed_origins,
+             supports_credentials=True,
+             methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+             allow_headers=['Content-Type', 'Authorization', 'X-CSRF-Token'],
+             expose_headers=['X-RateLimit-Limit', 'X-RateLimit-Remaining'],
+             max_age=86400)
+        app.logger.info(f"CORS configured for origins: {allowed_origins}")
+    else:
+        app.logger.warning("No CORS origins configured - API will reject cross-origin requests")
+
+    # --- Security Logging Configuration ---
     if not app.debug:
-        # Configure JSON logging for production
-        logger = app.logger # Get Flask's default logger
+        logger = app.logger
         handler = logging.StreamHandler()
         formatter = jsonlogger.JsonFormatter(
             '%(asctime)s %(levelname)s %(request_id)s %(module)s %(funcName)s %(lineno)d %(message)s'
@@ -111,29 +159,28 @@ def create_app(config_class=Config):
         if not app.logger.handlers: # Avoid adding handlers if already configured by Flask/extensions
             logging.basicConfig(level=logging.DEBUG)
 
-    # --- Request ID Generation (needs to be before logging request_id) ---
+    # --- Request ID and Security Middleware ---
     @app.before_request
-    def add_request_id():
+    def security_middleware():
         g.request_id = str(uuid.uuid4())
+        
+        # Log security-relevant requests
+        if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+            log_security_event('REQUEST', 
+                             user_id=getattr(current_user, 'id', None) if hasattr(current_user, 'id') else None,
+                             details={
+                                 'endpoint': request.endpoint,
+                                 'method': request.method,
+                                 'user_agent': request.headers.get('User-Agent', ''),
+                                 'content_length': request.content_length
+                             })
+
+    @app.after_request
+    def security_headers_middleware(response):
+        return secure_headers(response)
 
     # --- Production Warnings ---
     log_production_warnings(app)
-
-    # --- CORS Setup ---
-    default_cors_origins = ["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8082", "http://127.0.0.1:8082"]
-    cors_allowed_origins_env = os.getenv('CORS_ALLOWED_ORIGINS')
-
-    if cors_allowed_origins_env:
-        cors_origins = [origin.strip() for origin in cors_allowed_origins_env.split(',')]
-    else:
-        cors_origins = default_cors_origins
-        if not app.debug: # FLASK_DEBUG is called app.debug in Flask
-            app.logger.warning(
-                "CORS_ALLOWED_ORIGINS environment variable not set. "
-                f"Defaulting to {default_cors_origins}. This is insecure for production."
-            )
-    CORS(app, origins=cors_origins, supports_credentials=True)
-
 
     # --- Rate Limiter Setup ---
     # Ensure RATELIMIT_STORAGE_URI is taken from app.config, which was loaded from config_class
@@ -190,6 +237,23 @@ def create_app(config_class=Config):
             'status': False,
             'status_message': 'Missing or invalid authorization token.'
         }), HTTPStatus.UNAUTHORIZED
+
+    @jwt.token_in_blocklist_loader
+    def check_if_token_in_blacklist(jwt_header, jwt_payload):
+        jti = jwt_payload['jti']
+        try:
+            # Check if token exists in blacklist
+            token = db.session.query(TokenBlacklist.id).filter_by(jti=jti).scalar()
+            is_blacklisted = token is not None
+            
+            if is_blacklisted:
+                current_app.logger.warning(f"Request ID: {g.get('request_id', 'N/A')} - Blocked blacklisted token: {jti}")
+            
+            return is_blacklisted
+        except Exception as e:
+            current_app.logger.error(f"Request ID: {g.get('request_id', 'N/A')} - Error checking token blacklist: {str(e)}")
+            # Fail secure - if we can't check the blacklist, assume token is valid but log the error
+            return False
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):

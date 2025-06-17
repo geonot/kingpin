@@ -1,0 +1,46 @@
+# Page snapshot
+
+```yaml
+- banner:
+  - navigation:
+    - link "Kingpin Casino":
+      - /url: /
+      - img "Kingpin Casino"
+    - link "Register":
+      - /url: /register
+    - button "Switch to Dark Mode"
+    - button "Open menu"
+- alert:
+  - strong: "Error:"
+  - text: An unexpected internal server error occurred. Please try again later.
+  - button "Close"
+- main:
+  - img "Kingpin Casino Logo"
+  - heading "Sign in to your account" [level=2]
+  - alert:
+    - img
+    - text: Error! An unexpected internal server error occurred. Please try again later.
+    - button "Dismiss":
+      - text: Dismiss
+      - img
+  - text: Username
+  - textbox "Username": testuser
+  - text: Password
+  - textbox "Password": password123
+  - link "Forgot your password?":
+    - /url: "#"
+  - button "Sign in"
+  - text: Don't have an account?
+  - link "Register here":
+    - /url: /register
+- contentinfo:
+  - paragraph: © 2025 Kingpin Casino. All rights reserved.
+  - paragraph: Please gamble responsibly. For help, visit BeGambleAware.org.
+  - navigation:
+    - link "Terms":
+      - /url: /terms
+    - link "Privacy Policy":
+      - /url: /privacy
+    - link "Responsible Gaming":
+      - /url: /responsible-gaming
+```

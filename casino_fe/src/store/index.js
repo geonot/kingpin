@@ -1,12 +1,13 @@
 import { createStore } from 'vuex';
-import axios from 'axios'; // Keep for /logout2 or other direct calls if necessary
+import axios from 'axios';
 import apiService from '@/services/api';
 
 export default createStore({
   state: {
     user: null,
-    userSession: localStorage.getItem('userSession') || null,
-    refreshToken: localStorage.getItem('refreshToken') || null,
+    userSession: null, // Access token
+    refreshToken: null, // Refresh token
+    csrfToken: null,
     slots: [],
     slotsLoaded: false,
     currentSlotConfig: null,
@@ -25,39 +26,71 @@ export default createStore({
     adminUsersTotalCount: 0,
     isAdminUsersLoading: false,
     adminUsersError: null,
+    isAuthenticated: false,
   },
   mutations: {
     setGlobalError(state, errorMessage) {
       state.globalError = errorMessage;
-      // Optionally, set a timer to clear it
-      // setTimeout(() => { state.globalError = null; }, 5000);
     },
     clearGlobalError(state) {
       state.globalError = null;
     },
     setUser(state, userData) {
       state.user = userData;
+      state.isAuthenticated = !!userData;
     },
-    setAuthTokens(state, { accessToken, refreshToken }) {
-      state.userSession = accessToken;
-      state.refreshToken = refreshToken;
-      if (accessToken) {
+    setCsrfToken(state, token) {
+      state.csrfToken = token;
+    },
+    setAuthTokens(state, tokens) {
+      if (tokens && (tokens.accessToken || tokens.access_token)) {
+        // Handle both naming conventions
+        const accessToken = tokens.accessToken || tokens.access_token;
+        const refreshToken = tokens.refreshToken || tokens.refresh_token;
+        
+        // Store in state
+        state.userSession = accessToken;
+        state.refreshToken = refreshToken;
+        
+        // Store in localStorage for persistence
         localStorage.setItem('userSession', accessToken);
+        if (refreshToken) {
+          localStorage.setItem('refreshToken', refreshToken);
+        }
+        
+        // Also store with backend naming for compatibility
+        localStorage.setItem('access_token', accessToken);
+        if (refreshToken) {
+          localStorage.setItem('refresh_token', refreshToken);
+        }
+        
+        state.isAuthenticated = true;
       } else {
+        // Clear tokens from state
+        state.userSession = null;
+        state.refreshToken = null;
+        
+        // Clear tokens from localStorage
         localStorage.removeItem('userSession');
-      }
-      if (refreshToken) {
-        localStorage.setItem('refreshToken', refreshToken);
-      } else {
         localStorage.removeItem('refreshToken');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        
+        state.isAuthenticated = false;
       }
     },
     clearAuth(state) {
       state.user = null;
       state.userSession = null;
       state.refreshToken = null;
+      state.csrfToken = null;
+      state.isAuthenticated = false;
+      
+      // Clear localStorage
       localStorage.removeItem('userSession');
       localStorage.removeItem('refreshToken');
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
     },
     setSlots(state, slots) {
       state.slots = slots;
@@ -121,143 +154,136 @@ export default createStore({
     }
   },
   actions: {
-    // --- Authentication ---
-    async register({ dispatch }, payload) {
+    // --- Authentication with HTTP-Only Cookies ---
+    async register({ dispatch, commit }, payload) {
       try {
-        const response = await apiService.register(payload); // Use apiService
+        const response = await apiService.register(payload);
         const data = response.data;
-        if (data.status && data.access_token && data.refresh_token) {
-          dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token, refreshToken: data.refresh_token });
+        if (data.status && data.user) {
+          commit('setUser', data.user);
+          if (data.csrf_token) {
+            commit('setCsrfToken', data.csrf_token);
+          }
         }
         return data;
       } catch (error) {
         // The interceptor in api.js will handle generic network errors or 401s.
         // Specific error handling for registration (e.g., email already exists) can remain here.
+        console.error("Registration Error:", error.response?.data || error.message);
         return error.response?.data || { status: false, status_message: "Network error during registration." };
       }
     },
-    async login({ dispatch, commit }, payload) {
+    
+    async login({ commit }, payload) {
       commit('startGlobalLoading');
       try {
-        const response = await apiService.login(payload); // Use apiService
+        const response = await apiService.login(payload);
         const data = response.data;
-        if (data.status && data.access_token && data.refresh_token) {
-          dispatch('setAuthTokensAndFetchUser', { accessToken: data.access_token, refreshToken: data.refresh_token });
+        if (data.status && data.user) {
+          commit('setUser', data.user);
+          if (data.csrf_token) {
+            commit('setCsrfToken', data.csrf_token);
+          }
         }
         return data;
       } catch (error) {
         const errData = error.response?.data;
         const defaultMessage = "Login failed. Please try again later.";
-        // Interceptor handles 401. Other errors (e.g., 400 bad request) can be handled here.
         if (error.response && error.response.status !== 401) {
-            commit('setGlobalError', errData?.status_message || defaultMessage);
+          commit('setGlobalError', errData?.status_message || defaultMessage);
         }
         return errData || { status: false, status_message: defaultMessage };
       } finally {
         commit('stopGlobalLoading');
       }
     },
-    async setAuthTokensAndFetchUser({ commit, dispatch }, { accessToken, refreshToken }) {
-        commit('setAuthTokens', { accessToken, refreshToken });
-        if (accessToken) {
-            await dispatch('fetchUserProfile');
-        }
-    },
-    async refreshToken({ commit, state, dispatch }) {
-      if (!state.refreshToken) {
-        // No await dispatch('logout') here as it might cause loops if logout also fails.
-        // The interceptor in api.js will call logout if refresh fails.
-        // This action is primarily called by the interceptor.
-        commit('clearAuth'); // Clear auth state immediately
-        return { status: false, status_message: "No refresh token available." };
-      }
+    
+    async refreshToken({ commit }) {
       try {
-        // apiService.refreshToken expects the token value and returns the axios response
-        const response = await apiService.refreshToken(state.refreshToken);
+        const response = await apiService.refreshToken();
         const data = response.data;
-        if (data.status && data.access_token) {
-          commit('setAuthTokens', { accessToken: data.access_token, refreshToken: state.refreshToken });
-          // The interceptor in api.js will use this new token to retry the original request.
-          // We also need to update the Authorization header for subsequent requests made by the apiClient in api.js
-          // This is handled by the interceptor setting the new token in apiClient's defaults or by re-initializing.
-          // For now, the request interceptor in api.js should pick up the new token from store/localStorage.
-          return { status: true, access_token: data.access_token };
+        if (data.status) {
+          if (data.csrf_token) {
+            commit('setCsrfToken', data.csrf_token);
+          }
+          return { status: true };
         } else {
-          // Refresh failed, logout will be dispatched by the interceptor in api.js
-          // However, if this action is called directly, we should ensure logout.
-          await dispatch('logout'); // Ensure local state is cleared
+          commit('clearAuth');
           return { status: false, status_message: data.status_message || "Session refresh failed." };
         }
       } catch (error) {
         // Logout will be dispatched by the interceptor in api.js
-        await dispatch('logout'); // Ensure local state is cleared
+        console.error("Token Refresh Action Error:", error.response?.data || error.message);
+        commit('clearAuth');
         return { status: false, status_message: "Session expired. Please log in again." };
       }
     },
-    async logout({ commit, state }) {
-      const currentAccessToken = state.userSession; // Store before clearing auth
-      const currentRefreshToken = state.refreshToken; // Store before clearing auth
-      
-      commit('clearAuth'); // Clear local tokens and user state immediately
-
+    
+    async logout({ commit }) {
       try {
-        // Invalidate access token on backend (if it was still valid)
-        if (currentAccessToken) {
-          // Use a temporary direct axios call to avoid interceptor complexities
-          const tempApiClient = axios.create({ baseURL: '/api' });
-          await tempApiClient.post('/logout', {}, { 
-            headers: { Authorization: `Bearer ${currentAccessToken}` } 
-          });
-        }
-
-        // Invalidate refresh token on backend
-        if (currentRefreshToken) {
-          // Use a temporary direct axios call for logout2 to avoid interceptor complexities
-          // and to ensure the correct refresh token is sent.
-          const tempApiClient = axios.create({ baseURL: '/api' });
-          await tempApiClient.post('/logout2', {}, { headers: { Authorization: `Bearer ${currentRefreshToken}` } });
-        }
-        return { status: true, status_message: "Logged out successfully." };
+        await apiService.logout();
       } catch (error) {
-        // Even if server logout fails, user is logged out locally.
-        return { status: true, status_message: "Logged out locally. Server session might have issues clearing." };
+        console.error("Logout error:", error);
+      } finally {
+        commit('clearAuth');
       }
     },
-    async loadSession({ dispatch, commit, state }) { // Added state
-      const accessToken = state.userSession; // Check state first, then localStorage
-      if (accessToken) {
-        commit('startGlobalLoading');
-        try {
-            // fetchUserProfile will use the new apiService which has interceptors.
-            // If token is expired, interceptor should try to refresh.
-            // If refresh fails, interceptor should logout.
-            await dispatch('fetchUserProfile');
-        } catch (error) {
-            // If fetchUserProfile itself fails (e.g. network error not caught by interceptor, or refresh fails and logs out)
-            // this catch might not be strictly necessary if interceptor handles all logout cases.
-            // dispatch('logout'); // Consider if this is needed or if interceptor handles it.
-        } finally {
-            commit('stopGlobalLoading');
-        }
+    
+    async loadSession({ dispatch, commit }) {
+      // For HTTP-only cookies, we don't check localStorage
+      // Instead, try to fetch user profile which will validate cookies
+      commit('startGlobalLoading');
+      try {
+        // fetchUserProfile will use the new apiService which has interceptors.
+        // If token is expired, interceptor should try to refresh.
+        // If refresh fails, interceptor should logout.
+        await dispatch('fetchUserProfile');
+      } catch (error) {
+        // If fetchUserProfile itself fails (e.g. network error not caught by interceptor)
+        // this catch might not be strictly necessary if interceptor handles all logout cases.
+        console.error("Load session error:", error);
+      } finally {
+        commit('stopGlobalLoading');
       }
-      // No 'else dispatch logout' here, app starts in logged-out state if no token.
     },
     async fetchUserProfile({ commit }) {
       try {
-        const response = await apiService.fetchUserProfile(); // Use apiService
-        if (response.data.status) {
-          commit('setUser', response.data.user);
-          return response.data.user;
+        const response = await apiService.getUserProfile();
+        const data = response.data;
+        if (data.status && data.user) {
+          commit('setUser', data.user);
+          return data;
         } else {
-          // Non-2xx responses that are not 401 should be caught by the .catch block
-          // This part might be redundant if apiService throws for non-ok responses.
-          return null;
+          commit('clearAuth');
+          return { status: false, status_message: data.status_message || "Failed to fetch user profile." };
         }
       } catch (error) {
-        // Interceptor should handle 401. This catches other errors (500, network, etc.).
-        // Do not dispatch logout here directly, interceptor in api.js should manage it on 401.
-        return null;
+        const errData = error.response?.data;
+        if (error.response?.status === 401) {
+          commit('clearAuth');
+        }
+        console.error("Error fetching user profile:", errData || error.message);
+        return errData || { status: false, status_message: "Failed to load user profile." };
       }
+    },
+    
+    async setAuthTokensAndFetchUser({ commit, dispatch }, tokens) {
+      // For HTTP-only cookies, we don't need to handle tokens manually
+      // Just fetch user profile to validate cookies
+      return await dispatch('fetchUserProfile');
+    },
+    
+    async getCsrfToken({ commit }) {
+      try {
+        const response = await apiService.getCsrfToken();
+        if (response.data.status && response.data.csrf_token) {
+          commit('setCsrfToken', response.data.csrf_token);
+          return response.data.csrf_token;
+        }
+      } catch (error) {
+        console.error("Error getting CSRF token:", error);
+      }
+      return null;
     },
 
     // --- Game Data ---
@@ -537,7 +563,7 @@ export default createStore({
     }
   },
   getters: {
-    isAuthenticated: (state) => !!state.userSession,
+    isAuthenticated: (state) => state.isAuthenticated,
     currentUser: (state) => state.user,
     isAdmin: (state) => state.user?.is_admin === true,
     getSlots: (state) => state.slots,

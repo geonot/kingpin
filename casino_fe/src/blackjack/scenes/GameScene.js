@@ -26,6 +26,7 @@ export default class GameScene extends Phaser.Scene {
   // --- Scene Lifecycle Methods ---
   create() {
     console.log('GameScene: create() called');
+    
     this.eventBus = this.registry.get('eventBus');
     this.tableAPIData = this.registry.get('tableAPIData');
     this.gameDefinition = this.registry.get('gameDefinition');
@@ -199,24 +200,47 @@ export default class GameScene extends Phaser.Scene {
 
   animateCardDeal(cardSprite, finalXInContainer, finalYInContainer, delay, container) {
     const dealSpeed = this.gameDefinition.animations.dealSpeed || 500;
-    // Start position relative to the container's origin (0,0)
-    // Assuming deck is off-screen or at a fixed point relative to game, not container
     const deckPosition = this.gameDefinition.positions.deck;
     const startX = deckPosition.x - container.x;
     const startY = deckPosition.y - container.y;
 
     cardSprite.setPosition(startX, startY);
     cardSprite.setAlpha(0.3);
+    cardSprite.setScale(0.8);
 
+    // Enhanced card deal animation with effects
     this.tweens.add({
       targets: cardSprite,
       x: finalXInContainer,
       y: finalYInContainer,
       alpha: 1,
+      scaleX: 1,
+      scaleY: 1,
       delay: delay,
       duration: dealSpeed,
-      ease: 'Power2',
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        // Add subtle sparkle effect when card lands
+        this.createCardLandEffect(container.x + finalXInContainer, container.y + finalYInContainer);
+      }
     });
+  }
+
+  createCardLandEffect(x, y) {
+    // Simple sparkle effect
+    for (let i = 0; i < 3; i++) {
+      const sparkle = this.add.circle(x, y, 2, 0xFFD700);
+      
+      this.tweens.add({
+        targets: sparkle,
+        x: x + (Math.random() - 0.5) * 20,
+        y: y + (Math.random() - 0.5) * 20,
+        alpha: 0,
+        duration: 200,
+        delay: i * 30,
+        onComplete: () => sparkle.destroy()
+      });
+    }
   }
 
   positionCardsInContainer(container, cardSpacing) {
@@ -278,9 +302,20 @@ export default class GameScene extends Phaser.Scene {
       if (container && container.scene) {
         let resultText = hand.result ? hand.result.replace('_', ' ').toUpperCase() : 'OUTCOME';
         let textColor = this.gameDefinition.fontStyles.outcomeText.fill || '#ffffff';
-        if (hand.result === 'win' || hand.result === 'blackjack_win') textColor = this.gameDefinition.fontStyles.successColor || '#00D700';
-        else if (hand.result === 'lose') textColor = this.gameDefinition.fontStyles.errorColor || '#ff0000';
-        else if (hand.result === 'push') textColor = this.gameDefinition.fontStyles.infoColor || '#ffff00';
+        
+        // Add win celebration effects
+        if (hand.result === 'win' || hand.result === 'blackjack_win') {
+          textColor = this.gameDefinition.fontStyles.successColor || '#00D700';
+          this.createWinCelebration(container.x, container.y);
+          
+          if (hand.result === 'blackjack_win') {
+            this.createBlackjackCelebration(container.x, container.y);
+          }
+        } else if (hand.result === 'lose') {
+          textColor = this.gameDefinition.fontStyles.errorColor || '#ff0000';
+        } else if (hand.result === 'push') {
+          textColor = this.gameDefinition.fontStyles.infoColor || '#ffff00';
+        }
 
         const outcomeText = this.add.text(
           0, // Centered in container
@@ -288,11 +323,83 @@ export default class GameScene extends Phaser.Scene {
           resultText,
           { ...this.gameDefinition.fontStyles.outcomeText, fill: textColor }
         ).setOrigin(0.5);
-        container.add(outcomeText); // Add to hand container
-        this.outcomeTextObjects.push(outcomeText); // Keep track for clearing
+        
+        // Animate outcome text
+        outcomeText.setScale(0);
+        this.tweens.add({
+          targets: outcomeText,
+          scaleX: 1,
+          scaleY: 1,
+          duration: 300,
+          ease: 'Back.easeOut'
+        });
+        
+        container.add(outcomeText);
+        this.outcomeTextObjects.push(outcomeText);
       }
     });
+    
     this.eventBus.emit('roundEndedUI', outcomeData);
+  }
+
+  createWinCelebration(x, y) {
+    // Create golden particles
+    for (let i = 0; i < 8; i++) {
+      const particle = this.add.circle(x, y, 4, 0xFFD700);
+      
+      const angle = (i / 8) * Math.PI * 2;
+      const distance = 50 + Math.random() * 30;
+      
+      this.tweens.add({
+        targets: particle,
+        x: x + Math.cos(angle) * distance,
+        y: y + Math.sin(angle) * distance,
+        alpha: 0,
+        scaleX: 0.5,
+        scaleY: 0.5,
+        duration: 800,
+        delay: i * 50,
+        onComplete: () => particle.destroy()
+      });
+    }
+  }
+
+  createBlackjackCelebration(x, y) {
+    // Special blackjack celebration with bigger effect
+    const text = this.add.text(x, y - 50, 'BLACKJACK!', {
+      fontSize: '24px',
+      fontFamily: 'Arial',
+      fill: '#FFD700',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+    
+    // Animate special text
+    text.setScale(0);
+    this.tweens.add({
+      targets: text,
+      scaleX: 1.5,
+      scaleY: 1.5,
+      duration: 300,
+      ease: 'Back.easeOut',
+      yoyo: true,
+      repeat: 2,
+      onComplete: () => text.destroy()
+    });
+    
+    // Extra sparkles for blackjack
+    for (let i = 0; i < 15; i++) {
+      const sparkle = this.add.circle(x, y, 3, 0xFFFFFF);
+      
+      this.tweens.add({
+        targets: sparkle,
+        x: x + (Math.random() - 0.5) * 100,
+        y: y + (Math.random() - 0.5) * 100,
+        alpha: 0,
+        duration: 1000,
+        delay: Math.random() * 300,
+        onComplete: () => sparkle.destroy()
+      });
+    }
   }
   
   playSoundForResult(resultData) {

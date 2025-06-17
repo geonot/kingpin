@@ -1,0 +1,126 @@
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy import table, column, Integer, String, Text, Float, JSON, DateTime, BigInteger, Boolean
+from datetime import datetime, timezone
+
+# revision identifiers, used by Alembic.
+revision = 'YYYYMMDDHHMMSS_add_celestial_guardians_slot' # Replace YYYYMMDDHHMMSS with actual timestamp
+down_revision = 'PREVIOUS_REVISION_ID' # Replace with the actual previous migration's ID
+branch_labels = None
+depends_on = None
+
+def upgrade():
+    slot_table = table('slot',
+        column('id', Integer), column('name', String), column('description', Text),
+        column('num_rows', Integer), column('num_columns', Integer), column('num_symbols', Integer),
+        column('wild_symbol_id', Integer), column('scatter_symbol_id', Integer),
+        column('bonus_type', String), column('bonus_subtype', String), column('bonus_multiplier', Float),
+        column('bonus_spins_trigger_count', Integer), column('bonus_spins_awarded', Integer),
+        column('short_name', String), column('asset_directory', String), column('rtp', Float),
+        column('volatility', String), column('is_active', Boolean), column('is_multiway', Boolean),
+        column('reel_configurations', JSON), column('is_cascading', Boolean), column('cascade_type', String),
+        column('min_symbols_to_match', Integer), column('win_multipliers', JSON), column('created_at', DateTime)
+    )
+    
+    slot_symbol_table = table('slot_symbol',
+        column('id', Integer), column('slot_id', Integer), column('symbol_internal_id', Integer),
+        column('name', String), column('img_link', String), column('value_multiplier', Float), column('data', JSON)
+    )
+    
+    slot_bet_table = table('slot_bet',
+        column('id', Integer), column('slot_id', Integer), column('bet_amount', BigInteger)
+    )
+
+    # Insert Slot 2 - Celestial Guardians
+    op.bulk_insert(slot_table, [
+        {
+            'id': 2,
+            'name': 'Celestial Guardians',
+            'description': 'An ethereal slot where players align cosmic energies with powerful celestial beings. Features Hold & Win and Free Spins.',
+            'num_rows': 3,
+            'num_columns': 5,
+            'num_symbols': 10, # 10 distinct symbols on main reels
+            'wild_symbol_id': 10, # Corresponds to Pulsating Nova Wild
+            'scatter_symbol_id': 9, # Corresponds to Celestial Orrery Scatter
+            'bonus_type': 'hold_and_win', # Primary bonus type displayed
+            'bonus_subtype': 'scatter_trigger',
+            'bonus_multiplier': 1.0, # For free spins, if applicable as base
+            'bonus_spins_trigger_count': 3,
+            'bonus_spins_awarded': 10,
+            'short_name': 'celestial',
+            'asset_directory': '/slot2/',
+            'rtp': 96.20,
+            'volatility': 'high',
+            'is_active': True,
+            'is_multiway': False,
+            'reel_configurations': {
+                'paylines': [ # Using standard 10 paylines from example
+                    {"id": "payline_1", "coords": [[0,0],[0,1],[0,2],[0,3],[0,4]]},
+                    {"id": "payline_2", "coords": [[1,0],[1,1],[1,2],[1,3],[1,4]]},
+                    {"id": "payline_3", "coords": [[2,0],[2,1],[2,2],[2,3],[2,4]]},
+                    {"id": "payline_4", "coords": [[0,0],[1,1],[2,2],[1,3],[0,4]]},
+                    {"id": "payline_5", "coords": [[2,0],[1,1],[0,2],[1,3],[2,4]]},
+                    {"id": "payline_6", "coords": [[0,0],[0,1],[1,2],[2,3],[2,4]]},
+                    {"id": "payline_7", "coords": [[2,0],[2,1],[1,2],[0,3],[0,4]]},
+                    {"id": "payline_8", "coords": [[1,0],[0,1],[0,2],[0,3],[1,4]]},
+                    {"id": "payline_9", "coords": [[1,0],[2,1],[2,2],[2,3],[1,4]]},
+                    {"id": "payline_10", "coords": [[0,0],[1,1],[0,2],[1,3],[0,4]]}
+                ],
+                'payouts': [ # Matches gameConfig payouts
+                    {"symbol_id": 1, "matches": 3, "multiplier": 0.5}, {"symbol_id": 1, "matches": 4, "multiplier": 1}, {"symbol_id": 1, "matches": 5, "multiplier": 2},
+                    {"symbol_id": 2, "matches": 3, "multiplier": 0.5}, {"symbol_id": 2, "matches": 4, "multiplier": 1}, {"symbol_id": 2, "matches": 5, "multiplier": 2},
+                    {"symbol_id": 3, "matches": 3, "multiplier": 0.6}, {"symbol_id": 3, "matches": 4, "multiplier": 1.2}, {"symbol_id": 3, "matches": 5, "multiplier": 2.5},
+                    {"symbol_id": 4, "matches": 3, "multiplier": 0.6}, {"symbol_id": 4, "matches": 4, "multiplier": 1.2}, {"symbol_id": 4, "matches": 5, "multiplier": 2.5},
+                    {"symbol_id": 5, "matches": 3, "multiplier": 0.7}, {"symbol_id": 5, "matches": 4, "multiplier": 1.5}, {"symbol_id": 5, "matches": 5, "multiplier": 3},
+                    {"symbol_id": 6, "matches": 3, "multiplier": 1}, {"symbol_id": 6, "matches": 4, "multiplier": 2.5}, {"symbol_id": 6, "matches": 5, "multiplier": 5},
+                    {"symbol_id": 7, "matches": 3, "multiplier": 1.5}, {"symbol_id": 7, "matches": 4, "multiplier": 5}, {"symbol_id": 7, "matches": 5, "multiplier": 10},
+                    {"symbol_id": 8, "matches": 3, "multiplier": 2}, {"symbol_id": 8, "matches": 4, "multiplier": 10}, {"symbol_id": 8, "matches": 5, "multiplier": 25},
+                    {"symbol_id": 9, "matches": 3, "multiplier": 2}, {"symbol_id": 9, "matches": 4, "multiplier": 10}, {"symbol_id": 9, "matches": 5, "multiplier": 50}, # Scatter Payouts
+                    {"symbol_id": 10, "matches": 3, "multiplier": 2.5}, {"symbol_id": 10, "matches": 4, "multiplier": 12}, {"symbol_id": 10, "matches": 5, "multiplier": 60} # Wild Payouts
+                ]
+            },
+            'is_cascading': False,
+            'cascade_type': None,
+            'min_symbols_to_match': 3,
+            'win_multipliers': None, 
+            'created_at': datetime.now(timezone.utc)
+        }
+    ])
+
+    # Insert Slot 2 Symbols
+    slot2_symbols = [
+        {'slot_id': 2, 'symbol_internal_id': 1, 'name': 'Ten', 'img_link': '/slot2/symbol_10.png', 'value_multiplier': 1.0, 'data': {'value_multipliers': {"3": 0.5, "4": 1, "5": 2}}},
+        {'slot_id': 2, 'symbol_internal_id': 2, 'name': 'Jack', 'img_link': '/slot2/symbol_j.png', 'value_multiplier': 1.0, 'data': {'value_multipliers': {"3": 0.5, "4": 1, "5": 2}}},
+        {'slot_id': 2, 'symbol_internal_id': 3, 'name': 'Queen', 'img_link': '/slot2/symbol_q.png', 'value_multiplier': 1.5, 'data': {'value_multipliers': {"3": 0.6, "4": 1.2, "5": 2.5}}},
+        {'slot_id': 2, 'symbol_internal_id': 4, 'name': 'King', 'img_link': '/slot2/symbol_k.png', 'value_multiplier': 1.5, 'data': {'value_multipliers': {"3": 0.6, "4": 1.2, "5": 2.5}}},
+        {'slot_id': 2, 'symbol_internal_id': 5, 'name': 'Ace', 'img_link': '/slot2/symbol_a.png', 'value_multiplier': 2.0, 'data': {'value_multipliers': {"3": 0.7, "4": 1.5, "5": 3}}},
+        {'slot_id': 2, 'symbol_internal_id': 6, 'name': 'Lunar Moth', 'img_link': '/slot2/symbol_lunar_moth.png', 'value_multiplier': 5.0, 'data': {'value_multipliers': {"3": 1, "4": 2.5, "5": 5}}},
+        {'slot_id': 2, 'symbol_internal_id': 7, 'name': 'Starfall Phoenix', 'img_link': '/slot2/symbol_starfall_phoenix.png', 'value_multiplier': 10.0, 'data': {'value_multipliers': {"3": 1.5, "4": 5, "5": 10}}},
+        {'slot_id': 2, 'symbol_internal_id': 8, 'name': 'Celestial Guardian Seraph', 'img_link': '/slot2/symbol_celestial_guardian_seraph.png', 'value_multiplier': 20.0, 'data': {'value_multipliers': {"3": 2, "4": 10, "5": 25}}},
+        {'slot_id': 2, 'symbol_internal_id': 9, 'name': 'Scatter - Celestial Orrery', 'img_link': '/slot2/symbol_scatter_orrery.png', 'value_multiplier': 0, 'data': {'scatter_payouts': {"3": 2, "4": 10, "5": 50}}},
+        {'slot_id': 2, 'symbol_internal_id': 10, 'name': 'Wild - Pulsating Nova', 'img_link': '/slot2/symbol_wild_nova.png', 'value_multiplier': 0, 'data': {'value_multipliers': {"3": 2.5, "4": 12, "5": 60}}},
+        {'slot_id': 2, 'symbol_internal_id': 11, 'name': 'Coin - Stardust Gem', 'img_link': '/slot2/symbol_coin_stardust_gem.png', 'value_multiplier': 0, 'data': {'isBonusCoin': True}}
+    ]
+    
+    start_symbol_id = 10 
+    for i, symbol_data in enumerate(slot2_symbols):
+        symbol_data['id'] = start_symbol_id + i
+        
+    op.bulk_insert(slot_symbol_table, slot2_symbols)
+
+    # Insert Slot 2 Bet Options
+    slot2_bets = [
+        {'slot_id': 2, 'bet_amount': 10}, {'slot_id': 2, 'bet_amount': 20},
+        {'slot_id': 2, 'bet_amount': 50}, {'slot_id': 2, 'bet_amount': 100},
+        {'slot_id': 2, 'bet_amount': 200}, {'slot_id': 2, 'bet_amount': 500}
+    ]
+    start_bet_id = 7 
+    for i, bet_data in enumerate(slot2_bets):
+        bet_data['id'] = start_bet_id + i
+
+    op.bulk_insert(slot_bet_table, slot2_bets)
+
+def downgrade():
+    op.execute(sa.text(f"DELETE FROM slot_bet WHERE slot_id = 2"))
+    op.execute(sa.text(f"DELETE FROM slot_symbol WHERE slot_id = 2"))
+    op.execute(sa.text(f"DELETE FROM slot WHERE id = 2"))

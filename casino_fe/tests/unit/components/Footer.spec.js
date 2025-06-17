@@ -8,7 +8,10 @@ describe('Footer.vue', () => {
     wrapper = shallowMount(Footer, {
       global: {
         stubs: {
-          'router-link': true // Basic stub for <router-link>
+          'router-link': {
+            template: '<a :href="to"><slot /></a>',
+            props: ['to']
+          }
         }
       }
     });
@@ -25,22 +28,18 @@ describe('Footer.vue', () => {
   });
 
   test('renders link to Terms page', () => {
-    // Find by attribute `to`
-    const termsLink = wrapper.find('router-link[to="/terms"]');
+    // Find by href since we're stubbing router-link as an anchor
+    const termsLink = wrapper.find('a[href="/terms"]');
     expect(termsLink.exists()).toBe(true);
-    // Check text content if available, assuming stub renders children or has text
-    // For a basic stub like `true`, it might not render text.
-    // If using a component stub like `<template><slot/></template>`, text can be checked.
-    // For this simple case, checking existence and `to` prop is often enough.
   });
 
   test('renders link to Privacy Policy page', () => {
-    const privacyLink = wrapper.find('router-link[to="/privacy"]');
+    const privacyLink = wrapper.find('a[href="/privacy"]');
     expect(privacyLink.exists()).toBe(true);
   });
 
   test('renders link to Responsible Gaming page', () => {
-    const responsibleGamingLink = wrapper.find('router-link[to="/responsible-gaming"]');
+    const responsibleGamingLink = wrapper.find('a[href="/responsible-gaming"]');
     expect(responsibleGamingLink.exists()).toBe(true);
   });
 

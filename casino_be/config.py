@@ -19,29 +19,72 @@ class Config:
     
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # JWT Secret - use default for development
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-key-change-in-production')
-    JWT_ACCESS_TOKEN_EXPIRES = 3600  # 1 hour
-    JWT_REFRESH_TOKEN_EXPIRES = 86400 * 7 # 7 days
+    # JWT Configuration - Enhanced Security
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
+    if not JWT_SECRET_KEY:
+        import secrets
+        import warnings
+        # Generate a secure random key for development
+        JWT_SECRET_KEY = secrets.token_urlsafe(64)
+        warnings.warn(
+            "JWT_SECRET_KEY not set in environment. Using generated key for development. "
+            "Set JWT_SECRET_KEY environment variable for production!",
+            UserWarning
+        )
+    
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', '3600'))  # 1 hour
+    JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', str(86400 * 7)))  # 7 days
     JWT_BLACKLIST_ENABLED = True
-    JWT_BLACKLIST_TOKEN_CHECKS = ['access', 'refresh'] # Check both token types
+    JWT_BLACKLIST_TOKEN_CHECKS = ['access', 'refresh']
+    
+    # JWT Cookie Configuration for enhanced security
+    JWT_TOKEN_LOCATION = ['cookies']
+    JWT_COOKIE_SECURE = os.getenv('JWT_COOKIE_SECURE', 'True').lower() in ('true', '1', 't')
+    JWT_COOKIE_HTTPONLY = True
+    JWT_COOKIE_SAMESITE = 'Strict'
+    JWT_COOKIE_CSRF_PROTECT = True
+    JWT_ACCESS_COOKIE_NAME = 'access_token_cookie'
+    JWT_REFRESH_COOKIE_NAME = 'refresh_token_cookie'
+    JWT_ACCESS_CSRF_HEADER_NAME = 'X-CSRF-Token'
+    JWT_REFRESH_CSRF_HEADER_NAME = 'X-CSRF-Token'
+    
+    # Session Configuration
+    SESSION_COOKIE_SECURE = JWT_COOKIE_SECURE
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Strict'
+    
+    # Security Headers
+    SECURITY_HEADERS = True
 
     # Rate Limiter Storage URI
     # For production, set e.g., RATELIMIT_STORAGE_URI='redis://localhost:6379/0'
     RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
 
-    # Flask Debug Mode
-    # For production, ensure FLASK_DEBUG is not set or set to 'False'.
-    # Set FLASK_DEBUG to 'True' or '1' for development.
-    DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() in ('true', '1', 't')
+    # Flask Debug Mode - SECURE DEFAULT
+    # Debug mode is DISABLED by default for security
+    # Set FLASK_DEBUG=True explicitly for development
+    DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
 
     # Satoshi Conversion Factor (1 BTC = 100,000,000 Satoshis)
     SATOSHI_FACTOR = 100_000_000
 
-    # Admin settings - use defaults for development
-    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
-    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')  # Default for development
-    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@kingpincasino.local')
+    # Admin settings - MUST be set in production
+    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
+    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
+    
+    # Validate required admin settings
+    if not all([ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_EMAIL]):
+        import warnings
+        warnings.warn(
+            "Admin credentials not fully configured in environment variables. "
+            "Set ADMIN_USERNAME, ADMIN_PASSWORD, and ADMIN_EMAIL for production!",
+            UserWarning
+        )
+        # Fallback values for development only
+        ADMIN_USERNAME = ADMIN_USERNAME or 'admin'
+        ADMIN_PASSWORD = ADMIN_PASSWORD or 'admin123'
+        ADMIN_EMAIL = ADMIN_EMAIL or 'admin@kingpincasino.local'
 
     # Service API Token for internal services (e.g., polling service)
     SERVICE_API_TOKEN = os.getenv('SERVICE_API_TOKEN', 'default_service_token_please_change')
