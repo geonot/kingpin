@@ -27,11 +27,19 @@ from marshmallow import ValidationError
 # Custom Logging Filter for Request ID
 class RequestIdFilter(logging.Filter):
     def filter(self, record):
-        record.request_id = g.get('request_id', 'N/A')
+        # Make the filter resilient to missing 'g' or 'request_id'
+        # This can happen if logging occurs outside of an active app/request context
+        # (e.g., during app initialization before context is pushed for tests)
+        try:
+            # Attempt to access g.request_id. This might fail if no app context.
+            record.request_id = g.get('request_id', 'N/A')
+        except RuntimeError:
+            # If a RuntimeError occurs, it means g is not available (outside context)
+            record.request_id = 'N/A' # Default if g or request_id is not available
         return True
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
-from models import (
+from casino_be.models import (
     db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist,
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
@@ -41,7 +49,7 @@ from models import (
     # Crystal Garden Models
     CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry
 )
-from schemas import (
+from casino_be.schemas import (
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
@@ -53,20 +61,20 @@ from schemas import (
     # Baccarat schemas will be defined below for now, or imported if moved to a separate file
     BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema, BaccaratActionSchema # Actual Baccarat Schemas
 )
-from utils.auth import register_jwt_handlers
-from utils.bitcoin import generate_bitcoin_wallet
-from utils.spin_handler import handle_spin
-from utils.multiway_helper import handle_multiway_spin
-from utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
-from utils import spacecrash_handler
-from utils import poker_helper
-from utils import roulette_helper # Import the new helper
-from utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
-from utils import baccarat_helper
-from config import Config
+from casino_be.utils.auth import register_jwt_handlers
+from casino_be.utils.bitcoin import generate_bitcoin_wallet
+from casino_be.utils.spin_handler import handle_spin
+from casino_be.utils.multiway_helper import handle_multiway_spin
+from casino_be.utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from casino_be.utils import spacecrash_handler
+from casino_be.utils import poker_helper
+from casino_be.utils import roulette_helper # Import the new helper
+from casino_be.utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS
+from casino_be.utils import baccarat_helper
+from casino_be.config import Config, TestingConfig, perform_startup_validation
 from sqlalchemy.orm import joinedload # Added for poker join logic
 from decimal import Decimal
-from services.bonus_service import apply_bonus_to_deposit
+from casino_be.services.bonus_service import apply_bonus_to_deposit
 from http import HTTPStatus
 import click # For CLI commands
 import re # For password validation
@@ -90,6 +98,22 @@ def create_app(config_class=Config):
     """Application factory pattern."""
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    # === Perform critical configuration validation ===
+    # Only run validation if not using TestingConfig and not specifically in a 'test' environment
+    # The app.config.get("TESTING", False) check is crucial.
+    if config_class != TestingConfig and not app.config.get("TESTING", False):
+        try:
+            perform_startup_validation()
+        except ValueError as e:
+            # Raising SystemExit is a clean way to stop the application.
+            # The error message from perform_startup_validation will be part of 'e'.
+            # Ensure logger is available or use print to stderr
+            # app.logger might not be configured yet if this fails early.
+            import sys
+            print(f"CRITICAL CONFIGURATION ERROR: {e}", file=sys.stderr)
+            raise SystemExit(1)
+
 
     # --- Logger Setup (early, so it's available for config warnings) ---
     if not app.debug:
@@ -250,18 +274,18 @@ def create_app(config_class=Config):
         return response
 
     # --- Blueprint Imports ---
-    from routes.auth import auth_bp
-    from routes.user import user_bp
-    from routes.admin import admin_bp
-    from routes.slots import slots_bp
-    from routes.blackjack import blackjack_bp
-    from routes.poker import poker_bp
-    from routes.plinko import plinko_bp
-    from routes.roulette import roulette_bp
-    from routes.spacecrash import spacecrash_bp
-    from routes.meta_game import meta_game_bp
-    from routes.baccarat import baccarat_bp # New Baccarat import
-    from routes.internal import internal_bp # New Internal import
+    from casino_be.routes.auth import auth_bp
+    from casino_be.routes.user import user_bp
+    from casino_be.routes.admin import admin_bp
+    from casino_be.routes.slots import slots_bp
+    from casino_be.routes.blackjack import blackjack_bp
+    from casino_be.routes.poker import poker_bp
+    from casino_be.routes.plinko import plinko_bp
+    from casino_be.routes.roulette import roulette_bp
+    from casino_be.routes.spacecrash import spacecrash_bp
+    from casino_be.routes.meta_game import meta_game_bp
+    from casino_be.routes.baccarat import baccarat_bp # New Baccarat import
+    from casino_be.routes.internal import internal_bp # New Internal import
     from casino_be.routes.crystal_garden import crystal_garden_bp # Crystal Garden import
 
     # CLI command for cleanup
@@ -406,17 +430,26 @@ def log_production_warnings(app):
             )
 
 
-# Create the app instance for direct usage
-# app = create_app() # This line is usually present for Gunicorn/uWSGI or direct run.
-                    # If manage.py or similar is the entry point, it might call create_app().
-                    # For running directly with `python app.py`, it's needed.
+# The global 'app' instance is removed to prevent issues with test collection and to strictly enforce the app factory pattern.
+# Tests should create their own app instances using create_app().
+# For running the development server, use 'flask run' which will automatically detect and use create_app().
 
-# Add main section to run the app
-if __name__ == '__main__':
-    # When running app.py directly, create_app() is called here.
-    # Ensure app.debug is correctly set based on FLASK_DEBUG env var for this direct run scenario.
-    # The create_app() function already handles app.debug based on config_class.DEBUG,
-    # which in turn reads FLASK_DEBUG.
-    current_app_instance = create_app() # Use a different variable name to avoid confusion with flask.current_app proxy
-    current_app_instance.run(host='0.0.0.0', port=5000) # debug is controlled by FLASK_DEBUG in Config
+# # Create the app instance for direct usage
+# # Conditionally use TestingConfig if FLASK_ENV is 'testing'
+# # This ensures that when tests import 'app', it's already using TestingConfig.
+# if os.getenv('FLASK_ENV') == 'testing':
+#     # from config import TestingConfig # Already imported at the top
+#     app = create_app(TestingConfig)
+# else:
+#     # from config import Config # Already imported at the top
+#     app = create_app(Config) # Default behavior, will trigger validation if env vars not set
+
+# # Add main section to run the app
+# if __name__ == '__main__':
+#     # When running app.py directly, create_app() is called here.
+#     # Ensure app.debug is correctly set based on FLASK_DEBUG env var for this direct run scenario.
+#     # The create_app() function already handles app.debug based on config_class.DEBUG,
+#     # which in turn reads FLASK_DEBUG.
+#     current_app_instance = create_app() # Use a different variable name to avoid confusion with flask.current_app proxy
+#     current_app_instance.run(host='0.0.0.0', port=5000) # debug is controlled by FLASK_DEBUG in Config
 

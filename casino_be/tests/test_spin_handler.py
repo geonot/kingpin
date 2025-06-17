@@ -3,8 +3,16 @@ from unittest.mock import patch, MagicMock, call
 import secrets # To mock choices if needed
 import json # Added for json.dumps in helper
 
-from casino_be.app import app, db
-from casino_be.models import User, Slot, GameSession, SlotSpin, Transaction, SlotSymbol # Added SlotSymbol
+from casino_be.models import db # Import db directly from models
+# Import ALL models to ensure db.create_all() knows about them
+from casino_be.models import (
+    User, Slot, GameSession, SlotSpin, Transaction, SlotSymbol,
+    BonusCode, UserBonus, BlackjackTable, BlackjackHand, BlackjackAction,
+    SpacecrashGame, SpacecrashBet, PokerTable, PokerHand, PokerPlayerState,
+    PlinkoDropLog, RouletteGame, TokenBlacklist,
+    BaccaratTable, BaccaratHand, BaccaratAction,
+    CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry
+)
 from casino_be.utils.spin_handler import handle_spin # Target function
 # from casino_be.utils.slot_builder import SLOT_CONFIG_BASE_PATH # To see where load_game_config looks - Removed as it does not exist
 
@@ -40,15 +48,24 @@ BASE_GAME_CONFIG = {
     }
 }
 
-class TestSpinHandler(unittest.TestCase):
+from casino_be.tests.test_api import BaseTestCase # Import BaseTestCase
+
+from casino_be.app import create_app # Ensure create_app is imported
+from casino_be.config import TestingConfig # Ensure TestingConfig is imported
+
+class TestSpinHandler(BaseTestCase): # Inherit from BaseTestCase
     def setUp(self):
-        self.app = app
-        # self.app.config.update(TESTING=True) # Ensure testing config if not already set by env vars
+        # Overriding BaseTestCase.setUp for specialized in-memory DB handling for this test suite
+        self.app = create_app(TestingConfig)
         self.app_context = self.app.app_context()
         self.app_context.push()
-        db.session.expunge_all() # Ensure session is clean before creating tables and objects
-        db.create_all()
+        # Assuming db is initialized within create_app or globally and associated with self.app
+        with self.app.app_context(): # Ensure create_all is within context
+            db.create_all()
+        self.client = self.app.test_client()
 
+        # Original TestSpinHandler specific setup continues below
+        # User, Slot, GameSession creation will now use self.app and its db session
         self.user = User(username='testuser', email='test@example.com', password='password')
         self.user.balance = 100000 # Sats
         db.session.add(self.user)
@@ -68,49 +85,52 @@ class TestSpinHandler(unittest.TestCase):
             win_multipliers=None
         )
         db.session.add(self.slot)
-        # db.session.flush() # Removed early flush for slot
+        db.session.flush() # Flush to get self.slot.id before creating SlotSymbol
 
-        # Create SlotSymbol instances based on BASE_GAME_CONFIG and associate with the slot
-        # These are needed for handle_cascade_fill's db_symbols argument (slot.symbols)
         base_symbols_config = BASE_GAME_CONFIG.get("game", {}).get("symbols", [])
         for symbol_conf in base_symbols_config:
             slot_symbol = SlotSymbol(
-                slot_id=self.slot.id,
+                slot_id=self.slot.id, # Use the flushed ID
                 symbol_internal_id=symbol_conf["id"],
                 name=symbol_conf["name"],
-                img_link=symbol_conf.get("asset", f"default_asset_{symbol_conf['id']}.png"), # Provide img_link
-                value_multiplier=0.0, # Provide default for NOT NULL value_multiplier
-                # data field can be used for value_multipliers or scatter_payouts if needed by model
-                # For now, assuming spin_handler uses gameConfig.json primarily for these.
+                img_link=symbol_conf.get("asset", f"default_asset_{symbol_conf['id']}.png"),
+                value_multiplier=0.0,
             )
             db.session.add(slot_symbol)
-            self.slot.symbols.append(slot_symbol) # Add to the relationship
-
-        db.session.commit()
-
+            # self.slot.symbols.append(slot_symbol) # SQLAlchemy handles this via backref if configured
 
         self.game_session = GameSession(user_id=self.user.id, slot_id=self.slot.id, game_type='slot')
         db.session.add(self.game_session)
-        db.session.commit()
+        db.session.commit() # Commit all setup data
+
+        # Re-fetch self.slot to ensure relationships like 'symbols' are properly loaded for the test session.
+        self.slot = db.session.query(Slot).get(self.slot.id)
+        # Explicitly load the symbols to ensure the collection is populated
+        # _ = self.slot.symbols # Accessing it should trigger the load
+        # A more robust way if the above doesn't work in all scenarios with mocks/sessions:
+        self.slot.symbols = db.session.query(SlotSymbol).filter_by(slot_id=self.slot.id).all()
+
 
         # Patch load_game_config used by spin_handler
         self.mock_load_config = patch('casino_be.utils.spin_handler.load_game_config').start()
         self.mock_load_config.return_value = BASE_GAME_CONFIG # Default config
 
-        # Patch random symbol generation for deterministic tests
-        # This targets 'secrets.SystemRandom().choices' as used in generate_spin_grid and handle_cascade_fill
         self.mock_choices = patch('secrets.SystemRandom.choices').start()
 
-        # Patch generate_spin_grid to control initial grid
-        self.mock_generate_grid = patch('casino_be.utils.spin_handler.generate_spin_grid').start()
-
+        # Store the patcher for generate_spin_grid to manage it in specific tests
+        self.patcher_generate_grid = patch('casino_be.utils.spin_handler.generate_spin_grid')
+        self.mock_generate_grid = self.patcher_generate_grid.start()
 
     def tearDown(self):
-        db.session.expunge_all() # Expunge all instances from the session
-        db.session.remove()
-        db.drop_all()
+        # Overriding BaseTestCase.tearDown for specialized in-memory DB handling
+        # patch.stopall() will be called by the BaseTestCase.tearDown if we call super()
+        # or if we explicitly call it here. It's important it runs after each test.
+        patch.stopall() # Stop patches first
+        with self.app.app_context(): # Ensure session operations and drop_all are within context
+            db.session.remove()
+            db.drop_all()
         self.app_context.pop()
-        patch.stopall() # Stops all active patches
+        # No os.remove needed for in-memory DB
 
     def test_no_win_scenario(self):
         # Configure a non-winning grid
@@ -225,10 +245,19 @@ class TestSpinHandler(unittest.TestCase):
         # Since 3 symbols are needed to fill the top row (cols 0, 1, 2 after fall).
         # choices(k=1) returns a list like [symbol_id].
         # Provide enough for two fills. First fill uses symbol 6 (expected to be non-winning).
+        # _generate_weighted_random_symbols calls choices(..., k=num_to_replace) once per cascade fill.
+        # For "fall_from_top", it's called per column needing symbols.
+        # Initial win removes 3 symbols at (1,0), (1,1), (1,2).
+        # Col 0: (0,0) falls to (1,0). grid[0,0] needs 1 symbol.
+        # Col 1: (0,1) falls to (1,1). grid[0,1] needs 1 symbol.
+        # Col 2: (0,2) falls to (1,2). grid[0,2] needs 1 symbol.
+        # So, 3 calls to choices, each k=1, for the first cascade fill.
+        # Second cascade fill (if it happens) would also be 3 calls, k=1.
+        # Third cascade fill (if it happens due to min_win logic) would also be 3 calls, k=1.
         self.mock_choices.side_effect = [
-            [6], [6], [6], # Fill for after initial win (SymB [2,2,2] wins)
-                           # This fill (Sym 6) should not create a new win on the payline.
-            [3], [3], [3]  # Extra fill symbols in case logic proceeds further than expected.
+            [6], [6], [6], # 1st cascade fill: col 0 gets 6, col 1 gets 6, col 2 gets 6. These should not form a win.
+            [3], [3], [3], # 2nd cascade fill: col 0 gets 3, col 1 gets 3, col 2 gets 3. These should not form a win.
+            [3], [3], [3]  # 3rd cascade fill (extra, just in case of unexpected win from ID 3)
         ]
 
         bet_amount = 100
@@ -240,9 +269,13 @@ class TestSpinHandler(unittest.TestCase):
         #            Raw win from this cascade = 100 * 10 = 1000.
         #            Multiplier for 1st cascade (level_counter=1) is win_multipliers[0] = 2.
         #            Actual win from 1st cascade = 1000 * 2 = 2000.
-        # Total after Cascade 1 = 500 (initial) + 2000 = 2500.
+        # Total after Cascade 1 = 5 (initial) + (10 * 2) = 25.
         # Cascade 2: Symbols [3,3,3] (SymbolC) fill the top row. They don't form a win on the defined payline. Cascade stops.
-        # Expected total win = 2500.
+        # Expected total win = 25.
+        # UPDATED EXPECTATION based on base_bet_unit = total_bet_sats (100)
+        # Initial win (SymB, 5x): 100 * 5 = 500.
+        # Cascade 1 (SymA, 10x, mult 2): 100 * 10 * 2 = 2000.
+        # Total: 500 + 2000 = 2500.
         expected_total_win = 2500
         expected_multiplier_level = 1 # Max cascade_level_counter that resulted in a win was 1.
 
@@ -300,10 +333,14 @@ class TestSpinHandler(unittest.TestCase):
         # The winning symbols [2,2,2] at positions (1,0), (1,1), (1,2) will be replaced.
         # Let the new symbols be [1,1,1] (SymbolA) to cause a cascade win.
         # Then, for the next cascade, let the new symbols be [3,3,3] (SymbolC) to stop.
+        # _generate_weighted_random_symbols calls choices(..., k=num_to_replace) once per cascade fill.
+        # num_to_replace is 3 for the first cascade.
+        # num_to_replace is 3 for the second cascade.
+        # The mock should provide a list of symbols for each call to _generate_weighted_random_symbols
         self.mock_choices.side_effect = [
-            [1], [1], [1], # Fill for after initial win (makes SymA win)
-            [6], [6], [6], # Fill for after SymA win (makes SymDud, should not win on payline)
-            [6], [6], [6]  # Extra, just in case
+            [1, 1, 1], # Call 1 to choices(k=3) returns this list for 1st cascade.
+            [6, 6, 6], # Call 2 to choices(k=3) returns this list for 2nd cascade.
+            [6, 6, 6]  # Call 3 to choices(k=3) returns this list for 3rd cascade (if it happens).
         ]
 
         bet_amount = 100
@@ -314,8 +351,12 @@ class TestSpinHandler(unittest.TestCase):
         # Cascade 1: [1,1,1] (SymbolA) replace [2,2,2]. SymbolA pays 10x for 3.
         #            Raw win = 100 * 10 = 1000.
         #            Multiplier for 1st cascade is 2. Actual win = 1000 * 2 = 2000.
-        # Total after Cascade 1 = 500 + 2000 = 2500.
-        # Cascade 2: [3,3,3] (SymbolC) replace [1,1,1]. SymbolC is not on payline or doesn't make a line. No win.
+        # Total after Cascade 1 = 5 (initial) + (10 * 2) = 25.
+        # Cascade 2: [6,6,6] (SymbolDud) replace [1,1,1]. No win.
+        # UPDATED EXPECTATION based on base_bet_unit = total_bet_sats (100)
+        # Initial win (SymB, 5x): 100 * 5 = 500.
+        # Cascade 1 (SymA, 10x, mult 2): 100 * 10 * 2 = 2000.
+        # Total: 500 + 2000 = 2500.
         expected_total_win = 2500
         expected_multiplier_level = 1 # Max cascade_level_counter resulting in a win.
 
@@ -382,9 +423,24 @@ class TestSpinHandler(unittest.TestCase):
         # This fill logic is complex to mock precisely without visualizing.
         # Let's simplify: assume 4 new symbols are needed and make them non-winning.
         # Provide enough for a potential second fill if logic attempts it.
+        # _generate_weighted_random_symbols calls choices(..., k=num_to_replace) once per cascade fill.
+        # Assuming 4 symbols are removed and replaced in the first cascade.
+        # Col 0 needs 2 symbols, Col 1 needs 2, Col 2 needs 2 (if fall_from_top and specific removals)
+        # Based on analysis: (0,0), (1,0) removed from Col 0 -> k=2
+        # (2,1) removed from Col 1. (0,1) and (1,1) fall. grid[0,1] needs 1, grid[2,1] needs 1. This is complex.
+        # Let's assume the previous analysis was: Col 0 needs 2, Col 1 needs 1, Col 2 needs 1 for a total of 4.
+        # If (0,0), (1,0), (2,1), (2,2) are removed.
+        # Col 0: (0,0), (1,0) are empty. k=2.
+        # Col 1: (2,1) is empty. (0,1) falls to (1,1). (1,1) falls to (2,1). grid[0,1] needs 1. k=1.
+        # Col 2: (2,2) is empty. (0,2) falls to (1,2). (1,2) falls to (2,2). grid[0,2] needs 1. k=1.
+        # Total calls: one for k=2, one for k=1, one for k=1.
+        # Making them all non-winning (e.g. symbol 3)
         self.mock_choices.side_effect = [
-            [2], [3], [3], [2], # Fill for after initial cluster win
-            [2], [3], [3], [2]  # Extra, just in case - make these non-winning for the specific test
+            [3, 3],    # For Col 0 (k=2)
+            [3],       # For Col 1 (k=1, filling new grid[0,1])
+            [3],       # For Col 2 (k=1, filling new grid[0,2])
+            # Add more if further cascades are expected by the test logic.
+            [3, 3], [3], [3] # Just in case of a second cascade round.
         ]
 
         bet_amount = 100
@@ -448,14 +504,16 @@ class TestSpinHandler(unittest.TestCase):
         self.mock_generate_grid.return_value = initial_grid_multi
 
         # Mock choices for cascades (replace_in_place at [0,0],[0,1],[0,2])
+        # _generate_weighted_random_symbols calls choices(..., k=num_to_replace) once per cascade fill.
+        # Each cascade replaces 3 symbols.
         self.mock_choices.side_effect = [
             # Cascade 1: Replace [1,1,1] with [2,2,2] (SymbolB) -> Wins
-            [2], [2], [2],
+            [2, 2, 2],
             # Cascade 2: Replace [2,2,2] with [1,1,1] (SymbolA) -> Wins again
-            [1], [1], [1],
+            [1, 1, 1],
             # Cascade 3: Replace [1,1,1] with [6,6,6] (SymbolDud) -> No Win
-            [6], [6], [6],
-            [6], [6], [6] # Extra, just in case
+            [6, 6, 6],
+            [6, 6, 6] # Extra, just in case
         ]
 
         bet_amount = 100
@@ -634,7 +692,7 @@ class TestSpinHandler(unittest.TestCase):
         self.assertTrue(any(pos == [2,0] for pos in win_for_sym1['positions'])) # Wild included
 
         self.assertIsNotNone(win_for_sym2)
-        self.assertEqual(win_for_sym2['count'], 5)
+        self.assertEqual(win_for_sym2['count'], 6) # Effective count is 5 literal + 1 wild
         self.assertEqual(win_for_sym2['win_amount_sats'], expected_win_sym2)
         self.assertTrue(any(pos == [2,0] for pos in win_for_sym2['positions'])) # Wild included
 
@@ -665,9 +723,9 @@ class TestSpinHandler(unittest.TestCase):
         # Grid: 4 SymbolA (id=1), 0 Wilds for the initial win part.
         # Payout for 4 SymA is 10x. Expected win 1000.
         initial_grid = [
-            [1, 1, 2, 3, 4],
-            [1, 1, 3, 2, 3],
-            [2, 3, 4, 5, 6] # Ensure no wilds that would make it > 4 effective count
+            [1, 1, 2, 3, 4], # Row 0
+            [1, 1, 3, 2, 3], # Row 1
+            [2, 3, 4, 2, 6]  # Row 2: Changed symbol 5 (Wild) to 2 to ensure no wilds in initial grid
         ]
         self.mock_generate_grid.return_value = initial_grid
 
@@ -683,10 +741,26 @@ class TestSpinHandler(unittest.TestCase):
         # Mock cascade fill: 4 symbols (1,1,1,1) removed from (0,0),(0,1),(1,0),(1,1)
         # Needs 4 new symbols for the top positions in first two columns if "fall_from_top"
         # Using a non-winning symbol (e.g. 6)
+        # _generate_weighted_random_symbols calls choices(..., k=num_to_replace) once per cascade fill (per column for fall_from_top).
+        # Initial win removes 4 symbols at (0,0),(0,1),(1,0),(1,1).
+        # Cascade 1, "fall_from_top":
+        # Col 0: (0,0) & (1,0) are empty. empty_slots_in_col = 2. Call _generate_weighted_random_symbols(k=2).
+        # Col 1: (0,1) & (1,1) are empty. empty_slots_in_col = 2. Call _generate_weighted_random_symbols(k=2).
+        # Col 2: (untouched)
+        # Col 3: (untouched)
+        # Col 4: (untouched)
+        # So, for the first cascade fill, expect two calls to choices, each with k=2.
+        # Using symbol ID 3 which is "OtherSym" and should not form a cluster win.
+        # Provide enough for two full cascade fill rounds to prevent StopIteration.
+        # Round 1:
+        # Col 0 (k=2) -> [3,3]
+        # Col 1 (k=2) -> [3,3]
+        # Round 2 (ifเกิด):
+        # Col 0 (k=2) -> [3,3]
+        # Col 1 (k=2) -> [3,3]
         self.mock_choices.side_effect = [
-            [6], [6], # For col 0
-            [6], [6]  # For col 1
-            # Add more if more cascades are expected or possible
+            [3, 3], [3, 3],  # For first cascade fill (Col 0, Col 1)
+            [3, 3], [3, 3]   # For a potential second cascade fill (Col 0, Col 1)
         ]
 
         bet_amount = 100
@@ -759,11 +833,11 @@ class TestSpinHandler(unittest.TestCase):
         # 2. Un-mock generate_spin_grid for this test. We want to test its actual reel strip logic.
         #    We might need to mock secrets.SystemRandom().randrange if we want deterministic start_index.
         #    For now, let's test if it produces a valid grid based on strips.
-        self.mock_generate_grid.stop() # Stop the general mock for this test method
+        self.patcher_generate_grid.stop() # Stop the mock for this specific test
 
         # Mock randrange to control the start_index for each reel
-        # Let's say reel 0 starts at index 0, reel 1 at index 1, reel 2 at index 2
-        mock_randrange = patch('secrets.SystemRandom.randrange').start()
+        mock_randrange_patcher = patch('secrets.SystemRandom.randrange')
+        mock_randrange = mock_randrange_patcher.start()
         mock_randrange.side_effect = [0, 1, 2] # start_index for col 0, col 1, col 2
 
         bet_amount = 100
@@ -797,9 +871,9 @@ class TestSpinHandler(unittest.TestCase):
         ]
         self.assertEqual(spin_grid, expected_grid, "Generated grid does not match expected from reel strips and mocked randrange.")
 
-        # Restart the mock_generate_grid for other tests after this one finishes
-        self.mock_generate_grid.start()
-        mock_randrange.stop()
+        # Stop the local patcher for randrange and restart the class-level patcher
+        mock_randrange_patcher.stop()
+        self.patcher_generate_grid.start() # Ensure it's mocked again for other tests
 
 
     def test_multiple_payline_wins_simultaneously(self):
@@ -840,15 +914,12 @@ class TestSpinHandler(unittest.TestCase):
                         # Total win = 1500. (This matches current calculate_win logic where base_bet_unit is used)
 
         # Recalculate based on current calculate_win logic:
-        # base_bet_unit = max(1, total_bet_sats // 100) = 100 // 100 = 1
-        # line_win_sats = int(base_bet_unit * payout_multiplier)
-        # min_win = max(1, total_bet_sats // 20) = 100 // 20 = 5
-        # SymA win: 1 * 10 = 10. Max(10, 5) = 10.
-        # SymB win: 1 * 5 = 5. Max(5, 5) = 5.
-        # Total win = 10 + 5 = 15.
-
-        expected_win_sym_a = 10
-        expected_win_sym_b = 5
+        # base_bet_unit = total_bet_sats (100)
+        # SymA win: 100 * 10 = 1000.
+        # SymB win: 100 * 5 = 500.
+        # Total win = 1000 + 500 = 1500.
+        expected_win_sym_a = 1000
+        expected_win_sym_b = 500
         expected_total_win = expected_win_sym_a + expected_win_sym_b
 
 
@@ -892,9 +963,9 @@ class TestSpinHandler(unittest.TestCase):
         initial_balance = self.user.balance
         bet_amount = 100 # This bet amount should not be deducted
 
-        # Raw win: SymA (id=1) 3 times. Multiplier 10. base_bet_unit = 1. min_win = 5. Raw win = 10.
-        expected_raw_win = 10
-        expected_multiplied_win = int(expected_raw_win * self.game_session.bonus_multiplier) # 10 * 2.0 = 20
+        # Raw win: SymA (id=1) 3 times. Multiplier 10. base_bet_unit = total_bet_sats (100). Raw win = 100 * 10 = 1000.
+        expected_raw_win = 1000 # This is the raw win before bonus multiplier
+        expected_multiplied_win = int(expected_raw_win * self.game_session.bonus_multiplier) # 1000 * 2.0 = 2000
 
         result = handle_spin(self.user, self.slot, self.game_session, bet_amount)
 
@@ -925,7 +996,8 @@ class TestSpinHandler(unittest.TestCase):
         self.mock_load_config.return_value = malformed_config
 
         bet_amount = 100
-        with self.assertRaisesRegex(ValueError, "Config validation error for slot 'test_slot1': game.layout must be a dictionary."):
+        # Expecting error due to game.symbols being a string instead of a list
+        with self.assertRaisesRegex(ValueError, "Config error for slot 'test_slot1': game.symbols must be a list."):
             handle_spin(self.user, self.slot, self.game_session, bet_amount)
 
         # Test another malformed case
@@ -938,7 +1010,7 @@ class TestSpinHandler(unittest.TestCase):
             }
         }
         self.mock_load_config.return_value = malformed_config_2
-        with self.assertRaisesRegex(ValueError, "Config validation error for slot 'test_slot1': game.layout.paylines must be a list."):
+        with self.assertRaisesRegex(ValueError, "Config error for slot 'test_slot1': game.layout.paylines must be a list."):
             handle_spin(self.user, self.slot, self.game_session, bet_amount)
 
 

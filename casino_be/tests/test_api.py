@@ -6,11 +6,11 @@ from datetime import datetime, timezone
 # It's crucial that 'app' and 'db' are imported from the main application package.
 # Assuming your Flask app instance is named 'app' and SQLAlchemy instance is 'db'
 # in 'casino_be.app' and models are in 'casino_be.models'.
-from casino_be.app import app, db
+from casino_be.app import db, create_app # Import create_app factory and db
 from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction, BonusCode, UserBonus, PlinkoDropLog # Added BonusCode, UserBonus, PlinkoDropLog
 #SATOSHI_FACTOR might be needed if amounts are converted
 from casino_be.config import Config, TestingConfig # Import TestingConfig
-from casino_be.app import create_app # Import create_app factory
+# create_app is already imported above
 from datetime import timedelta
 from casino_be.utils.plinko_helper import PAYOUT_MULTIPLIERS
 # StaticPool is not needed for file-based DB strategy per test
@@ -44,12 +44,18 @@ class BaseTestCase(unittest.TestCase):
         db.drop_all()         # Drop all tables
         self.app_context.pop()
 
-        # Clean up the test database file
-        if os.path.exists(self.test_db_file):
+        # Clean up the test database file using the path from app config
+        db_file_path = self.app.config.get('DATABASE_FILE_PATH')
+        if db_file_path and os.path.exists(db_file_path):
             try:
-                os.remove(self.test_db_file)
+                os.remove(db_file_path)
             except OSError as e: # Handle potential errors during file removal (e.g., file in use)
-                print(f"Error removing test database file {self.test_db_file}: {e}")
+                print(f"Error removing test database file {db_file_path}: {e}")
+        elif self.test_db_file and os.path.exists(self.test_db_file): # Fallback to older self.test_db_file if new path not in config
+             try:
+                os.remove(self.test_db_file)
+             except OSError as e:
+                print(f"Error removing fallback test database file {self.test_db_file}: {e}")
 
 
     def _create_user(self, username="testuser", email="test@example.com", password="password123", deposit_wallet_address=None):
@@ -297,31 +303,25 @@ class GameApiTests(BaseTestCase):
 
     def test_spin_success(self):
         """Test a successful spin."""
-        token, _ = self._login_and_get_token(username_prefix="spinner", password_suffix="spinpassword")
+        token, logged_in_user_id = self._login_and_get_token(username_prefix="spinner", password_suffix="spinpassword")
 
         # Get user for balance update
         with self.app.app_context():
-            user = User.query.filter_by(username="spinner").first()
-            self.assertIsNotNone(user)
+            user = User.query.get(logged_in_user_id) # Use logged_in_user_id to fetch
+            self.assertIsNotNone(user, f"User with ID {logged_in_user_id} not found for setting balance.")
             user.balance = 1000 * Config.SATOSHI_FACTOR # Give user 1000 BTC in satoshis
             db.session.commit()
-            # Re-fetch user to ensure it's attached to the current session after commit
-            user = User.query.filter_by(username="spinner").first()
-            original_balance = user.balance
+            original_balance = user.balance # Already refreshed from query.get
 
         # Create a slot machine
         slot_id = self._create_slot(short_name="slot1") # Use an existing config
 
         with self.app.app_context():
-            # Fetch user and slot within the current session context to avoid DetachedInstanceError
-            # User object might have been created/modified in a different session/context from _login_and_get_token
-            user_for_session = User.query.filter_by(username="spinner").first()
+            # Fetch user and slot within the current session context
+            user_for_session = User.query.get(logged_in_user_id) # Use logged_in_user_id
             slot_for_session = Slot.query.get(slot_id)
             self.assertIsNotNone(user_for_session, "User for session not found")
             self.assertIsNotNone(slot_for_session, "Slot for session not found")
-
-            # original_balance is already set correctly above with the re-fetched user.
-            # No need to set it again here from user_for_session unless balance was changed again without commit.
 
             game_session = GameSession(user_id=user_for_session.id, slot_id=slot_for_session.id, game_type="slot", session_start=datetime.now(timezone.utc))
             db.session.add(game_session)
@@ -343,7 +343,8 @@ class GameApiTests(BaseTestCase):
 
         # Verify balance update in DB
         with self.app.app_context():
-            user_after_spin = User.query.filter_by(username="spinner").first() # Re-fetch for current session
+            user_after_spin = User.query.get(logged_in_user_id) # Re-fetch for current session
+            self.assertIsNotNone(user_after_spin, f"User with ID {logged_in_user_id} not found after spin.")
             win_amount_sats = data['win_amount']
             # Balance should be original - bet + win
             expected_balance = original_balance - bet_amount_sats + win_amount_sats
@@ -598,7 +599,7 @@ class PlinkoApiTests(BaseTestCase):
         return {'Authorization': f'Bearer {access_token}'}, user_id
 
     def test_plinko_play_success(self):
-        headers, user_id = self._get_auth_headers()
+        headers, user_id = self._get_auth_headers() # This call is correct
         
         initial_balance_units = 100.0
         with self.app.app_context():
@@ -656,7 +657,7 @@ class PlinkoApiTests(BaseTestCase):
 
 
     def test_plinko_play_insufficient_funds(self):
-        headers, user_id = self._get_auth_headers(username="plinko_poor_user")
+        headers, user_id = self._get_auth_headers(username_prefix="plinko_poor_user")
         
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -677,7 +678,7 @@ class PlinkoApiTests(BaseTestCase):
         self.assertAlmostEqual(data['new_balance'], 0.5) # Balance before bet attempt
 
     def test_plinko_play_validation_errors(self):
-        headers, user_id = self._get_auth_headers(username="plinko_validation_user")
+        headers, user_id = self._get_auth_headers(username_prefix="plinko_validation_user")
         with self.app.app_context(): # Ensure user has some balance
             user = User.query.get(user_id)
             user.balance = int(10 * self.SATOSHIS_PER_UNIT)

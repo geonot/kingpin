@@ -570,6 +570,8 @@ class CrystalFlower(db.Model):
     position_x = db.Column(db.Integer, nullable=False)  # Position in the garden grid
     position_y = db.Column(db.Integer, nullable=False)  # Position in the garden grid
     active_power_ups = db.Column(db.JSON, nullable=True, default=lambda: [])
+    growth_modifier = db.Column(db.Float, default=1.0, nullable=False)
+    clarity_modifier = db.Column(db.Float, default=1.0, nullable=False)
 
     # Relationships
     user = db.relationship("User", back_populates="crystal_flowers")
@@ -594,7 +596,9 @@ class CrystalFlower(db.Model):
             'appraised_value': self.appraised_value,
             'position_x': self.position_x,
             'position_y': self.position_y,
-            'active_power_ups': self.active_power_ups if self.active_power_ups is not None else []
+            'active_power_ups': self.active_power_ups if self.active_power_ups is not None else [],
+            'growth_modifier': self.growth_modifier,
+            'clarity_modifier': self.clarity_modifier
         }
 
 class CrystalCodexEntry(db.Model):
@@ -607,6 +611,8 @@ class CrystalCodexEntry(db.Model):
     clarity = db.Column(Float, nullable=False)
     special_type = db.Column(db.String, nullable=True)
     first_discovered_at = db.Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    last_discovered_at = db.Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    discovery_count = db.Column(db.Integer, default=1, nullable=False)
     notes = db.Column(db.String, nullable=True)  # Player's personal notes or game-generated lore
 
     # Relationships
@@ -625,5 +631,7 @@ class CrystalCodexEntry(db.Model):
             'clarity': self.clarity,
             'special_type': self.special_type,
             'first_discovered_at': self.first_discovered_at.isoformat() if self.first_discovered_at else None,
+            'last_discovered_at': self.last_discovered_at.isoformat() if self.last_discovered_at else None,
+            'discovery_count': self.discovery_count,
             'notes': self.notes
         }

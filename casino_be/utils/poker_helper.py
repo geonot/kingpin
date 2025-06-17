@@ -13,7 +13,7 @@ from sqlalchemy import func, desc
 # Assuming models are in casino_be.models
 # Adjust the import path if your project structure is different.
 # from ..models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction # if utils is a module inside casino_be
-from models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction
+from casino_be.models import db, User, PokerTable, PokerHand, PokerPlayerState, Transaction
 
 # Card Constants
 SUITS = ['H', 'D', 'C', 'S']  # Hearts, Diamonds, Clubs, Spades

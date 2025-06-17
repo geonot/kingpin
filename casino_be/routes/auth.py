@@ -8,9 +8,9 @@ from marshmallow import ValidationError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-from models import db, User, TokenBlacklist
-from schemas import UserSchema, RegisterSchema, LoginSchema
-from utils.bitcoin import generate_bitcoin_wallet
+from casino_be.models import db, User, TokenBlacklist
+from casino_be.schemas import UserSchema, RegisterSchema, LoginSchema
+from casino_be.utils.bitcoin import generate_bitcoin_wallet
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api')
 

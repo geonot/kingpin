@@ -1,5 +1,5 @@
 from flask_jwt_extended import get_jwt_identity, get_jti
-from models import db, User, TokenBlacklist # Make sure models are imported correctly
+from casino_be.models import db, User, TokenBlacklist # Make sure models are imported correctly
 from datetime import datetime, timezone
 
 def user_identity_lookup(user):

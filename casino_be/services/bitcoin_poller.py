@@ -14,6 +14,7 @@ from flask import current_app # To be used within app_context
 from app import create_app, db # Adjusted to import db directly if it's initialized in app.py
 from models import User, Transaction # Assuming Transaction model is appropriately defined
 from utils.bitcoin import get_address_from_private_key_wif, send_to_hot_wallet
+from config import Config, TestingConfig # Import Config and TestingConfig
 # generate_bitcoin_wallet is not directly used by poller's core loop
 
 # --- Configuration ---
@@ -275,7 +276,11 @@ def poll_deposits():
     cycle_id = str(uuid.uuid4())
     logger.info(f"Starting polling cycle ID: {cycle_id}")
 
-    app = create_app()
+    # Use TestingConfig if FLASK_ENV is 'testing', otherwise default Config
+    flask_env = os.getenv('FLASK_ENV')
+    app_config = TestingConfig if flask_env == 'testing' else Config
+    app = create_app(config_class=app_config)
+
     with app.app_context():
         logger.info(f"Polling for new Bitcoin deposits... Cycle: {cycle_id}")
         try:

@@ -108,7 +108,7 @@ class TestBitcoinPoller(BaseTestCase): # Inherit from BaseTestCase
         mock_update_balance_api.return_value = True # Simulate successful API update
 
         # --- ACT ---
-        bitcoin_poller.check_address_for_transactions(deposit_address, user_id)
+        bitcoin_poller.check_address_for_transactions(deposit_address, user_id, "test_cycle_id")
 
         # --- ASSERT ---
         mock_requests_get.assert_called_once_with(f"{bitcoin_poller.BLOCKCHAIN_EXPLORER_API_BASE_URL}/address/{deposit_address}/txs", timeout=20)
@@ -140,7 +140,7 @@ class TestBitcoinPoller(BaseTestCase): # Inherit from BaseTestCase
         mock_explorer_response.raise_for_status = MagicMock()
         mock_requests_get.return_value = mock_explorer_response
 
-        bitcoin_poller.check_address_for_transactions(deposit_address, user_id)
+        bitcoin_poller.check_address_for_transactions(deposit_address, user_id, "test_cycle_id")
 
         mock_requests_get.assert_called_once() # Still fetches from explorer
         mock_send_hot_wallet.assert_not_called()
@@ -162,7 +162,7 @@ class TestBitcoinPoller(BaseTestCase): # Inherit from BaseTestCase
         mock_explorer_response.raise_for_status = MagicMock()
         mock_requests_get.return_value = mock_explorer_response
 
-        bitcoin_poller.check_address_for_transactions(deposit_address, user_id)
+        bitcoin_poller.check_address_for_transactions(deposit_address, user_id, "test_cycle_id")
 
         mock_requests_get.assert_called_once()
         mock_send_hot_wallet.assert_not_called()
@@ -176,7 +176,7 @@ class TestBitcoinPoller(BaseTestCase): # Inherit from BaseTestCase
         mock_explorer_response.raise_for_status = MagicMock()
         mock_requests_get.return_value = mock_explorer_response
 
-        bitcoin_poller.check_address_for_transactions(self.user1_deposit_address, self.user1_id)
+        bitcoin_poller.check_address_for_transactions(self.user1_deposit_address, self.user1_id, "test_cycle_id")
         mock_requests_get.assert_called_once()
         # No other calls should be made
 
@@ -202,7 +202,7 @@ class TestBitcoinPoller(BaseTestCase): # Inherit from BaseTestCase
 
         mock_get_priv_key.return_value = None # Simulate private key retrieval failure
 
-        bitcoin_poller.check_address_for_transactions(deposit_address, user_id)
+        bitcoin_poller.check_address_for_transactions(deposit_address, user_id, "test_cycle_id")
 
         mock_get_priv_key.assert_called_once_with(deposit_address)
         mock_send_hot_wallet.assert_not_called()
@@ -232,7 +232,7 @@ class TestBitcoinPoller(BaseTestCase): # Inherit from BaseTestCase
         mock_get_priv_key.return_value = self.known_test_wif
         mock_send_hot_wallet.return_value = None # Simulate sweep failure
 
-        bitcoin_poller.check_address_for_transactions(deposit_address, user_id)
+        bitcoin_poller.check_address_for_transactions(deposit_address, user_id, "test_cycle_id")
 
         mock_send_hot_wallet.assert_called_once()
         mock_update_balance_api.assert_not_called()
@@ -251,9 +251,10 @@ class TestBitcoinPoller(BaseTestCase): # Inherit from BaseTestCase
 
         # ASSERT
         # Ensure check_address_for_transactions was called for each user with a deposit address
+        # The cycle_id is generated within poll_deposits, so we use unittest.mock.ANY for it.
         expected_calls = [
-            call(self.user1_deposit_address, self.user1_id),
-            call(self.user2_deposit_address, self.user2_id)
+            call(self.user1_deposit_address, self.user1_id, unittest.mock.ANY),
+            call(self.user2_deposit_address, self.user2_id, unittest.mock.ANY)
         ]
         mock_check_address_txs.assert_has_calls(expected_calls, any_order=True)
         self.assertEqual(mock_check_address_txs.call_count, 2)

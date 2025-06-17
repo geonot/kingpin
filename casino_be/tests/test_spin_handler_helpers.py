@@ -26,9 +26,12 @@ class MockSlotSymbol:
     def __repr__(self):
         return f"<MockSlotSymbol {self.name} (ID: {self.symbol_internal_id})>"
 
-class TestSpinHandlerHelpers(unittest.TestCase):
+from casino_be.tests.test_api import BaseTestCase # Import BaseTestCase
+
+class TestSpinHandlerHelpers(BaseTestCase): # Inherit from BaseTestCase
 
     def setUp(self):
+        super().setUp() # Call BaseTestCase setUp
         """Setup common mock data for tests."""
         self.mock_secure_random = secrets.SystemRandom() # Use real one for now, can be mocked if needed for determinism
 
@@ -65,17 +68,20 @@ class TestSpinHandlerHelpers(unittest.TestCase):
 
     # --- Tests for _generate_weighted_random_symbols ---
     def test_gwr_returns_correct_count(self):
-        symbols = _generate_weighted_random_symbols(3, self.config_symbols_map_simple, self.db_symbols_simple, self.mock_secure_random)
+        with self.app.app_context():
+            symbols = _generate_weighted_random_symbols(3, self.config_symbols_map_simple, self.db_symbols_simple, self.mock_secure_random)
         self.assertEqual(len(symbols), 3)
 
     def test_gwr_symbol_ids_are_valid(self):
-        symbols = _generate_weighted_random_symbols(50, self.config_symbols_map_simple, self.db_symbols_simple, self.mock_secure_random)
+        with self.app.app_context():
+            symbols = _generate_weighted_random_symbols(50, self.config_symbols_map_simple, self.db_symbols_simple, self.mock_secure_random)
         valid_ids = self.config_symbols_map_simple.keys()
         for s_id in symbols:
             self.assertIn(s_id, valid_ids)
 
     def test_gwr_empty_db_symbols_uses_config_keys_if_possible(self):
-        symbols = _generate_weighted_random_symbols(3, self.config_symbols_map_simple, [], self.mock_secure_random)
+        with self.app.app_context():
+            symbols = _generate_weighted_random_symbols(3, self.config_symbols_map_simple, [], self.mock_secure_random)
         self.assertEqual(len(symbols), 3)
         for s_id in symbols:
             self.assertIn(s_id, self.config_symbols_map_simple.keys())
@@ -86,14 +92,16 @@ class TestSpinHandlerHelpers(unittest.TestCase):
             2: {"id": 2, "name": "B", "weight": 0}
         }
         db_syms = [MockSlotSymbol(1), MockSlotSymbol(2)]
-        symbols = _generate_weighted_random_symbols(10, zero_weight_map, db_syms, self.mock_secure_random)
+        with self.app.app_context():
+            symbols = _generate_weighted_random_symbols(10, zero_weight_map, db_syms, self.mock_secure_random)
         self.assertEqual(len(symbols), 10)
         for s_id in symbols:
             self.assertIn(s_id, zero_weight_map.keys())
 
     def test_gwr_no_spinable_symbols_raises_error(self):
-        with self.assertRaises(ValueError) as context:
-            _generate_weighted_random_symbols(3, {}, [], self.mock_secure_random)
+        with self.app.app_context():
+            with self.assertRaises(ValueError) as context:
+                _generate_weighted_random_symbols(3, {}, [], self.mock_secure_random)
         self.assertTrue("No numeric symbol IDs available" in str(context.exception) or \
                         "No symbols available for choice" in str(context.exception))
 

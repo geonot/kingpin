@@ -1,70 +1,149 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Config:
-    # Database configuration - PostgreSQL for both development and production
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    
-    if DATABASE_URL:
-        # Use provided DATABASE_URL
-        SQLALCHEMY_DATABASE_URI = DATABASE_URL
-    else:
-        # Build from individual components for local development
-        DB_HOST = os.getenv('DB_HOST', 'localhost')
-        DB_PORT = os.getenv('DB_PORT', '5432')
-        DB_NAME = os.getenv('DB_NAME', 'kingpin_casino')
-        DB_USER = os.getenv('DB_USER', 'kingpin_user')
-        DB_PASSWORD = os.getenv('DB_PASSWORD', 'password123')
-        
-        SQLALCHEMY_DATABASE_URI = f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
-    
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY')
+    ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # JWT Secret - use default for development
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-key-change-in-production')
-    JWT_ACCESS_TOKEN_EXPIRES = 3600  # 1 hour
-    JWT_REFRESH_TOKEN_EXPIRES = 86400 * 7 # 7 days
-    JWT_BLACKLIST_ENABLED = True
-    JWT_BLACKLIST_TOKEN_CHECKS = ['access', 'refresh'] # Check both token types
+    DB_USER = os.environ.get('DB_USER')
+    DB_PASSWORD = os.environ.get('DB_PASSWORD')
+    DB_HOST = os.environ.get('DB_HOST')
+    DB_PORT = os.environ.get('DB_PORT', '5432')
+    DB_NAME = os.environ.get('DB_NAME')
 
-    # Rate Limiter Storage URI
-    # For production, set e.g., RATELIMIT_STORAGE_URI='redis://localhost:6379/0'
-    RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
+    if DB_USER and DB_PASSWORD and DB_HOST and DB_NAME:
+        SQLALCHEMY_DATABASE_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    else:
+        SQLALCHEMY_DATABASE_URI = None # Explicitly None if not all parts are set
 
-    # Flask Debug Mode
-    # For production, ensure FLASK_DEBUG is not set or set to 'False'.
-    # Set FLASK_DEBUG to 'True' or '1' for development.
-    DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() in ('true', '1', 't')
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
-    # Satoshi Conversion Factor (1 BTC = 100,000,000 Satoshis)
-    SATOSHI_FACTOR = 100_000_000
+    # Example of other configurations
+    SLOTS_CONFIG_PATH = os.environ.get('SLOTS_CONFIG_PATH', 'slot_configs/default_slots.json')
+    GAME_CONFIG_PATH = os.environ.get('GAME_CONFIG_PATH', 'game_configs/default_game_config.json')
 
-    # Admin settings - use defaults for development
-    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
-    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')  # Default for development
-    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@kingpincasino.local')
+    # Bitcoin Poller configuration
+    BITCOIN_RPC_URL = os.environ.get('BITCOIN_RPC_URL') # e.g., http://user:password@localhost:8332
+    MIN_CONFIRMATIONS = int(os.environ.get('MIN_CONFIRMATIONS', '1'))
+    POLL_INTERVAL_SECONDS = int(os.environ.get('POLL_INTERVAL_SECONDS', '60'))
+    WALLET_NAME = os.environ.get('WALLET_NAME', '') # Optional, for multi-wallet setups
 
-    # Service API Token for internal services (e.g., polling service)
-    SERVICE_API_TOKEN = os.getenv('SERVICE_API_TOKEN', 'default_service_token_please_change')
+    # Crystal Garden
+    CRYSTAL_CONFIG_PATH = os.environ.get('CRYSTAL_CONFIG_PATH', 'game_configs/crystal_garden_config.json')
 
-    # Feature Flags
-    CRYSTAL_GARDEN_ENABLED = os.getenv('CRYSTAL_GARDEN_ENABLED', 'True').lower() in ('true', '1', 't')
 
+class DevelopmentConfig(Config):
+    DEBUG = True
+    # For development, we might use a local SQLite database if PostgreSQL isn't set up
+    if not Config.SQLALCHEMY_DATABASE_URI:
+        SQLALCHEMY_DATABASE_URI = "sqlite:///./dev_casino_be.db"
 
 class TestingConfig(Config):
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///./test_casino_be_isolated.db' # File-based for test isolation using SQLite
-    # Define a key to store the database file path for easy cleanup
-    DATABASE_FILE_PATH = SQLALCHEMY_DATABASE_URI.replace('sqlite:///', '') # Adjusted for SQLite
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = 'test-jwt-secret-key'
-    # Disable CSRF protection for tests if applicable (e.g., if using Flask-WTF)
-    WTF_CSRF_ENABLED = False
-    # Disable rate limiting for tests
-    RATELIMIT_ENABLED = False
-    RATELIMIT_DEFAULT_LIMITS_ENABLED = False
-    # Ensure engine options for SQLite are appropriate if not using in-memory
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        'connect_args': {'check_same_thread': False}
-        # StaticPool is not typically needed for file-based DBs,
-        # as file ensures persistence across connections.
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:" # Use in-memory SQLite for tests
+    # DATABASE_FILE_PATH = None # Remove or comment out if it exists
+
+    JWT_SECRET_KEY = "test_jwt_secret" # Override for testing
+    ADMIN_PASSWORD = "test_admin_password" # Override for testing
+    SECRET_KEY = "test_secret_key" # Override for testing
+
+    # Ensure other potentially sensitive or environment-specific configs are set for testing
+    BITCOIN_RPC_URL = "http://testuser:testpass@localhost:18332" # Mock RPC URL for testing
+
+    # Make sure slots and game configs point to test/dummy versions if necessary
+    SLOTS_CONFIG_PATH = 'tests/fixtures/test_slots.json'
+    GAME_CONFIG_PATH = 'tests/fixtures/test_game_config.json'
+    CRYSTAL_CONFIG_PATH = 'tests/fixtures/test_crystal_config.json'
+
+
+class ProductionConfig(Config):
+    DEBUG = False
+    # In production, ensure SQLALCHEMY_DATABASE_URI is set via environment variables.
+    # Additional production-specific settings can go here.
+
+def perform_startup_validation():
+    """
+    Validates that critical configurations are set.
+    Raises ValueError if any critical configuration is missing.
+    """
+    critical_vars = {
+        "JWT_SECRET_KEY": Config.JWT_SECRET_KEY,
+        "ADMIN_PASSWORD": Config.ADMIN_PASSWORD,
+        "SQLALCHEMY_DATABASE_URI": Config.SQLALCHEMY_DATABASE_URI,
     }
+
+    # For SQLALCHEMY_DATABASE_URI, if it's based on components, check them too if SQLALCHEMY_DATABASE_URI is None
+    if not Config.SQLALCHEMY_DATABASE_URI:
+        component_based_vars = {
+            "DB_USER": Config.DB_USER,
+            "DB_PASSWORD": Config.DB_PASSWORD,
+            "DB_HOST": Config.DB_HOST,
+            "DB_NAME": Config.DB_NAME,
+        }
+        # If URI is None, all components must be present to form it.
+        # This logic is a bit reversed; if URI is None, it means components weren't all there.
+        missing_components = [key for key, value in component_based_vars.items() if not value]
+        if len(missing_components) > 0 and len(missing_components) < len(component_based_vars): # some but not all
+             raise ValueError(f"CRITICAL CONFIGURATION ERROR: SQLALCHEMY_DATABASE_URI is not fully defined. Missing components: {', '.join(missing_components)}")
+        elif len(missing_components) == len(component_based_vars) and not os.getenv('FLASK_ENV') == 'testing':
+             # If all components are missing AND we are not in testing, then it's an error.
+             # TestingConfig provides its own SQLALCHEMY_DATABASE_URI.
+             # DevelopmentConfig also provides a fallback.
+             # This primarily targets ProductionConfig or if DevelopmentConfig fallback is removed.
+             current_flask_env = os.getenv('FLASK_ENV', 'None')
+             current_config_class = os.getenv('APP_CONFIG_CLASS', 'None') # You might need to set this in app.py when loading config
+
+             # Only raise if not using TestingConfig and not DevelopmentConfig with its fallback
+             is_testing = TestingConfig.TESTING
+             is_dev_with_fallback = (current_flask_env == 'development' and DevelopmentConfig.SQLALCHEMY_DATABASE_URI and "sqlite" in DevelopmentConfig.SQLALCHEMY_DATABASE_URI)
+
+             # The validation should only fail if critical secrets are missing AND we are in an environment
+             # that doesn't provide its own safe defaults (like TestingConfig or DevelopmentConfig's SQLite fallback)
+             # For Production, SQLALCHEMY_DATABASE_URI (or its components) must be set.
+             # For Development, if components are not set, it falls back to SQLite.
+             # For Testing, it uses its own SQLite.
+
+             # If SQLALCHEMY_DATABASE_URI is still None at this point (meaning no env vars, no components, no dev fallback used)
+             # then it's a critical issue unless we are in testing.
+             if not is_testing and Config.SQLALCHEMY_DATABASE_URI is None:
+                 raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: SQLALCHEMY_DATABASE_URI is not set and no default is available for the current environment."
+                 )
+
+
+    # General check for other critical vars (JWT_SECRET_KEY, ADMIN_PASSWORD)
+    # SQLALCHEMY_DATABASE_URI is checked above more thoroughly
+    missing_critical_vars = [key for key, value in critical_vars.items() if not value and key != "SQLALCHEMY_DATABASE_URI"]
+    if missing_critical_vars:
+        raise ValueError(f"CRITICAL CONFIGURATION ERROR: Missing critical environment variables: {', '.join(missing_critical_vars)}")
+
+    # Specific check for Bitcoin poller in production like environments
+    if os.getenv('FLASK_ENV') == 'production' and not Config.BITCOIN_RPC_URL:
+        raise ValueError("CRITICAL CONFIGURATION ERROR: BITCOIN_RPC_URL must be set in production.")
+
+
+# Determine which configuration to use
+env = os.environ.get("FLASK_ENV", "development")
+
+if env == "testing":
+    app_config = TestingConfig()
+elif env == "production":
+    app_config = ProductionConfig()
+else:
+    app_config = DevelopmentConfig()
+
+# Perform validation after selecting config, but only if not running under a test runner
+# that might be loading this file without intending to start the app (e.g. for discovery)
+# However, app.py will call this explicitly.
+# if not os.environ.get("PYTEST_CURRENT_TEST"):
+#    perform_startup_validation(app_config)
+
+config_by_name = dict(
+    dev=DevelopmentConfig,
+    test=TestingConfig,
+    prod=ProductionConfig
+)

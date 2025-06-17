@@ -211,15 +211,11 @@ class CrystalGardenService:
             # For SQLAlchemy to detect change in JSON mutable type
             flower.active_power_ups = list(flower.active_power_ups)
 
-            if flower.details is None:
-                flower.details = {}
-
+            # Apply modifiers directly to the new model fields
             if power_up_type == 'fertilizer':
-                current_growth_mod = flower.details.get('growth_modifier', 1.0)
-                flower.details['growth_modifier'] = round(current_growth_mod + 0.1, 3) # Using round for float precision
+                flower.growth_modifier = round(flower.growth_modifier + 0.1, 3) # Using round for float precision
             elif power_up_type == 'moon_glow':
-                current_clarity_mod = flower.details.get('clarity_modifier', 1.0)
-                flower.details['clarity_modifier'] = round(current_clarity_mod + 0.05, 3) # Using round
+                flower.clarity_modifier = round(flower.clarity_modifier + 0.05, 3) # Using round
 
             # Mark 'details' as modified for SQLAlchemy if it's a JSON field
             # This is often handled automatically if the top-level assignment flower.details = new_dict occurs,
@@ -227,8 +223,8 @@ class CrystalGardenService:
             # However, since we are potentially reassigning (if flower.details was None) or directly setting keys
             # on an existing dict, SQLAlchemy's default tracking should detect this.
             # If issues arise, uncomment:
-            # from sqlalchemy.orm.attributes import flag_modified
-            # flag_modified(flower, "details")
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(flower, "active_power_ups")
 
             db.session.commit()
         except Exception as e:

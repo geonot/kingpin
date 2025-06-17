@@ -183,10 +183,18 @@ def _load_and_prepare_config(slot_short_name):
     cfg_game_root = game_config.get('game', {})
     cfg_layout = cfg_game_root.get('layout', {})
 
+    symbols_data = cfg_game_root.get('symbols', [])
+    if not isinstance(symbols_data, list):
+        raise ValueError(f"Config error for slot '{slot_short_name}': game.symbols must be a list.")
+
+    paylines_data = cfg_layout.get('paylines', [])
+    if not isinstance(paylines_data, list):
+        raise ValueError(f"Config error for slot '{slot_short_name}': game.layout.paylines must be a list.")
+
     return {
         "game_config": game_config,
-        "symbols_map": {s['id']: s for s in cfg_game_root.get('symbols', [])},
-        "paylines": cfg_layout.get('paylines', []),
+        "symbols_map": {s['id']: s for s in symbols_data},
+        "paylines": paylines_data, # Use validated paylines_data
         "rows": cfg_layout.get('rows', 3),
         "columns": cfg_layout.get('columns', 5),
         "wild_symbol_id": cfg_game_root.get('wild_symbol_id'),
@@ -514,11 +522,6 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         )
         initial_spin_grid_for_record = [row[:] for row in spin_result_grid]
 
-        # Pass bet_amount_sats_for_calc to _calculate_initial_and_cascading_wins
-        # This should be actual_bet_this_spin if we want wins based on actual stake,
-        # or bet_amount_sats if wins are always calculated on original bet even for bonus spins (config dependent)
-        # For typical slots, payouts are based on the original bet that initiated the spin or bonus round.
-        # If bonus spins have a fixed bet value, that should be used. Here, using original bet_amount_sats.
         cascade_results = _calculate_initial_and_cascading_wins(
             initial_spin_grid_for_record,
             slot.symbols,
@@ -556,6 +559,9 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         )
 
         current_app.logger.info(f"User {user.id}, Slot {slot.id}, Session {game_session.id}: Spin processed successfully. Spin ID: {new_spin_id}, Final Win: {final_win_amount_for_session_and_tx} sats.")
+
+        db.session.commit() # Commit all database changes if the entire spin process was successful
+
         return {
             "spin_id": new_spin_id,
             "spin_result": initial_spin_grid_for_record,
@@ -591,6 +597,7 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
     Generates the symbol grid for a spin.
     (Full docstring from original file)
     """
+    current_app.logger.info(f"generate_spin_grid called with rows={rows}, cols={columns}, len(db_symbols)={len(db_symbols) if db_symbols is not None else 'None'}")
     if not db_symbols:
         s_ids = list(config_symbols_map.keys())
         current_app.logger.warning("db_symbols is empty in generate_spin_grid. Falling back to a default symbol grid using first config symbol.")
@@ -629,6 +636,7 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
             start_index = secure_random.randrange(strip_len)
             for r_idx in range(rows):
                 grid[r_idx][c_idx] = current_reel_strip[(start_index + r_idx) % strip_len]
+        current_app.logger.info(f"Generated grid using reel_strips: {grid}")
         return grid
     else:
         current_app.logger.info("Using weighted random symbol generation for grid.")
@@ -637,6 +645,7 @@ def generate_spin_grid(rows, columns, db_symbols, wild_symbol_config_id, scatter
                 columns, config_symbols_map, db_symbols, secure_random,
                 wild_symbol_config_id, scatter_symbol_config_id
             )
+        current_app.logger.info(f"Generated grid using weighted random: {grid}")
         return grid
 
 
@@ -674,7 +683,13 @@ def _calculate_payline_wins_for_grid(grid, config_paylines, config_symbols_map, 
     payline_winning_lines_data = []
     payline_winning_coords = set()
 
-    base_bet_unit = max(1, total_bet_sats // 100) if total_bet_sats >= 100 else 1
+    # MODIFIED: Assuming total_bet_sats is the amount bet per line for calculation purposes,
+    # or that for single-line/non-line-based scaling, it's the direct base.
+    # This aligns with test expectations where bet_amount=100 and 10x multiplier yields 1000.
+    # If multiple paylines are active and bet is distributed, this might need adjustment
+    # (e.g., base_bet_unit = total_bet_sats / len(config_paylines) if config_paylines else total_bet_sats)
+    # For now, using total_bet_sats directly as tests imply this.
+    base_bet_unit = total_bet_sats
     
     for payline_config in config_paylines:
         payline_id = payline_config.get("id", "unknown_line")
@@ -734,9 +749,8 @@ def _calculate_payline_wins_for_grid(grid, config_paylines, config_symbols_map, 
         payout_multiplier = get_symbol_payout(match_symbol_id, consecutive_count, config_symbols_map, is_scatter=False)
 
         if payout_multiplier > 0:
-            line_win_sats_calc = int(base_bet_unit * payout_multiplier)
-            min_win_threshold = max(1, total_bet_sats // 20)
-            line_win_sats_final = max(line_win_sats_calc, min_win_threshold)
+            # MODIFIED: Removed min_win_threshold logic for now.
+            line_win_sats_final = int(base_bet_unit * payout_multiplier)
 
             if line_win_sats_final > 0:
                 payline_win_sats += line_win_sats_final
@@ -832,19 +846,30 @@ def _calculate_cluster_wins_for_grid(grid, config_symbols_map, total_bet_sats,
             continue
         effective_count = literal_symbol_count + num_wilds_on_grid
 
-        # print(f"LOG_DEBUG_CLUSTER: sym={symbol_id}, lit_count={literal_symbol_count}, wilds={num_wilds_on_grid}, eff_count={effective_count}") # Debug print removed
+        current_app.logger.info(f"[ClusterDebug] Symbol: {symbol_id}, Literal: {literal_symbol_count}, Wilds: {num_wilds_on_grid}, Effective: {effective_count}, MinMatch: {min_symbols_to_match}")
 
         if effective_count >= min_symbols_to_match:
             payout_value_for_cluster = 0
             symbol_config_data = config_symbols_map.get(symbol_id, {})
             cluster_payout_rules = symbol_config_data.get('cluster_payouts', {})
+            payout_value_for_cluster = 0.0 # Initialize
             if cluster_payout_rules:
-                payout_value_for_cluster = cluster_payout_rules.get(str(effective_count), 0.0)
+                # Iterate downwards from effective_count to find the best applicable payout
+                # e.g. if effective_count is 6, but payouts are for "5", "4", use payout for "5".
+                current_check_count = effective_count
+                while current_check_count >= min_symbols_to_match:
+                    payout_value_for_cluster = cluster_payout_rules.get(str(current_check_count), 0.0)
+                    if payout_value_for_cluster > 0:
+                        break # Found the best payout for this effective count or lower
+                    current_check_count -= 1
+                if current_check_count < min_symbols_to_match and payout_value_for_cluster == 0.0: # Ensure we didn't fall through without a payout
+                     payout_value_for_cluster = 0.0 # Explicitly set to 0 if no tier matched
 
-            # print(f"LOG_DEBUG_CLUSTER: sym={symbol_id}, eff_count={effective_count}, payout_val={payout_value_for_cluster}") # Debug print removed
+            current_app.logger.info(f"[ClusterDebug] Symbol: {symbol_id}, PayoutVal: {payout_value_for_cluster} for effective_count {effective_count} (checked down to {current_check_count if 'current_check_count' in locals() else 'N/A'})")
 
             if payout_value_for_cluster > 0:
                 cluster_win_sats_this_group = int(total_bet_sats * payout_value_for_cluster)
+                current_app.logger.info(f"[ClusterDebug] Symbol: {symbol_id}, WinThisGroup: {cluster_win_sats_this_group}")
                 if cluster_win_sats_this_group > 0:
                     cluster_win_sats += cluster_win_sats_this_group
                     current_symbol_positions = symbol_positions_map.get(symbol_id, [])

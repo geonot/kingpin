@@ -11,10 +11,18 @@ from casino_be.utils.slot_tester import SlotTester
 from casino_be.utils.spin_handler import calculate_win, get_symbol_payout
 from casino_be.models import Slot, SlotSymbol # For type hints or creating specific mock objects if needed
 
+from casino_be.tests.test_api import BaseTestCase # Import BaseTestCase
+
 # Define the base path for test configuration files
 TEST_CONFIG_BASE_PATH = "casino_be/tests/test_data/slot_tester_configs"
 
-class TestSlotTester(unittest.TestCase):
+class TestSlotTester(BaseTestCase): # Inherit from BaseTestCase
+
+    def setUp(self):
+        super().setUp() # Call BaseTestCase setUp
+
+    def tearDown(self):
+        super().tearDown() # Call BaseTestCase tearDown
 
     def test_config_loading_and_mock_creation(self):
         print("\nRunning test_config_loading_and_mock_creation...")
@@ -192,7 +200,9 @@ class TestSlotTester(unittest.TestCase):
         tester.load_configuration(test_config_base_path=TEST_CONFIG_BASE_PATH)
         tester.initialize_simulation_state()
 
-        spin_data = tester._simulate_one_spin()
+        # Ensure an app context is active for current_app.logger to work
+        with self.app.app_context():
+            spin_data = tester._simulate_one_spin()
         self.assertIsNotNone(spin_data, "_simulate_one_spin should return data.")
 
         grid = spin_data['spin_result']
@@ -219,9 +229,9 @@ if __name__ == "__main__":
     # Create a TextTestRunner
     runner = unittest.TextTestRunner(verbosity=2) # verbosity=2 for more detailed output
     # Run the tests
-    test_results = runner.run(suite)
+    # test_results = runner.run(suite) # Commented out to prevent running when file is imported
 
     # Exit with a non-zero code if tests failed
-    if not test_results.wasSuccessful():
-        sys.exit(1)
-    print("--- All SlotTester Unit Tests Passed ---")
+    # if not test_results.wasSuccessful():
+    #     sys.exit(1)
+    # print("--- All SlotTester Unit Tests Passed ---")

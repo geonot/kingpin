@@ -137,7 +137,7 @@ def test_plant_seed_success(app, db_session, service):
     assert flower.growth_stage == 'seeded'
     assert flower.active_power_ups == []
 
-    db_flower = db_session.session.get(CrystalFlower, flower.id)
+    db_flower = db_session.session.query(CrystalFlower).get(flower.id)
     assert db_flower is not None
 
 def test_plant_seed_plot_occupied(app, db_session, service):
@@ -284,7 +284,7 @@ def test_sell_crystal_success(app, db_session, service):
     assert codex_entry.color == 'red'
     assert codex_entry.size == 3.0
 
-    deleted_flower = db_session.session.get(CrystalFlower, flower.id)
+    deleted_flower = db_session.session.query(CrystalFlower).get(flower.id)
     assert deleted_flower is None
 
 def test_sell_crystal_not_appraised(app, db_session, service):

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import re
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
-from models import (
+from casino_be.models import (
     db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet,
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
@@ -13,7 +13,7 @@ from models import (
     PlinkoDropLog,  # Plinko models
     BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
 )
-from utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Plinko specific imports
+from casino_be.utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Plinko specific imports
 
 # --- Helper ---
 def validate_password(password):
