@@ -116,8 +116,8 @@ try:
             wallet_name = f"temp_wallet_{uuid.uuid4().hex[:8]}"
             
             try:
-                # Create wallet from private key
-                wallet = Wallet.create(wallet_name, key_path=private_key_wif, network='bitcoin')
+                # Create wallet from private key, using 'keys' argument for WIF string
+                wallet = Wallet.create(wallet_name, keys=private_key_wif, network='bitcoin')
                 
                 # Get wallet balance
                 wallet.scan()

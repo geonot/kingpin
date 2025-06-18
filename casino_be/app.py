@@ -14,7 +14,7 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token, jwt_required,
-    get_jwt_identity, get_jti, current_user
+    get_jwt_identity, get_jti, current_user, verify_jwt_in_request
 )
 from flask_jwt_extended.exceptions import NoAuthorizationError # For JWT specific errors
 from sqlalchemy.exc import SQLAlchemyError # For database errors
@@ -165,9 +165,26 @@ def create_app(config_class=Config):
         g.request_id = str(uuid.uuid4())
         
         # Log security-relevant requests
+        user_id_to_log = None
+        try:
+            verify_jwt_in_request(optional=True) # Allow requests without JWT
+            identity = get_jwt_identity() # Returns None if no JWT was found or if verify_jwt_in_request fails silently
+            if identity:
+                # Assuming identity is user_id or an object with id attribute that user_loader would return
+                # For this logging purpose, directly using the identity (if it's simple like an int)
+                # or trying to access current_user IF a token was found and processed might be options.
+                # A common pattern is that identity is the user's ID.
+                user_id_to_log = identity
+                # If current_user is reliably populated after optional verify_jwt_in_request, this could be:
+                # if current_user: user_id_to_log = current_user.id
+        except Exception:
+            # If any error occurs during JWT verification (e.g. malformed token, though optional=True should prevent most)
+            # or getting identity, log without user_id.
+            pass
+
         if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
             log_security_event('REQUEST', 
-                             user_id=getattr(current_user, 'id', None) if hasattr(current_user, 'id') else None,
+                             user_id=user_id_to_log,
                              details={
                                  'endpoint': request.endpoint,
                                  'method': request.method,

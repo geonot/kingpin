@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 # It's crucial that 'app' and 'db' are imported from the main application package.
 # Assuming your Flask app instance is named 'app' and SQLAlchemy instance is 'db'
 # in 'casino_be.app' and models are in 'casino_be.models'.
-from casino_be.app import app, db
+from casino_be.app import db # app removed, db is fine as it's initialized globally
 from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, TokenBlacklist, Transaction, BonusCode, UserBonus, PlinkoDropLog # Added BonusCode, UserBonus, PlinkoDropLog
 #SATOSHI_FACTOR might be needed if amounts are converted
 from casino_be.config import Config, TestingConfig # Import TestingConfig
@@ -32,7 +32,7 @@ class BaseTestCase(unittest.TestCase):
         self.app_context = self.app.app_context()
         self.app_context.push()
 
-        db.init_app(self.app) # Initialize db with the test app instance
+        # db.init_app(self.app) # This is already done in create_app factory
         db.drop_all()         # Ensure any existing tables are dropped
         db.create_all()       # Create tables fresh for each test
 
@@ -58,7 +58,8 @@ class BaseTestCase(unittest.TestCase):
             username=username,
             email=email,
             password=User.hash_password(password), # Assuming User model has hash_password
-            deposit_wallet_address=f"test_wallet_{username}" # Make wallet address unique
+            # Use provided deposit_wallet_address if available, otherwise generate one
+            deposit_wallet_address=deposit_wallet_address if deposit_wallet_address is not None else f"test_wallet_{username}"
         )
         # Operations will use the session from the currently active app context (e.g., from setUp)
         db.session.add(user)

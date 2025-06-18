@@ -3,6 +3,7 @@ import time
 import requests
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
+from sqlalchemy import select # Import select
 
 from models import db, User, Transaction
 from utils.encryption import decrypt_private_key
@@ -60,11 +61,14 @@ class BitcoinMonitor:
         
         for tx in transactions:
             # Check if we've already processed this transaction
-            existing_tx = Transaction.query.filter_by(
+            # Use op('->>') for JSON key access for better compatibility and indexing if available
+            stmt = select(Transaction).filter_by(
                 user_id=user.id,
-                transaction_type='deposit',
-                details={'btc_txid': tx['txid']}
-            ).first()
+                transaction_type='deposit'
+            ).filter(
+                Transaction.details.op('->>')('btc_txid') == tx['txid']
+            )
+            existing_tx = db.session.execute(stmt).scalar_one_or_none()
             
             if not existing_tx:
                 self.process_deposit_transaction(user, tx)
