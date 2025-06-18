@@ -326,7 +326,8 @@ def create_app(config_class=Config):
     from routes.meta_game import meta_game_bp
     from routes.baccarat import baccarat_bp # New Baccarat import
     from routes.internal import internal_bp # New Internal import
-    from casino_be.routes.crystal_garden import crystal_garden_bp # Crystal Garden import
+    from routes.crystal_garden import crystal_garden_bp # Crystal Garden import
+    from routes.bitcoin import bitcoin_bp # Bitcoin routes import
 
     # CLI command for cleanup
     @app.cli.command('cleanup-expired-tokens')
@@ -355,6 +356,7 @@ def create_app(config_class=Config):
     app.register_blueprint(baccarat_bp) # Consolidated baccarat registration
     app.register_blueprint(internal_bp) # Register internal blueprint
     app.register_blueprint(crystal_garden_bp) # Register Crystal Garden blueprint
+    app.register_blueprint(bitcoin_bp) # Register Bitcoin blueprint
 
     # --- CLI command for creating an admin user (moved from manage.py) ---
     @app.cli.command("create-admin")

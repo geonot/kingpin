@@ -12,7 +12,7 @@ cryptography==41.0.7
 passlib[bcrypt]==1.7.4
 
 # Bitcoin and Blockchain
-python-bitcoinlib==0.12.2
+bitcoinlib==0.7.4
 
 # Data Validation and Serialization
 marshmallow==3.20.1

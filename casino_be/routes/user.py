@@ -69,10 +69,39 @@ def withdraw():
             'transaction_id': transaction.id
         })
         
+        # Try to process withdrawal automatically if user has private key
+        auto_processed = False
+        if hasattr(user, 'deposit_wallet_private_key') and user.deposit_wallet_private_key:
+            try:
+                from utils.encryption import decrypt_private_key
+                from utils.bitcoin import send_to_hot_wallet
+                
+                private_key_wif = decrypt_private_key(user.deposit_wallet_private_key)
+                fee_sats = 5000  # Fixed fee for demo
+                
+                txid = send_to_hot_wallet(private_key_wif, amount_sats, withdraw_address, fee_sats)
+                
+                if txid and not txid.startswith('dummy'):  # Real transaction
+                    transaction.status = 'completed'
+                    transaction.details['txid'] = txid
+                    transaction.details['auto_processed'] = True
+                    db.session.commit()
+                    auto_processed = True
+                    current_app.logger.info(f"Auto-processed withdrawal for user {user.id}: {txid}")
+                    
+            except Exception as e:
+                current_app.logger.warning(f"Auto-processing failed for withdrawal {transaction.id}: {e}")
+        
         current_app.logger.info(f"Withdrawal request for user {user.id}: {amount_sats} sats to {withdraw_address}. Tx ID: {transaction.id}")
+        
+        status_message = 'Withdrawal completed.' if auto_processed else 'Withdrawal request submitted for processing.'
+        
         return jsonify({
-            'status': True, 'withdraw_id': transaction.id, 'user': UserSchema().dump(user),
-            'status_message': 'Withdrawal request submitted.'
+            'status': True, 
+            'withdraw_id': transaction.id, 
+            'user': UserSchema().dump(user),
+            'status_message': status_message,
+            'auto_processed': auto_processed
         }), 201
     except Exception as e:
         db.session.rollback()

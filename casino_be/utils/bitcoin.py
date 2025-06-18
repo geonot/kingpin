@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 # --- Attempt to import bitcoinlib and define functions ---
 try:
-    from bitcoinlib.keys import PrivateKey
+    from bitcoinlib.keys import Key
     from bitcoinlib.wallets import WalletError # Import WalletError for robust error handling
 
     def generate_bitcoin_wallet():
@@ -27,21 +27,18 @@ try:
         """
         try:
             # Generate a new private key
-            private_key = PrivateKey()
+            private_key = Key()
 
             # Get the WIF (Wallet Import Format) for the private key
-            private_key_wif = private_key.wif
+            private_key_wif = private_key.wif()
             if not private_key_wif: # Should always return a WIF, but good to check
                 logger.error("Failed to generate WIF for private key.")
                 return None, None
 
-            # Derive the public key
-            public_key = private_key.public()
-
-            # Derive the P2PKH address from the public key
-            address = public_key.address()
+            # Get the address directly from the key
+            address = private_key.address()
             if not address: # Should always return an address, but good to check
-                logger.error("Failed to generate address from public key.")
+                logger.error("Failed to generate address from private key.")
                 return None, None
 
             logger.warning(
@@ -68,9 +65,8 @@ try:
             str | None: The corresponding P2PKH address, or None if an error occurs.
         """
         try:
-            private_key = PrivateKey(wif_key)
-            public_key = private_key.public()
-            address = public_key.address()
+            private_key = Key(wif_key)
+            address = private_key.address()
             if not address:
                 logger.error(f"Could not derive address from WIF: {wif_key[:10]}...") # Log only a portion for security
                 return None
@@ -84,8 +80,8 @@ try:
 
     def send_to_hot_wallet(private_key_wif: str, amount_sats: int, hot_wallet_address: str, fee_sats: int) -> str | None:
         """
-        Placeholder function to simulate sending Bitcoin to a hot wallet.
-        In a real application, this would involve creating and broadcasting a transaction.
+        Send Bitcoin to a hot wallet using bitcoinlib.
+        This creates and broadcasts a real Bitcoin transaction.
 
         Args:
             private_key_wif (str): The WIF private key of the address to send from.
@@ -94,35 +90,65 @@ try:
             fee_sats (int): The transaction fee in satoshis.
 
         Returns:
-            str | None: A dummy transaction ID if successful, None otherwise.
+            str | None: The transaction ID if successful, None otherwise.
         """
-        logger.info(
-            f"Placeholder: Attempting to send {amount_sats} sats to {hot_wallet_address} "
-            f"from address derived from WIF (first 10 chars): {private_key_wif[:10]}... "
-            f"with a fee of {fee_sats} sats."
-        )
-        # In a real implementation:
-        # 1. Import the private key.
-        # 2. Create a transaction (UTXO selection, signing).
-        # 3. Broadcast the transaction.
-        # 4. Return the transaction ID.
-        # This requires a connection to the Bitcoin network (e.g., via a node or API).
-        # For now, we'll just log and return a dummy txid.
+        try:
+            from bitcoinlib.wallets import Wallet
+            from bitcoinlib.transactions import Transaction
+            
+            logger.info(
+                f"Attempting to send {amount_sats} sats to {hot_wallet_address} "
+                f"from address derived from WIF (first 10 chars): {private_key_wif[:10]}... "
+                f"with a fee of {fee_sats} sats."
+            )
+            
+            if not private_key_wif or not hot_wallet_address or amount_sats <= 0 or fee_sats < 0:
+                logger.error("Invalid parameters for send_to_hot_wallet.")
+                return None
 
-        if not private_key_wif or not hot_wallet_address or amount_sats <= 0 or fee_sats <= 0: # fee_sats can be 0 if dynamically calculated
-            logger.error("Invalid parameters for send_to_hot_wallet.")
+            # Derive the source address to validate
+            source_address = get_address_from_private_key_wif(private_key_wif)
+            if not source_address:
+                logger.error(f"Could not derive source address for WIF: {private_key_wif[:10]}...")
+                return None
+
+            # Create a temporary wallet with the private key
+            wallet_name = f"temp_wallet_{uuid.uuid4().hex[:8]}"
+            
+            try:
+                # Create wallet from private key
+                wallet = Wallet.create(wallet_name, key_path=private_key_wif, network='bitcoin')
+                
+                # Get wallet balance
+                wallet.scan()
+                balance = wallet.balance()
+                
+                logger.info(f"Wallet balance: {balance} satoshis")
+                
+                if balance < (amount_sats + fee_sats):
+                    logger.error(f"Insufficient balance: {balance} < {amount_sats + fee_sats}")
+                    return None
+                
+                # Create and send transaction
+                transaction = wallet.send_to(hot_wallet_address, amount_sats, fee=fee_sats)
+                
+                if transaction and transaction.txid:
+                    logger.info(f"Successfully sent Bitcoin. Transaction ID: {transaction.txid}")
+                    return transaction.txid
+                else:
+                    logger.error("Transaction creation failed")
+                    return None
+                    
+            finally:
+                # Clean up temporary wallet
+                try:
+                    wallet.delete()
+                except:
+                    pass
+            
+        except Exception as e:
+            logger.error(f"Error in send_to_hot_wallet: {e}", exc_info=True)
             return None
-
-        # Simulate deriving the source address to show it's possible
-        source_address = get_address_from_private_key_wif(private_key_wif)
-        if not source_address:
-            logger.error(f"Could not derive source address for WIF: {private_key_wif[:10]}...")
-            return None
-
-        logger.info(f"Transaction details: Send from {source_address} to {hot_wallet_address}, Amount: {amount_sats} sats, Fee: {fee_sats} sats.")
-        dummy_txid = f"dummy_txid_{uuid.uuid4()}"
-        logger.info(f"Placeholder: Successfully 'sent' Bitcoin. Transaction ID: {dummy_txid}")
-        return dummy_txid
 
 except ImportError:
     logger.error(

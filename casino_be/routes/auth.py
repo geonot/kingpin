@@ -61,24 +61,40 @@ def register():
             current_app.logger.error("Failed to generate Bitcoin wallet (address or WIF is None).")
             return jsonify({'status': False, 'status_message': 'Failed to generate wallet address for user.'}), 500
         
-        new_user = User(
-            username=data['username'],
-            email=data['email'],
-            password=User.hash_password(data['password']),
-            deposit_wallet_address=address  # Store the address
-        )
+        # Import encryption utilities
+        from utils.encryption import encrypt_private_key
+        
+        try:
+            # Encrypt the private key
+            encrypted_private_key = encrypt_private_key(private_key_wif)
+            
+            new_user = User(
+                username=data['username'],
+                email=data['email'],
+                password=User.hash_password(data['password']),
+                deposit_wallet_address=address  # Store the address
+            )
+            
+            # Try to set private key if column exists
+            if hasattr(new_user, 'deposit_wallet_private_key'):
+                new_user.deposit_wallet_private_key = encrypted_private_key
+                
+        except Exception as e:
+            current_app.logger.warning(f"Could not store private key (column may not exist): {e}")
+            # Continue with just the address for now
+            new_user = User(
+                username=data['username'],
+                email=data['email'],
+                password=User.hash_password(data['password']),
+                deposit_wallet_address=address  # Store the address
+            )
+        
         db.session.add(new_user)
-        # The private_key_wif needs to be handled securely.
-        # For this exercise, we log its generation and the need for secure storage.
-        # In a production system, this key would be encrypted and stored in a secure vault,
-        # or managed via an HSM or dedicated key management service.
-        # It should NOT be stored directly on the User model in plain text.
+        # Note: Private key storage depends on database schema
         current_app.logger.info(
-            f"Generated Bitcoin private key (WIF) for user {new_user.username} (ID will be {new_user.id} after commit). "
-            "This key MUST be stored securely and separately. First 5 chars of WIF: "
-            f"{private_key_wif[:5]}..."
+            f"Generated Bitcoin wallet for user {new_user.username}. "
+            f"Address: {address}"
         )
-        # IMPORTANT: The private_key_wif is NOT being saved to the main user database here for security reasons.
         # The polling service or a dedicated wallet management system would need access to this key
         # (e.g., from a secure vault) to sweep funds.
 

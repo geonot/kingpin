@@ -14,6 +14,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     balance = db.Column(BigInteger, default=0, nullable=False, index=True)
     deposit_wallet_address = db.Column(db.String(255), unique=True, nullable=True, index=True)
+    deposit_wallet_private_key = db.Column(db.Text, nullable=True)  # Encrypted WIF private key
     is_admin = db.Column(db.Boolean, default=False, nullable=False, index=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

@@ -89,6 +89,17 @@ class Config:
     # Service API Token for internal services (e.g., polling service)
     SERVICE_API_TOKEN = os.getenv('SERVICE_API_TOKEN', 'default_service_token_please_change')
 
+    # Encryption key for private key storage
+    ENCRYPTION_SECRET = os.getenv('ENCRYPTION_SECRET')
+    if not ENCRYPTION_SECRET:
+        import warnings
+        warnings.warn(
+            "ENCRYPTION_SECRET not set in environment. Using default for development. "
+            "Set ENCRYPTION_SECRET environment variable for production!",
+            UserWarning
+        )
+        ENCRYPTION_SECRET = 'default-encryption-secret-change-in-production'
+
     # Feature Flags
     CRYSTAL_GARDEN_ENABLED = os.getenv('CRYSTAL_GARDEN_ENABLED', 'True').lower() in ('true', '1', 't')
 
