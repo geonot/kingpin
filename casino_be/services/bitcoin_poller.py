@@ -1,3 +1,9 @@
+# BitcoinPoller: This service is currently DEACTIVATED for deposit detection.
+# BitcoinMonitor (bitcoin_monitor.py) is the primary service responsible for
+# detecting new Bitcoin deposits and updating user balances.
+# This poller (bitcoin_poller.py) remains as a reference or for potential future
+# use cases NOT related to primary deposit detection to avoid conflicts.
+
 import os
 import time
 import requests
@@ -312,13 +318,13 @@ if __name__ == '__main__':
         logger.warning("WARNING: HOT_WALLET_ADDRESS is not configured or is using a default placeholder.")
         # Allow to run for testing, but this would be an error in prod.
 
-    logger.info("Poller initialized. Starting main loop...")
-    while True:
-        try:
-            poll_deposits()
-        except Exception as e:
-            logger.error(f"Unhandled exception in main polling loop: {e}", exc_info=True)
-            # Avoid rapid-fire restarts on persistent errors in the loop itself
-            # (though poll_deposits has its own try/except)
-        logger.info(f"Sleeping for {POLLING_INTERVAL_SECONDS} seconds...")
-        time.sleep(POLLING_INTERVAL_SECONDS)
+    logger.info("Poller initialized. Main loop is commented out as this poller is deactivated for deposit detection.")
+    # while True:
+    #     try:
+    #         poll_deposits()
+    #     except Exception as e:
+    #         logger.error(f"Unhandled exception in main polling loop: {e}", exc_info=True)
+    #         # Avoid rapid-fire restarts on persistent errors in the loop itself
+    #         # (though poll_deposits has its own try/except)
+    #     logger.info(f"Sleeping for {POLLING_INTERVAL_SECONDS} seconds...")
+    #     time.sleep(POLLING_INTERVAL_SECONDS)

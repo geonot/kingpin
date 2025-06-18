@@ -113,6 +113,7 @@ class TestingConfig(Config):
     JWT_SECRET_KEY = 'test-jwt-secret-key'
     # Disable CSRF protection for tests if applicable (e.g., if using Flask-WTF)
     WTF_CSRF_ENABLED = False
+    JWT_COOKIE_CSRF_PROTECT = False # Disable JWT CSRF for tests
     # Disable rate limiting for tests
     RATELIMIT_ENABLED = False
     RATELIMIT_DEFAULT_LIMITS_ENABLED = False

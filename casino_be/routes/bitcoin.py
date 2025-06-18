@@ -1,14 +1,30 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 import logging
+import os # Added for test seam
 
-from utils.bitcoin import generate_bitcoin_wallet, get_address_from_private_key_wif, send_to_hot_wallet
+# Import real function with an alias
+from utils.bitcoin import generate_bitcoin_wallet, get_address_from_private_key_wif, send_to_hot_wallet as real_send_to_hot_wallet
 from utils.encryption import encrypt_private_key, decrypt_private_key
 from models import db, User, Transaction
+from sqlalchemy.orm.attributes import flag_modified # Added for JSON field update
 from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
 
 bitcoin_bp = Blueprint('bitcoin', __name__, url_prefix='/api/bitcoin')
 logger = logging.getLogger(__name__)
+
+# Global _send_to_hot_wallet_override is removed as per new strategy
+
+def get_sender_func():
+    """Helper to get the sender function, allowing override for testing via current_app."""
+    if os.environ.get('TEST_MODE_ACTIVE_FOR_BTC_SENDER') == '1' and hasattr(current_app, 'test_btc_sender_override'):
+        sender_override = getattr(current_app, 'test_btc_sender_override')
+        if callable(sender_override): # Ensure it's callable
+            return sender_override
+        else:
+            # Log a warning or error if it's set but not callable, and fall back
+            logger.warning("TEST_MODE_ACTIVE_FOR_BTC_SENDER is '1' and test_btc_sender_override is set, but it's not callable. Falling back to real sender.")
+    return real_send_to_hot_wallet
 
 @bitcoin_bp.route('/deposit-address', methods=['GET'])
 @jwt_required()
@@ -137,13 +153,18 @@ def process_withdrawal():
         # In production, you'd set appropriate fee and use real blockchain
         fee_sats = 5000  # Fixed fee for demo
         hot_wallet_address = withdraw_address  # Direct to user address for now
-        
-        txid = send_to_hot_wallet(private_key_wif, amount_sats, hot_wallet_address, fee_sats)
+
+        sender = get_sender_func()
+        txid = sender(private_key_wif, amount_sats, hot_wallet_address, fee_sats)
         
         if txid:
             # Update transaction status
             transaction.status = 'completed'
+            # Ensure the details dictionary is mutable and changes are tracked
+            if transaction.details is None:
+                transaction.details = {}
             transaction.details['txid'] = txid
+            flag_modified(transaction, "details") # Mark 'details' field as modified
             db.session.commit()
             
             logger.info(f"Withdrawal processed for user {user.id}: {txid}")

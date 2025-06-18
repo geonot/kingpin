@@ -11,6 +11,11 @@ internal_bp = Blueprint('internal', __name__, url_prefix='/api/internal')
 @service_token_required
 def update_player_balance():
     """
+    DEPRECATED: This endpoint was used by the BitcoinPoller service.
+    BitcoinPoller is currently deactivated for deposit detection in favor of BitcoinMonitor.
+    This endpoint may no longer be in active use for Bitcoin deposit processing.
+    Consider removal if no other services rely on it.
+
     Updates a player's balance and records a transaction.
     Protected by a service API token.
     Expects JSON: { "user_id": <int>, "sats_amount": <int>, "original_tx_id": <str_optional> }
