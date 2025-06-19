@@ -141,11 +141,17 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
             "is_wild": s_detail['id'] == 11, # Assuming ID 11 is Wild
             "is_scatter": s_detail['id'] == 9, # Assuming ID 9 is Scatter
             "is_bonus": s_detail['id'] == 10, # Assuming ID 10 is Bonus
-            # Default weights assigned based on typical symbol roles/values
-            "weight": 1.0 # Default, will be overridden below
+            "weight": 1.0, # Default, will be overridden below
+            "animations": { # Default win animation
+                "win": {
+                    "type": "pulse",
+                    "scale": 1.25,
+                    "duration": 300
+                }
+            }
         }
 
-        # Assign specific default weights based on symbol ID conventions
+        # Assign specific default weights and potentially 'shake' animation for high-value
         symbol_id = s_detail['id']
         if 1 <= symbol_id <= 3: # Low-value
             symbol_obj['weight'] = 10.0
@@ -153,13 +159,14 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
             symbol_obj['weight'] = 5.0
         elif 7 <= symbol_id <= 8: # High-value
             symbol_obj['weight'] = 2.0
+            if symbol_id == 8: # Make one high-value symbol 'shake'
+                symbol_obj['animations']['win']['type'] = 'shake'
         elif symbol_id == 9: # Scatter
             symbol_obj['weight'] = 1.0
         elif symbol_id == 10: # Bonus
             symbol_obj['weight'] = 1.0
         elif symbol_id == 11: # Wild
             symbol_obj['weight'] = 1.5
-        # Ensure all symbols have a weight, even if it's a generic default already set
 
         s_value_for_payout = symbol_values_config.get(s_detail['id'])
 
@@ -232,7 +239,26 @@ def generate_game_config(theme_name, short_name, slot_id, asset_dir_for_config, 
             "is_cascading": is_cascading_arg,
             "cascade_type": cascade_type_arg if is_cascading_arg else None,
             "min_symbols_to_match": min_symbols_to_match_arg if is_cascading_arg else None,
-            "win_multipliers": json.loads(win_multipliers_arg_str) if is_cascading_arg else []
+            "win_multipliers": json.loads(win_multipliers_arg_str) if is_cascading_arg else [],
+            "reels_config": {
+                "stop_ease_function": "Back.easeOut",
+                "stop_ease_params": [1.5],
+                "symbol_settle_ease_function": "Bounce.easeOut",
+                "symbol_settle_duration": 250
+            },
+            "win_presentation": {
+                "big_win_threshold_multiplier": 20,
+                "mega_win_threshold_multiplier": 50,
+                "big_win_sfx": f"{short_name}_big_win",
+                "mega_win_sfx": f"{short_name}_mega_win"
+            },
+            "holdAndWinBonus": { # Placeholder structure
+                "triggerSymbolId": 10, # Conventionally Bonus symbol ID
+                "minTriggerCount": 3,
+                "coinSymbolId": 10,
+                "defaultCoinValue": 1,
+                "reSpinsAwarded": 3
+            }
         }
     }
 

@@ -139,18 +139,24 @@ def generate_all_images(brief, output_dir, num_special_symbols=4):
             'Coin': 'This is a bonus coin symbol used in a hold-and-win feature. It should look like a valuable thematic coin or gem.'
         }.get(name, f'This is a {"low" if name in "10JQKA" else "high"}-value symbol.')
 
-        prompt = (f"Create a vibrant, stylized '{name}' slot reel symbol. The symbol must be centered, square, have a transparent background, and be clearly recognizable at a small size. The art style should be consistent with this game theme: '{brief}'.")
+        prompt = (
+            f"Create a visually striking, modern, and vibrant '{name}' slot reel symbol that 'pops' off the screen. "
+            f"The symbol must be centered, square, and feature a fully transparent background (alpha channel). "
+            f"Ensure the design is crisp, well-defined, and instantly recognizable even at smaller sizes (e.g., previewed at 100x100px). "
+            f"Design as if for a high-resolution display, targeting a source quality suitable for a 150x150px area. "
+            f"The art style must be consistent with this game's creative brief: '{brief}'. {prompt_detail}"
+        )
         image_prompts[f"{sanitize_filename(name)}.png"] = prompt
 
     ui_details = {
-        'background': "Create an immersive 1920x1080 background image. The central area for the 5x3 reels should be visually distinct or slightly darker to ensure symbols are readable. Theme: '{brief}'.",
-        'bonus_background': "Create a more exciting 1920x1080 background for the bonus round. It should feel like a high-stakes version of the main background. Theme: '{brief}'.",
-        'play': "Create a thematic 'Play' button icon, like a stylized circular arrow. Centered, square, transparent background. Theme: '{brief}'.",
-        'autoplay': "Create a thematic 'Autoplay' button icon, like a play icon with an infinite loop. Centered, square, transparent background. Theme: '{brief}'.",
-        'settings': "Create a thematic 'Settings' button icon, like a stylized gear. Centered, square, transparent background. Theme: '{brief}'.",
-        'change_bet_plus': "Create a thematic '+' icon. Centered, square, transparent background. Theme: '{brief}'.",
-        'change_bet_minus': "Create a thematic '-' icon. Centered, square, transparent background. Theme: '{brief}'.",
-        'stop': "Create a thematic 'Stop' button icon, like a stylized square. Centered, square, transparent background. Theme: '{brief}'."
+        'background': "Create an immersive, modern, and high-resolution (e.g., 1920x1080 or similar aspect ratio) background image. The central area for the slot reels should be visually distinct or slightly darker/less detailed to ensure symbols are readable and 'pop'. Theme: '{brief}'.",
+        'bonus_background': "Create a more exciting, modern, and high-resolution (e.g., 1920x1080 or similar aspect ratio) background for the bonus round. It should feel like a high-stakes version of the main background, with clear visual hierarchy. Theme: '{brief}'.",
+        'play': "Create a modern and sleek 'Play' button icon, perhaps a stylized circular arrow, suitable for a high-resolution game interface. Icon should be intuitive, visually appealing, centered, square, and have a transparent background. Theme: '{brief}'.",
+        'autoplay': "Create a modern and sleek 'Autoplay' button icon, like a play icon with an infinite loop, suitable for a high-resolution game interface. Icon should be intuitive, centered, square, and have a transparent background. Theme: '{brief}'.",
+        'settings': "Create a modern and sleek 'Settings' button icon, like a stylized gear, suitable for a high-resolution game interface. Icon should be intuitive, centered, square, and have a transparent background. Theme: '{brief}'.",
+        'change_bet_plus': "Create a modern and sleek '+' icon for increasing bet, suitable for a high-resolution game interface. Icon should be clear, intuitive, centered, square, and have a transparent background. Theme: '{brief}'.",
+        'change_bet_minus': "Create a modern and sleek '-' icon for decreasing bet, suitable for a high-resolution game interface. Icon should be clear, intuitive, centered, square, and have a transparent background. Theme: '{brief}'.",
+        'stop': "Create a modern and sleek 'Stop' button icon, like a stylized square, suitable for a high-resolution game interface. Icon should be intuitive, centered, square, and have a transparent background. Theme: '{brief}'."
     }
 
     for name, detail in ui_details.items():
@@ -164,6 +170,11 @@ def generate_config_and_migration(brief, theme_name, slot_id, short_name):
     """Generates the game description, config JSON, and Alembic migration data."""
     print("\n--- Generating Game Configuration and Database Migration ---")
     
+    # For this subtask, we'll use fixed rows and cols for the prompt context.
+    # In a full implementation, these would likely come from function arguments.
+    rows = 3
+    cols = 5
+
     prompt = textwrap.dedent(f"""
         You are a senior slot game designer. Based on the provided creative brief, generate the necessary configuration data for a new slot game.
 
@@ -174,20 +185,127 @@ def generate_config_and_migration(brief, theme_name, slot_id, short_name):
         - Slot ID: {slot_id}
         - Short Name: {short_name}
         - Asset Directory: /slots/{short_name}/
-        - Layout: 5 columns, 3 rows
         - Low-pay symbols: 10, J, Q, K, A (IDs 1-5)
         - High-pay symbols: 4 thematic symbols (IDs 6-9)
         - WILD Symbol ID: 10
         - SCATTER Symbol ID: 11
-        - Bonus Coin Symbol ID: 12
+        - Bonus Coin Symbol ID: 12 (if game has Hold & Win, otherwise can be omitted or be another special symbol)
+
+        **Layout Specifics (Generate for a {cols} columns, {rows} rows grid):**
+        - "layout": {{ "rows": {rows}, "columns": {cols} }}
+        - "reel_strips": Generate {cols} reel strips. Each strip should be an array of 20-30 symbol IDs. Symbol IDs should primarily be from 1-12.
+        - "paylines": Generate 5-10 valid paylines for the {cols}x{rows} grid. Each payline is an array of [column, row] coordinates (e.g., [[0,1], [1,1], [2,1], [3,1], [4,1]] for a middle row). Remember row/col indices are 0-based.
+
+        **Game Mechanics and Presentation Details:**
+        - Default Symbol Win Animation: For each symbol in the `symbols` array (part of `game_config.game`), include an "animations" object. Example: "animations": {{ "win": {{ "type": "pulse", "scale": 1.25, "duration": 300 }} }}. For one or two high-value symbols (e.g., ID 8 or 9), you can set the "type" to "shake".
+        - Reel Animation Settings: Include a "reels_config" object at the game's root (within `game_config.game`): "reels_config": {{ "stop_ease_function": "Back.easeOut", "stop_ease_params": [1.5], "symbol_settle_ease_function": "Bounce.easeOut", "symbol_settle_duration": 250 }}.
+        - Win Presentation Settings: Include a "win_presentation" object at the game's root (within `game_config.game`): "win_presentation": {{ "big_win_threshold_multiplier": 20, "mega_win_threshold_multiplier": 50, "big_win_sfx": "theme_sfx_big_win", "mega_win_sfx": "theme_sfx_mega_win" }}.
+        - Hold and Win Bonus (Optional): If the theme suits a "Hold and Win" style bonus, include a "holdAndWinBonus" object within `game_config.game`. Example structure:
+          "holdAndWinBonus": {{
+            "triggerSymbolId": 12, // Must match the Bonus Coin Symbol ID
+            "minTriggerCount": 3,
+            "maxInitialCoins": 5, // How many of the triggering coins start the bonus
+            "bonusBackgroundAsset": "assets/bonus_bg_h&w.png", // Path to a specific background for this bonus
+            "bonusMusic": "sounds/music_h&w_bonus.mp3",
+            "defaultCoinValue": 1, // Can be multiplier of bet or fixed value
+            "respinsAwarded": 3
+          }}
+          If not thematically appropriate, omit the "holdAndWinBonus" object entirely.
 
         **Your Tasks:**
         1.  **Marketing Description:** Write a short, exciting 1-2 sentence marketing description.
-        2.  **Thematic Symbol Names:** Invent creative, thematic names for the 4 high-paying symbols and the special symbols (WILD, SCATTER, Coin).
-        3.  **Paytable and Weights:** Create a balanced paytable and symbol weights. Higher value symbols must have lower weights (be rarer).
-        4.  **Final JSON Output:** Format all of this information into a single, valid JSON object with three top-level keys: "description", "game_config", and "alembic_data". The structure of these objects must match the examples provided in the user's original request.
+        2.  **Thematic Symbol Names:** Invent creative, thematic names for the 4 high-paying symbols and the special symbols (WILD, SCATTER, Coin if used). These names are used in the `game_config.game.symbols` array. Each symbol object should look like: {{ "id": <id_num>, "name": "SymbolName", "description": "Brief description", "icon": "assets/symbol_<id_num>.png", "animations": {{ "win": {{ "type": "pulse", "scale": 1.25, "duration": 300 }} }} }}.
+        3.  **Paytable and Weights:** Create a balanced paytable (`game_config.game.paytable`) and symbol weights (`game_config.game.weights`). Higher value symbols must have lower weights (be rarer). Weights are typically integers.
+        4.  **Final JSON Output:** Format all of this information into a single, valid JSON object with three top-level keys: "description" (string), "game_config" (object), and "alembic_data" (object). The structure of these objects must match the examples provided in the user's original request, incorporating all new fields described above within `game_config.game`.
 
-        Ensure the output is ONLY the raw JSON object and nothing else.
+        **Output Format Reminder:**
+        The entire output must be a single JSON object. Do not include any text before or after the JSON object.
+        ```json
+        {{
+          "description": "...",
+          "game_config": {{
+            "name": "{theme_name}",
+            "short_name": "{short_name}",
+            "version": "1.0.0",
+            "type": "standard", // or "multiway" if applicable, but stick to "standard" for this 5x3
+            "asset_dir": "/slots/{short_name}/",
+            "game": {{
+              "layout": {{ "rows": {rows}, "columns": {cols} }},
+              "symbols": [
+                // ...array of symbol objects including 'animations' field...
+              ],
+              "reel_strips": [
+                // ...array of {cols} arrays of symbol IDs...
+              ],
+              "paylines": [
+                // ...array of payline coordinate arrays...
+              ],
+              "paytable": {{
+                // ...paytable object...
+              }},
+              "weights": {{
+                // ...symbol weights object...
+              }},
+              "reels_config": {{
+                "stop_ease_function": "Back.easeOut",
+                "stop_ease_params": [1.5],
+                "symbol_settle_ease_function": "Bounce.easeOut",
+                "symbol_settle_duration": 250
+              }},
+              "win_presentation": {{
+                "big_win_threshold_multiplier": 20,
+                "mega_win_threshold_multiplier": 50,
+                "big_win_sfx": "theme_sfx_big_win",
+                "mega_win_sfx": "theme_sfx_mega_win"
+              }}
+              // Optional: "holdAndWinBonus": {{ ... }}
+            }},
+            "settings": {{
+              "betOptions": [10, 20, 50, 100, 200, 500],
+              "defaultBet": 50
+            }},
+            "ui": {{
+              // ... UI configuration ...
+            }},
+            "assets": {{
+              "background": "assets/background.png",
+              "bonus_background": "assets/bonus_background.png",
+              "sounds": {{
+                 "theme_music_main": "sounds/music_main.mp3",
+                 "theme_reel_spin": "sounds/reel_spin.wav",
+                 "theme_reel_stop_1": "sounds/reel_stop1.wav",
+                 "theme_reel_stop_2": "sounds/reel_stop2.wav",
+                 "theme_reel_stop_3": "sounds/reel_stop3.wav",
+                 "theme_sfx_small_win": "sounds/sfx_small_win.wav",
+                 "theme_sfx_medium_win": "sounds/sfx_medium_win.wav",
+                 "theme_sfx_big_win": "sounds/sfx_big_win.mp3", // Longer for big win
+                 "theme_sfx_mega_win": "sounds/sfx_mega_win.mp3", // Longer for mega win
+                 "theme_sfx_scatter_trigger": "sounds/sfx_scatter_trigger.wav"
+              }}
+            }}
+          }},
+          "alembic_data": {{
+            "id": {slot_id},
+            "name": "{theme_name}",
+            "description": "Will be replaced by marketing description",
+            "num_rows": {rows},
+            "num_columns": {cols},
+            "num_symbols": 12, // (5 low + 4 high + WILD + SCATTER + BonusCoin)
+            "wild_symbol_id": 10,
+            "scatter_symbol_id": 11,
+            // ... other alembic fields, ensure they are sensible defaults ...
+            "short_name": "{short_name}",
+            "asset_directory": "/slots/{short_name}/",
+            "rtp": 96.0,
+            "volatility": "medium",
+            "is_active": True,
+            "is_multiway": False,
+            "reel_configurations": {{}}, // Can be populated later if needed
+            "is_cascading": False,
+            "min_symbols_to_match": 3
+          }}
+        }}
+        ```
     """)
 
     json_string = generate_text(prompt)
