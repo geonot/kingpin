@@ -105,6 +105,7 @@ from .routes.baccarat import baccarat_bp
 from .routes.internal import internal_bp
 from .routes.crystal_garden import crystal_garden_bp
 from .routes.bitcoin import bitcoin_bp
+from .routes.astrominerx import astrominerx_bp # AstroMinerX Blueprint
 
 def create_app(config_class=Config):
     """Application factory pattern with enhanced security."""
@@ -241,7 +242,7 @@ def create_app(config_class=Config):
 
     # --- Database Setup ---
     db.init_app(app)
-    migrate = Migrate(app, db, directory='migrations')
+    migrate = Migrate(app, db, directory='casino_be/migrations')
 
     # --- JWT Setup ---
     jwt = JWTManager(app)
@@ -460,6 +461,7 @@ def create_app(config_class=Config):
     app.register_blueprint(internal_bp) # Register internal blueprint
     app.register_blueprint(crystal_garden_bp) # Register Crystal Garden blueprint
     app.register_blueprint(bitcoin_bp) # Register Bitcoin blueprint
+    app.register_blueprint(astrominerx_bp, url_prefix='/api') # Register AstroMinerX Blueprint
 
     # --- CLI command for creating an admin user (moved from manage.py) ---
     @app.cli.command("create-admin")

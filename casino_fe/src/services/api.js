@@ -224,5 +224,19 @@ export default {
   
   fetchAdminUsers(page = 1, perPage = 20) {
     return apiClient.get(`/admin/users?page=${page}&per_page=${perPage}`);
+  },
+
+  // AstroMiner X Endpoints
+  launchAstroMinerXExpedition(data) { // data should be { bet_amount: number }
+    return apiClient.post('/astrominerx/launch', data);
+  },
+  scanAstroMinerXAsteroid(data) { // data should be { expedition_id: number, asteroid_id: number }
+    return apiClient.post('/astrominerx/scan', data);
+  },
+  collectAstroMinerXResources(data) { // data should be { expedition_id: number }
+    return apiClient.post('/astrominerx/collect', data);
+  },
+  getAstroMinerXExpeditionState(expeditionId) {
+    return apiClient.get(`/astrominerx/expedition/${expeditionId}`);
   }
 };

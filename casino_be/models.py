@@ -628,3 +628,52 @@ class CrystalCodexEntry(db.Model):
             'first_discovered_at': self.first_discovered_at.isoformat() if self.first_discovered_at else None,
             'notes': self.notes
         }
+
+# AstroMiner X Game Models
+class AstroMinerXExpedition(db.Model):
+    __tablename__ = 'astro_miner_x_expedition'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    bet_amount = db.Column(db.Float, nullable=False)
+    start_time = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    end_time = db.Column(db.DateTime(timezone=True), nullable=True)
+    total_value_collected = db.Column(db.Float, default=0, nullable=False)
+    status = db.Column(db.String(50), nullable=False, default='active', index=True) # e.g., "active", "completed", "aborted"
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('astro_miner_x_expeditions', lazy='dynamic'))
+    asteroids = db.relationship('AstroMinerXAsteroid', back_populates='expedition', lazy='dynamic', cascade="all, delete-orphan")
+    resources_collected = db.relationship('AstroMinerXResource', back_populates='expedition', lazy='dynamic', cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<AstroMinerXExpedition {self.id} (User: {self.user_id}, Status: {self.status})>"
+
+class AstroMinerXAsteroid(db.Model):
+    __tablename__ = 'astro_miner_x_asteroid'
+    id = db.Column(db.Integer, primary_key=True)
+    expedition_id = db.Column(db.Integer, db.ForeignKey('astro_miner_x_expedition.id', ondelete='CASCADE'), nullable=False, index=True)
+    asteroid_type = db.Column(db.String(50), nullable=False) # e.g., "standard", "gem", "motherlode"
+    value = db.Column(db.Float, nullable=True) # Value revealed after scanning/lasering
+    is_empty = db.Column(db.Boolean, default=False, nullable=False)
+    is_hazard = db.Column(db.Boolean, default=False, nullable=False)
+    scan_time = db.Column(db.DateTime(timezone=True), nullable=True) # Time when the asteroid was scanned/lasered
+
+    # Relationships
+    expedition = db.relationship('AstroMinerXExpedition', back_populates='asteroids')
+
+    def __repr__(self):
+        return f"<AstroMinerXAsteroid {self.id} (Expedition: {self.expedition_id}, Type: {self.asteroid_type}, Value: {self.value})>"
+
+class AstroMinerXResource(db.Model):
+    __tablename__ = 'astro_miner_x_resource'
+    id = db.Column(db.Integer, primary_key=True)
+    expedition_id = db.Column(db.Integer, db.ForeignKey('astro_miner_x_expedition.id', ondelete='CASCADE'), nullable=False, index=True)
+    resource_name = db.Column(db.String(100), nullable=False)
+    value = db.Column(db.Float, nullable=False)
+    collected_time = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    # Relationships
+    expedition = db.relationship('AstroMinerXExpedition', back_populates='resources_collected')
+
+    def __repr__(self):
+        return f"<AstroMinerXResource {self.id} (Expedition: {self.expedition_id}, Name: {self.resource_name}, Value: {self.value})>"

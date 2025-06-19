@@ -2,11 +2,11 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from models import db, User, Transaction, UserBonus
-from schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema
-from services.bonus_service import apply_bonus_to_deposit
-from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
-from casino_be.exceptions import InsufficientFundsException, ValidationException, NotFoundException, ForbiddenException
+from casino_be.models import db, User, Transaction, UserBonus
+from ..schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema # Relative import
+from ..services.bonus_service import apply_bonus_to_deposit # Relative import
+from ..utils.security import require_csrf_token, rate_limit_by_ip, log_security_event # Relative import
+from casino_be.exceptions import InsufficientFundsException, ValidationException, NotFoundException, AuthorizationException
 from casino_be.error_codes import ErrorCodes
 
 user_bp = Blueprint('user', __name__, url_prefix='/api')
@@ -50,7 +50,7 @@ def withdraw():
         if active_bonus_with_wagering.wagering_progress_sats < active_bonus_with_wagering.wagering_requirement_sats:
             remaining_wagering_sats = active_bonus_with_wagering.wagering_requirement_sats - active_bonus_with_wagering.wagering_progress_sats
             # current_app.logger.warning(f"User {user.id} withdrawal blocked due to unmet wagering for UserBonus {active_bonus_with_wagering.id}.") # Will be logged by global handler
-            raise ForbiddenException( # Using Forbidden as it's a restriction on action
+            raise AuthorizationException( # Using AuthorizationException as it's a restriction on action
                 error_code=ErrorCodes.FORBIDDEN, # Or a more specific one if available for bonus restriction
                 status_message="Withdrawal blocked due to unmet wagering requirements.",
                 details={
@@ -276,7 +276,7 @@ def transfer_funds():
     ).first()
     
     if active_bonus and active_bonus.wagering_progress_sats < active_bonus.wagering_requirement_sats:
-        raise ForbiddenException( # Using Forbidden as it's a restriction on action
+        raise AuthorizationException( # Using AuthorizationException as it's a restriction on action
             error_code=ErrorCodes.FORBIDDEN, # Or a more specific bonus-related error code
             status_message="Transfers are blocked while you have active bonus wagering requirements."
         )

@@ -28,6 +28,10 @@
           <i class="fas fa-poker-chip mr-2"></i> <!-- Placeholder for icon -->
           Poker
         </router-link>
+        <router-link to="/games/astrominerx" exact-active-class="bg-highlight text-accent font-semibold" class="nav-link">
+          <i class="fas fa-meteor mr-2"></i> <!-- Placeholder for AstroMiner X icon -->
+          AstroMiner X
+        </router-link>
       </nav>
     </div>
 

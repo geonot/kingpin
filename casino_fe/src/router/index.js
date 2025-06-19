@@ -17,6 +17,7 @@ const Settings = () => import('@views/Settings.vue');
 const Spacecrash = () => import('@/views/Spacecrash.vue'); // Import Spacecrash view
 const Plinko = () => import('@views/Plinko.vue'); // Added Plinko
 const Roulette = () => import('@/views/Roulette.vue'); // Added Roulette
+const AstroMinerXPage = () => import('@/views/AstroMinerXPage.vue'); // AstroMiner X
 
 // New Page Imports
 const BonusesPage = () => import('@/views/BonusesPage.vue');
@@ -175,6 +176,12 @@ const routes = [
     name: 'CrystalGarden',
     component: CrystalGardenPage,
     meta: { title: 'Crystal Garden', requiresAuth: true, featureFlag: 'CRYSTAL_GARDEN_ENABLED' }
+  },
+  {
+    path: '/games/astrominerx',
+    name: 'AstroMinerX',
+    component: AstroMinerXPage,
+    meta: { title: 'AstroMiner X', requiresAuth: true, gameName: 'AstroMiner X' }
   }
 ];
 
