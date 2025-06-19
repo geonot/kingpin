@@ -4,11 +4,11 @@ import logging
 import os # Added for test seam
 
 # Import real function with an alias
-from utils.bitcoin import generate_bitcoin_wallet, get_address_from_private_key_wif, send_to_hot_wallet as real_send_to_hot_wallet
-from utils.encryption import encrypt_private_key, decrypt_private_key
-from models import db, User, Transaction
+from ..utils.bitcoin import generate_bitcoin_wallet, get_address_from_private_key_wif, send_to_hot_wallet as real_send_to_hot_wallet # Relative
+from ..utils.encryption import encrypt_private_key, decrypt_private_key # Relative
+from ..models import db, User, Transaction # Relative
 from sqlalchemy.orm.attributes import flag_modified # Added for JSON field update
-from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
+from ..utils.security import require_csrf_token, rate_limit_by_ip, log_security_event # Relative
 
 bitcoin_bp = Blueprint('bitcoin', __name__, url_prefix='/api/bitcoin')
 logger = logging.getLogger(__name__)

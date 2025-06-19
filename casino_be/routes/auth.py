@@ -16,16 +16,6 @@ from utils.bitcoin import generate_bitcoin_wallet
 from utils.security import require_csrf_token, generate_csrf_token
 from casino_be.exceptions import AuthenticationException, ValidationException
 from casino_be.error_codes import ErrorCodes
-# Assuming is_password_strong will be moved to a utility or made accessible.
-# For now, we might need to import it from app if possible, or define it, or skip.
-# Let's try importing from app, and if it causes issues, it can be addressed in a follow-up.
-# from casino_be.app import is_password_strong # This might cause circular import.
-# A better solution would be to move is_password_strong to a utils.security or utils.validation module.
-# For this step, I will add the password check logic and assume is_password_strong is available.
-# If not, the test run will fail and it can be fixed.
-# Let's assume it's in 'utils.validation' for now for cleaner structure.
-# from utils.validation import is_password_strong
-# Reverting to import from app.py as is_password_strong is used by CLI in app.py
 from casino_be.app import is_password_strong
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api')
@@ -101,7 +91,7 @@ def register():
             raise Exception("Failed to generate wallet address for user during registration.") # Will be caught by global 500
         
         # Import encryption utilities
-        from utils.encryption import encrypt_private_key
+        from ..utils.encryption import encrypt_private_key # Relative import
         
         try:
             # Encrypt the private key

@@ -1,9 +1,9 @@
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime, timezone
 
-from models import db, User, Transaction
-from utils.decorators import service_token_required
-from schemas import UserSchema # To serialize user output
+from ..models import db, User, Transaction # Relative import
+from ..utils.decorators import service_token_required # Relative import
+from ..schemas import UserSchema # Relative import
 
 internal_bp = Blueprint('internal', __name__, url_prefix='/api/internal')
 

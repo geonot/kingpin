@@ -7,7 +7,8 @@ import json
 import os
 from typing import Dict, Any, Optional
 from flask import current_app
-from models import db, Slot
+from ..models import db, Slot # Relative import
+import time # Moved time import to top
 
 class GameConfigManager:
     """Secure manager for game configurations"""
@@ -195,5 +196,5 @@ class GameConfigManager:
             cls._config_cache.clear()
             cls._cache_timestamp.clear()
 
-# Import time module
-import time
+# Import time module # This redundant import will be removed
+# import time

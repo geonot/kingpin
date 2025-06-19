@@ -2,9 +2,9 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from http import HTTPStatus
 
-from models import db, User, PlinkoDropLog, Transaction
-from schemas import PlinkoPlayRequestSchema, PlinkoPlayResponseSchema
-from utils.plinko_helper import (
+from ..models import db, User, PlinkoDropLog, Transaction # Relative import
+from ..schemas import PlinkoPlayRequestSchema, PlinkoPlayResponseSchema # Relative import
+from ..utils.plinko_helper import ( # Relative import
     validate_plinko_params, calculate_winnings,
     PAYOUT_MULTIPLIERS, SATOSHIS_PER_UNIT
 )

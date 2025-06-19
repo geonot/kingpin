@@ -122,9 +122,10 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         # Extract key configurations
         cfg_layout = game_config.get('game', {}).get('layout', {})
         cfg_symbols_map = {s['id']: s for s in game_config.get('game', {}).get('symbols', [])}
-        cfg_paylines = cfg_layout.get('paylines', [])
-        cfg_rows = cfg_layout.get('rows', 3)
-        cfg_columns = cfg_layout.get('columns', 5)
+        # Ensure cfg_paylines is read from game.layout.paylines
+        cfg_paylines = game_config.get('game', {}).get('layout', {}).get('paylines', [])
+        cfg_rows = cfg_layout.get('rows', 3) # This correctly reads from game.layout.rows
+        cfg_columns = cfg_layout.get('columns', 5) # This correctly reads from game.layout.columns
         cfg_wild_symbol_id = game_config.get('game', {}).get('wild_symbol_id')
         cfg_scatter_symbol_id = game_config.get('game', {}).get('scatter_symbol_id')
         cfg_bonus_features = game_config.get('game', {}).get('bonus_features', {})
@@ -133,21 +134,6 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
         cfg_min_symbols_to_match = game_config.get('game', {}).get('min_symbols_to_match', None)
         cfg_win_multipliers = game_config.get('game', {}).get('win_multipliers', [])
         cfg_reel_strips = game_config.get('game', {}).get('reel_strips')
-
-        # --- Pre-Spin Validation ---
-        if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
-            raise ValueError("Invalid bet amount. Must be a positive integer (satoshis).")
-
-        # Check if bet is compatible with payline system
-        num_paylines = len(cfg_paylines)
-        if num_paylines > 0 and bet_amount_sats % num_paylines != 0:
-            next_valid_bet = ((bet_amount_sats // num_paylines) + 1) * num_paylines
-            prev_valid_bet = (bet_amount_sats // num_paylines) * num_paylines
-            if prev_valid_bet == 0:
-                prev_valid_bet = num_paylines
-            
-            raise ValueError(f"Bet amount ({bet_amount_sats} sats) must be evenly divisible by number of paylines ({num_paylines}). "
-                            f"Try {prev_valid_bet} or {next_valid_bet} sats instead.")
 
         # --- Update Wagering Progress if Active Bonus (for PAID spins) ---
         actual_bet_this_spin_for_wagering = 0
@@ -179,11 +165,25 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             is_bonus_spin = True
             current_spin_multiplier = game_session.bonus_multiplier
             game_session.bonus_spins_remaining -= 1
-            actual_bet_this_spin = 0
+            actual_bet_this_spin = 0 # No cost for a bonus spin
         else:
-            # CRITICAL: Re-check balance atomically to prevent race conditions
-            db.session.refresh(user)
+            # --- Paid Spin Validations ---
+            if not isinstance(bet_amount_sats, int) or bet_amount_sats <= 0:
+                raise ValueError("Invalid bet amount. Must be a positive integer (satoshis).")
+
+            num_paylines = len(cfg_paylines)
+            if num_paylines > 0 and bet_amount_sats % num_paylines != 0:
+                next_valid_bet = ((bet_amount_sats // num_paylines) + 1) * num_paylines
+                prev_valid_bet = (bet_amount_sats // num_paylines) * num_paylines
+                if prev_valid_bet == 0:
+                    prev_valid_bet = num_paylines
             
+                raise ValueError(f"Bet amount ({bet_amount_sats} sats) must be evenly divisible by number of paylines ({num_paylines}). "
+                                f"Try {prev_valid_bet} or {next_valid_bet} sats instead.")
+
+            # CRITICAL: Re-check balance atomically to prevent race conditions
+            db.session.refresh(user) # Ensure user object is up-to-date
+
             if user.balance < bet_amount_sats:
                 raise ValueError("Insufficient balance - balance changed during processing")
             
@@ -351,6 +351,8 @@ def handle_spin(user, slot, game_session, bet_amount_sats):
             "bonus_spins_remaining": game_session.bonus_spins_remaining if game_session.bonus_active else 0,
             "bonus_multiplier": game_session.bonus_multiplier if game_session.bonus_active else 1.0,
             "user_balance_sats": int(user.balance),
+            "is_bonus_spin": is_bonus_spin, # Added for clarity to caller
+            "bet_amount": actual_bet_this_spin, # Spin record already has this, but can be useful for caller
             "session_stats": {
                 "num_spins": game_session.num_spins,
                 "amount_wagered_sats": int(game_session.amount_wagered or 0),

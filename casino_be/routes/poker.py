@@ -2,12 +2,12 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from models import db, User, PokerTable, PokerHand, PokerPlayerState # GameSession
-from schemas import (
+from ..models import db, User, PokerTable, PokerHand, PokerPlayerState # Relative import
+from ..schemas import ( # Relative import
     PokerTableSchema, JoinPokerTableSchema, PokerActionSchema,
     UserSchema, PokerHandSchema, PokerPlayerStateSchema
 )
-from utils import poker_helper
+from ..utils import poker_helper # Relative import
 from sqlalchemy.orm import joinedload # For optimized querying
 
 poker_bp = Blueprint('poker', __name__, url_prefix='/api/poker')

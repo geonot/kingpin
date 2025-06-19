@@ -5,6 +5,14 @@ from flask import current_app
 import secrets
 # from casino_be.utils.spin_handler import SLOT_CONFIG_BASE_PATH # Removed import
 
+# Ensure models are imported relatively for consistency if this file is part of a package structure.
+# However, the error was in app.py importing this file, and this file importing models.
+# The fix here is for this file's own imports.
+from ..models import db, SlotSpin, GameSession, User, Transaction, UserBonus # Relative import for models
+from .game_config_manager import GameConfigManager # Relative import for game_config_manager
+from .spin_handler_new import check_bonus_trigger # Corrected and relative import for check_bonus_trigger
+
+
 def load_multiway_game_config(slot_short_name):
     """
     Loads the game configuration JSON file for a given multiway slot.
@@ -377,11 +385,9 @@ def calculate_multiway_win(
     }
 
 # --- Main Handler ---
-from datetime import datetime, timezone
-# Assuming models.py is in the parent directory of utils/
-# Adjust if your project structure is different (e.g. casino_be.models)
-from models import db, SlotSpin, GameSession, User, Transaction, UserBonus
-from utils.spin_handler import check_bonus_trigger # Reusing bonus trigger logic
+# datetime, timezone already imported at the top
+# Models (db, SlotSpin, etc.) are now imported at the top using relative path.
+# check_bonus_trigger is now imported at the top from spin_handler_new using relative path.
 
 def handle_multiway_spin(user: User, slot: db.Model, game_session: GameSession, bet_amount_sats: int):
     """
