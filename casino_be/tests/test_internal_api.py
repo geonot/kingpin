@@ -3,6 +3,7 @@ import json
 from casino_be.app import create_app, db
 from casino_be.models import User, Transaction
 from casino_be.tests.test_api import BaseTestCase # Re-use BaseTestCase for setup
+from casino_be.error_codes import ErrorCodes # Import ErrorCodes
 
 class TestInternalAPI(BaseTestCase):
 
@@ -97,7 +98,12 @@ class TestInternalAPI(BaseTestCase):
         payload = {"user_id": self.user.id, "sats_amount": 100}
         headers_no_token = {'Content-Type': 'application/json'}
         response = self.client.post('/api/internal/update_player_balance', data=json.dumps(payload), headers=headers_no_token)
-        self.assertEqual(response.status_code, 401) # As per service_token_required decorator
+        json_data = response.get_json()
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(json_data['status'])
+        self.assertEqual(json_data['error_code'], ErrorCodes.UNAUTHENTICATED) # Assuming service_token_required raises AuthenticationException
+        self.assertEqual(json_data['status_message'], 'Service token is missing or invalid.')
+
 
     def test_update_player_balance_unauthorized_invalid_token(self):
         payload = {"user_id": self.user.id, "sats_amount": 100}
@@ -106,7 +112,12 @@ class TestInternalAPI(BaseTestCase):
             'Content-Type': 'application/json'
         }
         response = self.client.post('/api/internal/update_player_balance', data=json.dumps(payload), headers=headers_invalid_token)
-        self.assertEqual(response.status_code, 403) # As per service_token_required decorator
+        json_data = response.get_json()
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(json_data['status'])
+        self.assertEqual(json_data['error_code'], ErrorCodes.FORBIDDEN) # Assuming service_token_required raises AuthorizationException
+        self.assertEqual(json_data['status_message'], 'Service token is invalid.')
+
 
     def test_update_player_balance_user_not_found(self):
         payload = {
@@ -115,18 +126,22 @@ class TestInternalAPI(BaseTestCase):
             "original_tx_id": "test_user_not_found_tx"
         }
         response = self.client.post('/api/internal/update_player_balance', data=json.dumps(payload), headers=self.headers)
-        self.assertEqual(response.status_code, 404)
         json_data = response.get_json()
+        self.assertEqual(response.status_code, 404) # NotFoundException
         self.assertFalse(json_data['status'])
-        self.assertIn("User with ID 99999 not found", json_data['status_message'])
+        self.assertEqual(json_data['error_code'], ErrorCodes.USER_NOT_FOUND)
+        self.assertEqual(json_data['status_message'], "User with ID 99999 not found.")
+
 
     def test_update_player_balance_invalid_payload_missing_field(self):
-        payload = {"user_id": self.user.id} # Missing sats_amount
+        payload = {"user_id": self.user.id} # Missing sats_amount and original_tx_id
         response = self.client.post('/api/internal/update_player_balance', data=json.dumps(payload), headers=self.headers)
-        self.assertEqual(response.status_code, 400)
         json_data = response.get_json()
+        self.assertEqual(response.status_code, 422) # ValidationException
         self.assertFalse(json_data['status'])
-        self.assertIn("sats_amount must be a positive integer", json_data['status_message'])
+        self.assertEqual(json_data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn("sats_amount", json_data['details']['errors'])
+        self.assertIn("original_tx_id", json_data['details']['errors'])
 
     def test_update_player_balance_invalid_payload_wrong_type(self):
         payload = {
@@ -135,10 +150,13 @@ class TestInternalAPI(BaseTestCase):
             "original_tx_id": "test_wrong_type_tx"
         }
         response = self.client.post('/api/internal/update_player_balance', data=json.dumps(payload), headers=self.headers)
-        self.assertEqual(response.status_code, 400)
         json_data = response.get_json()
+        self.assertEqual(response.status_code, 422) # ValidationException
         self.assertFalse(json_data['status'])
-        self.assertIn("sats_amount must be a positive integer", json_data['status_message'])
+        self.assertEqual(json_data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn("sats_amount", json_data['details']['errors']) # Marshmallow reports error on field
+        self.assertIn("Not a valid integer.", "".join(json_data['details']['errors']['sats_amount']))
+
 
     def test_update_player_balance_invalid_payload_non_positive_sats(self):
         payload = {
@@ -147,21 +165,26 @@ class TestInternalAPI(BaseTestCase):
             "original_tx_id": "test_non_positive_tx"
         }
         response = self.client.post('/api/internal/update_player_balance', data=json.dumps(payload), headers=self.headers)
-        self.assertEqual(response.status_code, 400)
         json_data = response.get_json()
+        self.assertEqual(response.status_code, 422) # ValidationException
         self.assertFalse(json_data['status'])
-        self.assertIn("sats_amount must be a positive integer", json_data['status_message'])
+        self.assertEqual(json_data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn("sats_amount", json_data['details']['errors'])
+        self.assertIn("must be greater than 0", "".join(json_data['details']['errors']['sats_amount'])) # Adjusted to match typical validator message
+
 
     def test_update_player_balance_no_json_payload(self):
         headers_no_json = self.headers.copy()
-        headers_no_json['Content-Type'] = 'text/plain'
+        headers_no_json['Content-Type'] = 'text/plain' # Incorrect content type
         response = self.client.post('/api/internal/update_player_balance', data="not json", headers=headers_no_json)
-        # This might also result in 400 due to data = request.get_json() failing if content-type is not application/json
-        # or if data is not valid json. The internal route explicitly checks `if not data: return 400`
-        self.assertEqual(response.status_code, 400)
         json_data = response.get_json()
+        # Werkzeug/Flask catches this early if content-type is not application/json and get_json(force=False/silent=False) is used.
+        # Or if it's application/json but malformed.
+        # This should be a 400 error, likely ErrorCodes.GENERIC_ERROR from handle_werkzeug_http_exception
+        self.assertEqual(response.status_code, 400)
         self.assertFalse(json_data['status'])
-        self.assertEqual(json_data['status_message'], 'Invalid JSON payload.')
+        self.assertEqual(json_data['error_code'], ErrorCodes.GENERIC_ERROR) # Or specific parsing error if defined
+        self.assertIn("Failed to decode JSON object", json_data['details']['description'])
 
 
 if __name__ == '__main__':

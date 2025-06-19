@@ -8,6 +8,7 @@ from flask_jwt_extended import create_access_token # Added import
 from casino_be.app import app, db
 from casino_be.models import User, BaccaratTable, BaccaratHand, GameSession, Transaction
 from casino_be.schemas import BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema
+from casino_be.error_codes import ErrorCodes # Import ErrorCodes
 
 # It's good practice to use a specific test configuration for Flask app
 # For simplicity, we'll use the existing app and mock heavily.
@@ -84,20 +85,22 @@ class TestBaccaratAPI(BaseTestCase): # Inherit from BaseTestCase
     def test_join_baccarat_table_not_found(self, mock_query_table):
         mock_query_table.get.return_value = None
         response = self.client.post('/api/baccarat/tables/99/join', headers={'Authorization': f'Bearer {self.access_token}'})
-        self.assertEqual(response.status_code, 404)
         data = response.get_json()
+        self.assertEqual(response.status_code, 404) # NotFoundException
         self.assertFalse(data['status'])
-        self.assertIn("not found", data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.GAME_NOT_FOUND) # Assuming GAME_NOT_FOUND is used
+        self.assertIn("Baccarat table with ID 99 not found", data['status_message']) # Exact message from route
 
     @patch('casino_be.models.BaccaratTable.query')
     def test_join_baccarat_table_not_active(self, mock_query_table):
         mock_table = BaccaratTable(id=1, name="Baccarat Table 1", is_active=False)
         mock_query_table.get.return_value = mock_table
         response = self.client.post('/api/baccarat/tables/1/join', headers={'Authorization': f'Bearer {self.access_token}'})
-        self.assertEqual(response.status_code, 400) # As per current app.py logic
         data = response.get_json()
+        self.assertEqual(response.status_code, 400) # ValidationException (or specific GameLogicException)
         self.assertFalse(data['status'])
-        self.assertIn("not active", data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.GAME_LOGIC_ERROR) # Assuming GameLogicException is used
+        self.assertIn("Table is not active", data['status_message']) # Exact message from route
 
     @patch('casino_be.app.db.session.add')
     @patch('casino_be.app.db.session.commit')
@@ -175,10 +178,11 @@ class TestBaccaratAPI(BaseTestCase): # Inherit from BaseTestCase
         bet_payload = {"table_id": 1, "bet_on_player": 100, "bet_on_banker": 0, "bet_on_tie": 0}
         response = self.client.post('/api/baccarat/hands', json=bet_payload, headers={'Authorization': f'Bearer {self.access_token}'})
 
-        self.assertEqual(response.status_code, 400)
         data = response.get_json()
+        self.assertEqual(response.status_code, 400) # InsufficientFundsException
         self.assertFalse(data['status'])
-        self.assertIn("Insufficient balance", data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.INSUFFICIENT_FUNDS)
+        self.assertIn("Insufficient balance for the bet", data['status_message']) # Exact message from route
         mock_db_add.assert_not_called()
         mock_db_commit.assert_not_called()
 
@@ -198,18 +202,34 @@ class TestBaccaratAPI(BaseTestCase): # Inherit from BaseTestCase
         self.assertEqual(data['hand']['outcome'], "player_win")
 
     @patch('casino_be.models.BaccaratHand.query')
-    def test_get_baccarat_hand_not_found(self, mock_hand_query):
-        mock_hand_query.get.return_value = None
-        response = self.client.get('/api/baccarat/hands/999', headers={'Authorization': f'Bearer {self.access_token}'})
-        self.assertEqual(response.status_code, 404)
-        data = response.get_json()
-        self.assertFalse(data['status'])
-        self.assertIn("not found", data['status_message'])
+    def test_get_baccarat_hand_not_found(self, mock_hand_query): # This mock needs to target where Hand.query.get is used
+        # Assuming Hand.query.get is used directly in the route, or adjust patch target
+        # For Baccarat, it's db.session.query(BaccaratHand).options(...).filter(...).first()
+        # So, the patch should be on db.session.query
+
+        # This test needs to be re-evaluated based on how the route fetches the hand.
+        # The current patch on models.BaccaratHand.query might not be effective if routes use db.session.query.
+        # For now, assuming it is NotFoundException
+        # If the route uses `BaccaratHand.query.get_or_404(hand_id)`, Flask handles it.
+        # If it's custom, then we test our custom NotFoundException.
+        # The route uses: db.session.query(BaccaratHand).options(joinedload(...)).filter(BaccaratHand.id == hand_id).first()
+        # So, the patch on 'casino_be.routes.baccarat.db.session' is more appropriate as done in other tests.
+        with patch('casino_be.routes.baccarat.db.session') as mock_db_session_in_route:
+            mock_query_obj = MagicMock()
+            mock_query_obj.options.return_value.filter.return_value.first.return_value = None # Hand not found
+            mock_db_session_in_route.query.return_value = mock_query_obj
+
+            response = self.client.get('/api/baccarat/hands/999', headers={'Authorization': f'Bearer {self.access_token}'})
+            data = response.get_json()
+            self.assertEqual(response.status_code, 404) # NotFoundException
+            self.assertFalse(data['status'])
+            self.assertEqual(data['error_code'], ErrorCodes.NOT_FOUND)
+            self.assertIn("Baccarat hand with ID 999 not found", data['status_message']) # Exact message
 
     @patch('casino_be.routes.baccarat.db.session')
     def test_get_baccarat_hand_unauthorized(self, mock_db_session):
         # Hand belongs to another user
-        mock_hand = BaccaratHand(id=1, user_id=2, table_id=1, total_bet_amount=100, outcome="player_win")
+        mock_hand = BaccaratHand(id=1, user_id=self.mock_user.id + 1, table_id=1, total_bet_amount=100, outcome="player_win") # Different user_id
 
         mock_query_obj = MagicMock()
         mock_query_obj.options.return_value.filter.return_value.first.return_value = mock_hand
@@ -217,10 +237,11 @@ class TestBaccaratAPI(BaseTestCase): # Inherit from BaseTestCase
 
         # current_user.is_admin is False by default in self.mock_user
         response = self.client.get('/api/baccarat/hands/1', headers={'Authorization': f'Bearer {self.access_token}'})
-        self.assertEqual(response.status_code, 403)
         data = response.get_json()
+        self.assertEqual(response.status_code, 403) # AuthorizationException
         self.assertFalse(data['status'])
-        self.assertIn("not authorized", data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.FORBIDDEN)
+        self.assertIn("User not authorized to view this hand", data['status_message']) # Exact message
 
     @patch('casino_be.routes.baccarat.db.session')
     def test_get_baccarat_hand_admin_access(self, mock_db_session):

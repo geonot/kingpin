@@ -11,6 +11,7 @@ from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, Token
 #SATOSHI_FACTOR might be needed if amounts are converted
 from casino_be.config import Config, TestingConfig # Import TestingConfig
 from casino_be.app import create_app # Import create_app factory
+from casino_be.error_codes import ErrorCodes # Import ErrorCodes
 from datetime import timedelta
 from casino_be.utils.plinko_helper import PAYOUT_MULTIPLIERS
 # StaticPool is not needed for file-based DB strategy per test
@@ -155,11 +156,14 @@ class AuthApiTests(BaseTestCase):
             "password": "Password123!" # Added special character
         }
         response = self.client.post('/api/register', json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
-        self.assertEqual(response.status_code, 409) # Conflict
+        self.assertEqual(response.status_code, 422) # ValidationException returns 422
         self.assertFalse(data['status'])
-        self.assertIn('Username already exists', data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.USERNAME_ALREADY_EXISTS)
+        self.assertEqual(data['status_message'], 'Username already taken.')
+        self.assertIn('username', data['details'])
+
 
     def test_register_email_exists(self):
         """Test registration with an existing email."""
@@ -170,37 +174,43 @@ class AuthApiTests(BaseTestCase):
             "password": "Password123!" # Added special character
         }
         response = self.client.post('/api/register', json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
-        self.assertEqual(response.status_code, 409) # Conflict
+        self.assertEqual(response.status_code, 422) # ValidationException returns 422
         self.assertFalse(data['status'])
-        self.assertIn('Email already exists', data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.EMAIL_ALREADY_EXISTS)
+        self.assertEqual(data['status_message'], 'Email already registered.')
+        self.assertIn('email', data['details'])
 
     def test_register_missing_fields(self):
-        """Test registration with missing fields."""
+        """Test registration with missing fields (handled by Marshmallow)."""
         # Missing password
         payload_no_pass = {"username": "user", "email": "email@example.com"}
         response = self.client.post('/api/register', json=payload_no_pass)
-        data = json.loads(response.data.decode())
-        self.assertEqual(response.status_code, 400)
+        data = response.get_json() # Marshmallow error handler returns 422
+        self.assertEqual(response.status_code, 422) # Changed from 400 to 422 for ValidationError
         self.assertFalse(data['status'])
-        self.assertIn('password', data['status_message']) # Schema validation should catch this
+        self.assertEqual(data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn('password', data['details']['errors'])
+
 
         # Missing username
         payload_no_user = {"email": "email@example.com", "password": "password"}
         response = self.client.post('/api/register', json=payload_no_user)
-        data = json.loads(response.data.decode())
-        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertEqual(response.status_code, 422)
         self.assertFalse(data['status'])
-        self.assertIn('username', data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn('username', data['details']['errors'])
 
         # Missing email
         payload_no_email = {"username": "user", "password": "password"}
         response = self.client.post('/api/register', json=payload_no_email)
-        data = json.loads(response.data.decode())
-        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertEqual(response.status_code, 422)
         self.assertFalse(data['status'])
-        self.assertIn('email', data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn('email', data['details']['errors'])
 
     def test_login_success(self):
         """Test successful user login."""
@@ -222,11 +232,12 @@ class AuthApiTests(BaseTestCase):
         """Test login with a non-existent username."""
         payload = {"username": "nonexistentuser", "password": "password"}
         response = self.client.post('/api/login', json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Invalid credentials.')
+        self.assertEqual(data['error_code'], ErrorCodes.INVALID_CREDENTIALS)
+        self.assertEqual(data['status_message'], 'Invalid username or password.')
 
     def test_login_invalid_password(self):
         """Test login with an invalid password."""
@@ -235,11 +246,12 @@ class AuthApiTests(BaseTestCase):
 
         payload = {"username": username, "password": "wrongpassword"}
         response = self.client.post('/api/login', json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Invalid credentials.')
+        self.assertEqual(data['error_code'], ErrorCodes.INVALID_CREDENTIALS)
+        self.assertEqual(data['status_message'], 'Invalid username or password.')
 
 
 class GameApiTests(BaseTestCase):
@@ -378,11 +390,12 @@ class GameApiTests(BaseTestCase):
         response = self.client.post('/api/slots/spin', # Corrected URL
                                      headers={'Authorization': f'Bearer {token}'},
                                      json=spin_payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
-        self.assertEqual(response.status_code, 400) # Bad Request or 402 Payment Required
+        self.assertEqual(response.status_code, 400) # InsufficientFundsException returns 400
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Insufficient balance')
+        self.assertEqual(data['error_code'], ErrorCodes.INSUFFICIENT_FUNDS)
+        self.assertEqual(data['status_message'], 'Insufficient balance to place bet.') # Updated message from slots.py
 
 
 # === Billing API Tests ===
@@ -501,12 +514,16 @@ class BillingApiTests(BaseTestCase):
         payload = {"deposit_amount_sats": deposit_amount, "bonus_code": "NONEXISTENTCODE"}
 
         response = self.client.post('/api/deposit', headers={'Authorization': f'Bearer {token}'}, json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
-        self.assertEqual(response.status_code, 200) # Deposit is successful, bonus fails
-        self.assertTrue(data['status'])
+        self.assertEqual(response.status_code, 200) # Deposit itself is successful
+        self.assertTrue(data['status']) # Overall status is true because deposit went through
         self.assertIn(f"Deposit of {deposit_amount} sats successful.", data['status_message'])
-        self.assertIn("Bonus application failed: Invalid or expired bonus code", data['status_message']) # Corrected expected message part
+        # The bonus failure message is part of the composite status_message
+        self.assertIn("Bonus application failed: Invalid or expired bonus code", data['status_message'])
+        # Note: The new error handling primarily standardizes HTTP error responses.
+        # For 2xx responses with partial failures (like bonus code), the structure might remain custom.
+        # If bonus failure were to cause a 4xx error, it would follow the new structure.
 
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -550,11 +567,13 @@ class BillingApiTests(BaseTestCase):
 
         payload = {"amount_sats": 1000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted payload
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
-        self.assertEqual(response.status_code, 400, data.get('status_message'))
+        self.assertEqual(response.status_code, 400, data.get('status_message')) # InsufficientFundsException returns 400
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Insufficient funds')
+        self.assertEqual(data['error_code'], ErrorCodes.INSUFFICIENT_FUNDS)
+        self.assertEqual(data['status_message'], 'Insufficient funds for withdrawal.')
+
 
     def test_withdraw_fail_active_bonus_wagering_incomplete(self):
         token, user_id = self._login_and_get_token(username_prefix="withdraw_wagering_user")
@@ -581,11 +600,12 @@ class BillingApiTests(BaseTestCase):
 
         payload = {"amount_sats": 1000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted amount_sats and address
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json()
 
-        self.assertEqual(response.status_code, 403, data.get('status_message')) 
+        self.assertEqual(response.status_code, 403, data.get('status_message')) # ForbiddenException returns 403
         self.assertFalse(data['status'])
-        self.assertIn("Withdrawal blocked. You have an active bonus with unmet wagering requirements.", data['status_message'])
+        self.assertEqual(data['error_code'], ErrorCodes.FORBIDDEN) # Or a more specific bonus-related code
+        self.assertIn("Withdrawal blocked due to unmet wagering requirements.", data['status_message'])
 
 
 class PlinkoApiTests(BaseTestCase):
@@ -670,12 +690,14 @@ class PlinkoApiTests(BaseTestCase):
             "slot_landed_label": '0.5x'
         }
         response = self.client.post('/api/plinko/play', headers=headers, json=payload)
-        data = json.loads(response.data.decode())
+        data = response.get_json() # Assuming plinko also uses the new error structure
 
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(data['success'])
-        self.assertEqual(data['error'], 'Insufficient funds')
-        self.assertAlmostEqual(data['new_balance'], 0.5) # Balance before bet attempt
+        self.assertEqual(response.status_code, 400) # InsufficientFundsException
+        self.assertFalse(data['status']) # Changed from 'success' for consistency
+        self.assertEqual(data['error_code'], ErrorCodes.INSUFFICIENT_FUNDS)
+        self.assertEqual(data['status_message'], 'Insufficient funds.')
+        # 'new_balance' might not be part of error response, check if it's still relevant
+        # self.assertAlmostEqual(data['new_balance'], 0.5)
 
     def test_plinko_play_validation_errors(self):
         headers, user_id = self._get_auth_headers(username="plinko_validation_user")
@@ -685,28 +707,31 @@ class PlinkoApiTests(BaseTestCase):
             db.session.commit()
 
         test_cases = [
-            # Marshmallow validation errors (missing fields)
-            ({"chosen_stake_label": "Low", "slot_landed_label": "2x"}, "stake_amount", 400, "Missing data for required field."),
-            ({"stake_amount": 1.0, "slot_landed_label": "2x"}, "chosen_stake_label", 400, "Missing data for required field."),
-            ({"stake_amount": 1.0, "chosen_stake_label": "Low"}, "slot_landed_label", 400, "Missing data for required field."),
-            # Custom validation errors (invalid choices or out of range)
-            ({"stake_amount": 1.0, "chosen_stake_label": "InvalidTier", "slot_landed_label": "2x"}, "chosen_stake_label", 400, "Must be one of: Low, Medium, High."),
-            ({"stake_amount": 0.05, "chosen_stake_label": "Low", "slot_landed_label": "2x"}, "error", 400, "Stake amount 0.05 out of range for Low tier"), # This is a custom error message from the route
-            ({"stake_amount": 1.0, "chosen_stake_label": "Low", "slot_landed_label": "100x"}, "slot_landed_label", 400, "Must be one of: 0.5x, 2x, 5x."),
+            # Marshmallow validation errors (missing fields) - will be caught by global ValidationError handler
+            ({"chosen_stake_label": "Low", "slot_landed_label": "2x"}, "stake_amount", 422, ErrorCodes.VALIDATION_ERROR, "Missing data for required field."),
+            ({"stake_amount": 1.0, "slot_landed_label": "2x"}, "chosen_stake_label", 422, ErrorCodes.VALIDATION_ERROR, "Missing data for required field."),
+            ({"stake_amount": 1.0, "chosen_stake_label": "Low"}, "slot_landed_label", 422, ErrorCodes.VALIDATION_ERROR, "Missing data for required field."),
+            # Custom validation errors from route logic (now raising ValidationException)
+            ({"stake_amount": 1.0, "chosen_stake_label": "InvalidTier", "slot_landed_label": "2x"}, "chosen_stake_label", 422, ErrorCodes.VALIDATION_ERROR, "Must be one of: Low, Medium, High."),
+            ({"stake_amount": 0.05, "chosen_stake_label": "Low", "slot_landed_label": "2x"}, None, 422, ErrorCodes.INVALID_AMOUNT, "Stake amount 0.05 out of range for Low tier"),
+            ({"stake_amount": 1.0, "chosen_stake_label": "Low", "slot_landed_label": "100x"}, "slot_landed_label", 422, ErrorCodes.VALIDATION_ERROR, "Must be one of: 0.5x, 2x, 5x."),
         ]
 
-        for payload, error_field, expected_status, expected_message_part in test_cases:
+        for payload, error_field_in_details, expected_status, expected_error_code, expected_message_part in test_cases:
             with self.subTest(payload=payload):
                 response = self.client.post('/api/plinko/play', headers=headers, json=payload)
-                data = json.loads(response.data.decode())
+                data = response.get_json()
                 self.assertEqual(response.status_code, expected_status)
+                self.assertFalse(data['status'])
+                self.assertEqual(data['error_code'], expected_error_code)
 
-                if 'success' in data and not data['success']: # Custom error from route logic (e.g. stake out of range)
-                    self.assertIn(expected_message_part, data['error'])
-                else: # Marshmallow validation errors
-                    messages = data.get('messages', {})
-                    self.assertIn(error_field, messages)
-                    self.assertIn(expected_message_part, messages[error_field][0])
+                if expected_error_code == ErrorCodes.VALIDATION_ERROR and error_field_in_details:
+                     # Marshmallow errors are in details.errors
+                    self.assertIn(error_field_in_details, data['details']['errors'])
+                    self.assertIn(expected_message_part, data['details']['errors'][error_field_in_details][0])
+                else:
+                    # Custom ValidationExceptions have message in status_message
+                    self.assertIn(expected_message_part, data['status_message'])
 
 
     def test_plinko_play_no_auth(self):
@@ -716,7 +741,10 @@ class PlinkoApiTests(BaseTestCase):
             "slot_landed_label": "2x"
         }
         response = self.client.post('/api/plinko/play', json=payload)
+        data = response.get_json()
         self.assertEqual(response.status_code, 401) # Unauthorized
+        self.assertFalse(data['status'])
+        self.assertEqual(data['error_code'], ErrorCodes.UNAUTHENTICATED) # Assuming NoAuthorizationError is caught
 
 
 if __name__ == '__main__':

@@ -31,16 +31,19 @@
 </template>
 
 <script setup>
-import { ref, watch, defineProps, defineEmits } from 'vue';
+import { ref, watch, defineProps, defineEmits, computed } from 'vue';
+import { useRouter } from 'vue-router';
+import { useStore } from 'vuex';
 
-import { computed } from 'vue'; // Import computed
+const router = useRouter();
+const store = useStore();
 
 const props = defineProps({
-  message: {
+  message: { // Fallback if error object is not provided or not structured
     type: String,
     default: ''
   },
-  error: {
+  error: { // Expected to be the structured error object from api.js
     type: Object,
     default: null
   }
@@ -48,34 +51,81 @@ const props = defineProps({
 
 const emit = defineEmits(['dismiss']);
 
-const displayMessage = computed(() => {
-  if (props.error) {
-    return props.error.status_message || props.error.message || 'An unknown error occurred.';
-  }
-  return props.message;
-});
-
-const actionButton = computed(() => {
-  if (props.error && props.error.actionButton) {
-    return props.error.actionButton;
+const enhancedMessage = computed(() => {
+  if (props.error && props.error.isStructuredError) {
+    // Optional: More specific messages based on errorCode if backend message is generic
+    // and no actionButton is present to guide the user.
+    if (!props.error.actionButton) {
+      switch (props.error.errorCode) {
+        case 'BE_GEN_003': // UNAUTHENTICATED
+          return "Your session has expired. Please log in again.";
+        case 'BE_FIN_200': // INSUFFICIENT_FUNDS
+          return "You have insufficient funds for this action. Please consider making a deposit.";
+        // Add more cases as needed
+      }
+    }
+    return props.error.message; // Use message from structured error
   }
   return null;
 });
 
-const visible = ref(!!displayMessage.value); // Initial visibility based on message presence
-
-// Watch the displayMessage to automatically become visible when message changes
-watch(displayMessage, (newMessage) => {
-  visible.value = !!newMessage;
+const displayMessage = computed(() => {
+  if (props.error) {
+    if (props.error.isStructuredError) {
+      return enhancedMessage.value || props.error.message || 'An unknown structured error occurred.';
+    }
+    // Fallback for non-structured errors (e.g., network error object from interceptor)
+    return props.error.message || 'An unexpected error occurred.';
+  }
+  return props.message; // Legacy message prop
 });
+
+const actionButton = computed(() => {
+  // Directly use the actionButton from the structured error if available
+  if (props.error && props.error.isStructuredError && props.error.actionButton) {
+    return props.error.actionButton;
+  }
+  // Fallback for older error structures if any part of the app still uses them
+  if (props.error && props.error.actionButton) {
+     return props.error.actionButton;
+  }
+  return null;
+});
+
+const visible = ref(false);
+
+watch(() => displayMessage.value, (newMessage) => {
+  visible.value = !!newMessage;
+}, { immediate: true });
+
 
 const dismiss = () => {
   visible.value = false;
   emit('dismiss');
+  // Optionally clear the error from Vuex store if it's a global error message
+  if (store.state.globalError === props.error) {
+    store.commit('clearGlobalError');
+  }
 };
 
 const handleActionClick = () => {
-  if (actionButton.value && typeof actionButton.value.action === 'function') {
+  if (actionButton.value && actionButton.value.actionType && actionButton.value.actionPayload) {
+    switch (actionButton.value.actionType) {
+      case 'NAVIGATE_TO_ROUTE':
+        router.push(actionButton.value.actionPayload.route || actionButton.value.actionPayload); // Support simple string or object
+        break;
+      case 'DISPATCH_VUEX_ACTION':
+        store.dispatch(actionButton.value.actionPayload.actionName, actionButton.value.actionPayload.payload);
+        break;
+      // Example: Emitting an event for parent component to handle
+      // case 'EMIT_EVENT':
+      //   emit(actionButton.value.actionPayload.eventName, actionButton.value.actionPayload.eventData);
+      //   break;
+      default:
+        console.warn('Unknown actionButton type:', actionButton.value.actionType);
+    }
+  } else if (actionButton.value && typeof actionButton.value.action === 'function') {
+    // Fallback for existing simple action function if still used (legacy)
     actionButton.value.action();
   }
   dismiss(); // Auto-dismiss after action
