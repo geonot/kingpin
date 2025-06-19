@@ -5,9 +5,9 @@ from decimal import Decimal
 from datetime import datetime, timezone
 from http import HTTPStatus
 
-from models import db, User, BaccaratTable, BaccaratHand, GameSession, Transaction # Added GameSession, Transaction
-from schemas import BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema # UserSchema might be needed if returned
-from utils import baccarat_helper
+from ..models import db, User, BaccaratTable, BaccaratHand, GameSession, Transaction # Relative import
+from ..schemas import BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema # Relative import
+from ..utils import baccarat_helper # Relative import
 
 baccarat_bp = Blueprint('baccarat_bp', __name__, url_prefix='/api/baccarat')
 

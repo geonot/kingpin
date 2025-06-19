@@ -1,12 +1,12 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 
-from models import db, User, BlackjackTable # BlackjackHand, BlackjackAction potentially if used directly
-from schemas import (
+from ..models import db, User, BlackjackTable # Relative import
+from ..schemas import ( # Relative import
     BlackjackTableSchema, JoinBlackjackSchema, BlackjackActionRequestSchema,
     UserSchema, BlackjackHandSchema
 )
-from utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action
+from ..utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action # Relative import
 
 blackjack_bp = Blueprint('blackjack', __name__, url_prefix='/api/blackjack')
 

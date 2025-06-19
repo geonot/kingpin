@@ -2,10 +2,10 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from models import db, User, Transaction, UserBonus
-from schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema
-from services.bonus_service import apply_bonus_to_deposit
-from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
+from ..models import db, User, Transaction, UserBonus # Relative import
+from ..schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema # Relative import
+from ..services.bonus_service import apply_bonus_to_deposit # Relative import
+from ..utils.security import require_csrf_token, rate_limit_by_ip, log_security_event # Relative import
 
 user_bp = Blueprint('user', __name__, url_prefix='/api')
 
@@ -21,8 +21,8 @@ def withdraw():
         return jsonify({'status': False, 'status_message': errors}), 400
     
     user = current_user
-    amount_sats = data['amount']
-    withdraw_address = data['address']
+    amount_sats = data['amount_sats'] # Corrected from data['amount'] to match WithdrawSchema
+    withdraw_address = data['withdraw_wallet_address'] # Corrected from data['address'] to match WithdrawSchema
     
     # Enhanced withdrawal validation
     if amount_sats < 10000:  # Minimum 0.0001 BTC
@@ -73,8 +73,8 @@ def withdraw():
         auto_processed = False
         if hasattr(user, 'deposit_wallet_private_key') and user.deposit_wallet_private_key:
             try:
-                from utils.encryption import decrypt_private_key
-                from utils.bitcoin import send_to_hot_wallet
+                from ..utils.encryption import decrypt_private_key # Relative import
+                from ..utils.bitcoin import send_to_hot_wallet # Relative import
                 
                 private_key_wif = decrypt_private_key(user.deposit_wallet_private_key)
                 fee_sats = 5000  # Fixed fee for demo
@@ -155,8 +155,8 @@ def deposit():
         return jsonify({'status': False, 'status_message': errors}), 400
 
     user = current_user
-    deposit_amount_sats = data['amount']
-    bonus_code_str = data.get('bonus_code')
+    deposit_amount_sats = data['deposit_amount_sats'] # Corrected: ensure this is the actual field name used from DepositSchema
+    bonus_code_str = data.get('bonus_code') # This was missing in the erroneous block from read_file output
     
     # Enhanced deposit validation
     if deposit_amount_sats > 1000000000:  # Maximum 10 BTC per deposit
@@ -165,6 +165,7 @@ def deposit():
 
     final_bonus_applied_sats = 0
     final_user_bonus_id = None
+    # Ensure deposit_message uses the correctly assigned deposit_amount_sats
     deposit_message = f"Deposit of {deposit_amount_sats} sats successful."
     bonus_message = ""
     status_code = 200

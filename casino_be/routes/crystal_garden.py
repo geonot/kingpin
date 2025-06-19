@@ -1,9 +1,10 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app # Added current_app for logging if needed
 from flask_jwt_extended import jwt_required, current_user
 
-from casino_be.models import db # For db session if service doesn't handle all commits
-from casino_be.services.crystal_garden_service import CrystalGardenService, ServiceError, ItemNotFoundError # Import service and custom errors
-from casino_be.utils.decorators import feature_flag_required
+# models import was missing from the previous read, but error trace shows it's needed
+from ..models import db, User, CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry # Ensure all needed models are here
+from ..services.crystal_garden_service import CrystalGardenService, ServiceError, ItemNotFoundError
+from ..utils.decorators import feature_flag_required
 
 crystal_garden_bp = Blueprint('crystal_garden_bp', __name__, url_prefix='/api/crystal-garden')
 service = CrystalGardenService()

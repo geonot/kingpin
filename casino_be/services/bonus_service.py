@@ -4,7 +4,7 @@ from flask import current_app # To access logger if needed, or pass logger
 # For tools, direct relative imports like 'from ..models' are usually preferred if the structure is flat.
 # If 'casino_be' is not directly in python path but a sub-module is, this might need adjustment.
 # For this context, we'll assume the structure allows 'from ..models'.
-from models import db, User, BonusCode, UserBonus, Transaction
+from ..models import db, User, BonusCode, UserBonus, Transaction
 
 def apply_bonus_to_deposit(user: User, bonus_code_str: str, requested_deposit_amount_sats: int | None):
     '''

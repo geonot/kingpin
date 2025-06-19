@@ -2,13 +2,13 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from marshmallow import ValidationError
 
-from models import db, User, SpacecrashGame, SpacecrashBet
-from schemas import (
+from ..models import db, User, SpacecrashGame, SpacecrashBet # Relative import
+from ..schemas import ( # Relative import
     SpacecrashBetSchema, SpacecrashGameSchema,
     SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema
 )
-from utils import spacecrash_handler
-from routes.admin import is_admin # Import is_admin helper
+from ..utils import spacecrash_handler # Relative import
+from .admin import is_admin # Relative import for sibling module
 
 spacecrash_bp = Blueprint('spacecrash', __name__, url_prefix='/api/spacecrash')
 

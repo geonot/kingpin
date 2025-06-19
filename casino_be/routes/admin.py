@@ -1,8 +1,8 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 
-from models import db, User, GameSession, Transaction, BonusCode
-from schemas import (
+from ..models import db, User, GameSession, Transaction, BonusCode # Relative import
+from ..schemas import ( # Relative import
     AdminUserSchema, UserListSchema, TransactionSchema, TransactionListSchema,
     BonusCodeSchema, BonusCodeListSchema, AdminCreditDepositSchema
 )

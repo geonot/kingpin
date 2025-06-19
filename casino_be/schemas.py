@@ -6,7 +6,7 @@ import re
 import html
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
-from models import (
+from .models import ( # Relative import
     db, User, GameSession, SlotSpin, Transaction, BonusCode, Slot, SlotSymbol, SlotBet,
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
@@ -14,8 +14,8 @@ from models import (
     PlinkoDropLog,  # Plinko models
     BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
 )
-from utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Plinko specific imports
-from utils.security import validate_password_strength, sanitize_input
+from .utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Relative import
+from .utils.security import validate_password_strength, sanitize_input # Relative import
 
 # --- Enhanced Security Validators ---
 def validate_username(username):
@@ -205,9 +205,9 @@ class SpinRequestSchema(Schema):
     )
     
     @validates('bet_amount')
-    def validate_bet_reasonable(self, bet_amount):
+    def validate_bet_reasonable(self, value, **kwargs): # Added **kwargs to accept unexpected arguments
         # Additional validation for reasonable bet amounts
-        if bet_amount % 100 != 0:  # Must be multiple of 100 satoshis
+        if value % 100 != 0:  # Must be multiple of 100 satoshis
             raise ValidationError('Bet amount must be a multiple of 100 satoshis.')
 
 class BlackjackActionSchema(Schema):

@@ -2,6 +2,7 @@ import os
 import unittest
 import json
 from datetime import datetime, timezone
+from unittest.mock import patch # Import patch
 
 # It's crucial that 'app' and 'db' are imported from the main application package.
 # Assuming your Flask app instance is named 'app' and SQLAlchemy instance is 'db'
@@ -114,10 +115,15 @@ class BaseTestCase(unittest.TestCase):
         response = self.client.post('/api/login', json=login_payload)
         data = json.loads(response.data.decode())
 
-        self.assertTrue(data.get('status'), f"Login failed for {user.username}: {data.get('status_message', 'No status message')}")
-        self.assertIn('access_token', data, "Access token not in login response.")
+        # Check for successful status code first
+        self.assertEqual(response.status_code, 200, f"Login failed. Status Code: {response.status_code}. Response: {data}")
+        self.assertTrue(data.get('status'), f"Login response 'status' field is False. Response: {data}")
+        # CSRF token should be in response if login is successful and sets cookies
+        self.assertIn('csrf_token', data, "CSRF token not in successful login response.")
 
-        return data['access_token'], user.id
+        # Token is now in HttpOnly cookie, not in JSON response body.
+        # The client (self.client) will store and use cookies automatically for subsequent requests.
+        return None, user.id # Return None for token string, user_id for reference.
 
 
 class AuthApiTests(BaseTestCase):
@@ -126,17 +132,18 @@ class AuthApiTests(BaseTestCase):
     def test_register_success(self):
         """Test successful user registration."""
         payload = {
-            "username": "newuser",
+            "username": "testregister", # Changed to not be part of email
             "email": "newuser@example.com",
-            "password": "StrongPassword123!" # Added special character
+            "password": "StrongPassword123!"
         }
         response = self.client.post('/api/register', json=payload)
         data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, f"Registration failed: {data}") # Include response data
         self.assertTrue(data['status'])
-        self.assertIn('access_token', data)
-        self.assertIn('refresh_token', data)
+        # self.assertIn('access_token', data) # Tokens are in HttpOnly cookies
+        # self.assertIn('refresh_token', data) # Tokens are in HttpOnly cookies
+        self.assertIn('csrf_token', data) # Assuming register returns csrf_token upon success
         self.assertEqual(data['user']['username'], payload['username'])
         self.assertEqual(data['user']['email'], payload['email'])
 
@@ -212,10 +219,11 @@ class AuthApiTests(BaseTestCase):
         response = self.client.post('/api/login', json=payload)
         data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(data['status'])
-        self.assertIn('access_token', data)
-        self.assertIn('refresh_token', data)
+        self.assertEqual(response.status_code, 200, f"Login failed. Response: {data}")
+        self.assertTrue(data.get('status'), f"Login response 'status' is False. Response: {data}")
+        self.assertIn('csrf_token', data, "CSRF token not in successful login response.")
+        self.assertNotIn('access_token', data) # Explicitly check token is NOT in body
+        self.assertNotIn('refresh_token', data) # Explicitly check token is NOT in body
         self.assertEqual(data['user']['username'], username)
 
     def test_login_invalid_username(self):
@@ -247,67 +255,84 @@ class GameApiTests(BaseTestCase):
 
     # GameApiTests will use the _login_and_get_token from BaseTestCase
 
-    def _create_slot(self, name="Test Slot", short_name="test_slot_sn", reels=3, rows=3, paylines=5): # Added short_name param
+    def _create_slot(self, name="Test Slot", short_name="test_slot_sn",
+                     reels=3, rows=3, scatter_symbol_id=None, bonus_symbol_id=None, is_multiway=False): # Added scatter_symbol_id, bonus_symbol_id, is_multiway
         """Helper to create a slot machine directly in the DB."""
         with self.app.app_context():
             # Create the slot first to get its ID
             slot = Slot(
                 name=name,
-                short_name=short_name, # Use parameter
+                short_name=short_name,
                 num_rows=rows,
                 num_columns=reels,
-                num_symbols=4, # Example, adjust if needed
-                    asset_directory="/test_assets/", # Added asset_directory
-                    rtp=95.0, # Added rtp
-                    volatility="medium", # Added volatility as it's also likely required
-                # wild_symbol_id, scatter_symbol_id can be set later if needed
+                num_symbols=4, # Default, can be adjusted if tests need more/less
+                asset_directory=f"/{short_name}/",
+                rtp=96.0,
+                volatility="medium",
+                scatter_symbol_id=scatter_symbol_id, # Set from parameter
+                # bonus_symbol_id=bonus_symbol_id, # Removed as it's not a field in Slot model
+                is_multiway=is_multiway,           # Set from parameter
+                # Assuming wild_symbol_id might be one of the default symbols created below
+                wild_symbol_id=4 # Defaulting wild to symbol_internal_id 4 for now
             )
             db.session.add(slot)
             db.session.commit()
-            # slot.id is definitely available here
-            slot_id_val = slot.id # Store the ID while session is active
+            slot_id_val = slot.id
 
 
             # Create symbols for this slot
+            # Ensure symbol_internal_ids match any specific IDs used (scatter, bonus, wild)
             symbols_data = [
                 {"name": "Cherry", "value_multiplier": 10, "img_link": "cherry.png", "symbol_internal_id": 1, "slot_id": slot_id_val},
                 {"name": "Lemon", "value_multiplier": 5, "img_link": "lemon.png", "symbol_internal_id": 2, "slot_id": slot_id_val},
-                {"name": "BAR", "value_multiplier": 20, "img_link": "bar.png", "symbol_internal_id": 3, "slot_id": slot_id_val},
-                {"name": "Wild", "value_multiplier": 0, "img_link": "wild.png", "symbol_internal_id": 4, "slot_id": slot_id_val},
+                {"name": "BAR", "value_multiplier": 20, "img_link": "bar.png", "symbol_internal_id": 3, "slot_id": slot_id_val}, # Scatter could be 3
+                {"name": "Wild", "value_multiplier": 0, "img_link": "wild.png", "symbol_internal_id": 4, "slot_id": slot_id_val}, # Wild is 4
+                # Add a specific bonus symbol if bonus_symbol_id is set and different
             ]
+            if bonus_symbol_id and bonus_symbol_id not in [s["symbol_internal_id"] for s in symbols_data]:
+                symbols_data.append({"name": "BonusSym", "value_multiplier": 0, "img_link": "bonus.png", "symbol_internal_id": bonus_symbol_id, "slot_id": slot_id_val})
+
 
             for s_data in symbols_data:
-                symbol = SlotSymbol(**s_data)
-                db.session.add(symbol)
+                # Ensure we don't add duplicate internal_ids for the same slot
+                existing_symbol = SlotSymbol.query.filter_by(slot_id=slot_id_val, symbol_internal_id=s_data["symbol_internal_id"]).first()
+                if not existing_symbol:
+                    symbol = SlotSymbol(**s_data)
+                    db.session.add(symbol)
+            db.session.flush() # Flush to ensure symbols are in DB before SlotBets that might reference them implicitly
 
-            # Create default SlotBet entries
+            # Create default SlotBet entries - ensure these are sensible defaults
             slot_bets_data = [
-                {"slot_id": slot_id_val, "bet_amount": 10},
-                {"slot_id": slot_id_val, "bet_amount": 10 * Config.SATOSHI_FACTOR} # Used in test_spin_success
+                {"slot_id": slot_id_val, "bet_amount": 100}, # e.g. 100 satoshis
+                {"slot_id": slot_id_val, "bet_amount": 200}, # e.g. 200 satoshis
+                {"slot_id": slot_id_val, "bet_amount": 500}  # e.g. 500 satoshis
             ]
+            # Add specific bet used in test_spin_success if it's different
+            if (10 * Config.SATOSHI_FACTOR) not in [sbd["bet_amount"] for sbd in slot_bets_data]:
+                 slot_bets_data.append({"slot_id": slot_id_val, "bet_amount": 10 * Config.SATOSHI_FACTOR})
+
+
             for sb_data in slot_bets_data:
-                # Ensure no duplicate bet amounts if this helper is called multiple times for the same slot_id
-                # (though setUp/tearDown should prevent this state across test methods)
                 existing_slot_bet = SlotBet.query.filter_by(slot_id=sb_data["slot_id"], bet_amount=sb_data["bet_amount"]).first()
                 if not existing_slot_bet:
                     slot_bet = SlotBet(**sb_data)
                     db.session.add(slot_bet)
 
             db.session.commit()
-        return slot_id_val # Return the stored ID
+        return slot_id_val
 
     def test_spin_success(self):
         """Test a successful spin."""
-        token, _ = self._login_and_get_token(username_prefix="spinner", password_suffix="spinpassword")
+        token, user_id = self._login_and_get_token(username_prefix="spinner", password_suffix="spinpassword") # Capture user_id
 
         # Get user for balance update
         with self.app.app_context():
-            user = User.query.filter_by(username="spinner").first()
-            self.assertIsNotNone(user)
+            user = User.query.get(user_id) # Use user_id to fetch
+            self.assertIsNotNone(user, "User not found after login_and_get_token in spin_success")
             user.balance = 1000 * Config.SATOSHI_FACTOR # Give user 1000 BTC in satoshis
             db.session.commit()
             # Re-fetch user to ensure it's attached to the current session after commit
-            user = User.query.filter_by(username="spinner").first()
+            user = User.query.get(user_id) # Use user_id
             original_balance = user.balance
 
         # Create a slot machine
@@ -315,10 +340,9 @@ class GameApiTests(BaseTestCase):
 
         with self.app.app_context():
             # Fetch user and slot within the current session context to avoid DetachedInstanceError
-            # User object might have been created/modified in a different session/context from _login_and_get_token
-            user_for_session = User.query.filter_by(username="spinner").first()
+            user_for_session = User.query.get(user_id) # Use user_id
             slot_for_session = Slot.query.get(slot_id)
-            self.assertIsNotNone(user_for_session, "User for session not found")
+            self.assertIsNotNone(user_for_session, "User for session not found (user_for_session)")
             self.assertIsNotNone(slot_for_session, "Slot for session not found")
 
             # original_balance is already set correctly above with the re-fetched user.
@@ -328,7 +352,7 @@ class GameApiTests(BaseTestCase):
             db.session.add(game_session)
             db.session.commit()
 
-        bet_amount_sats = 10 * Config.SATOSHI_FACTOR # Bet 10 BTC in satoshis
+        bet_amount_sats = 100 # Changed to a valid bet amount (e.g., 100 sats)
 
         spin_payload = {"bet_amount": bet_amount_sats}
         response = self.client.post('/api/slots/spin', # Corrected URL
@@ -344,7 +368,7 @@ class GameApiTests(BaseTestCase):
 
         # Verify balance update in DB
         with self.app.app_context():
-            user_after_spin = User.query.filter_by(username="spinner").first() # Re-fetch for current session
+            user_after_spin = User.query.get(user_id) # Use user_id
             win_amount_sats = data['win_amount']
             # Balance should be original - bet + win
             expected_balance = original_balance - bet_amount_sats + win_amount_sats
@@ -352,37 +376,282 @@ class GameApiTests(BaseTestCase):
 
     def test_spin_insufficient_balance(self):
         """Test spin attempt with insufficient balance."""
-        token, _ = self._login_and_get_token(username_prefix="pooruser", password_suffix="poorpassword")
+        token, user_id = self._login_and_get_token(username_prefix="pooruser", password_suffix="poorpassword") # Capture user_id
 
         # Set user balance
         with self.app.app_context():
-            user = User.query.filter_by(username="pooruser").first()
-            self.assertIsNotNone(user)
+            user = User.query.get(user_id) # Use user_id
+            self.assertIsNotNone(user, "User not found after login_and_get_token in spin_insufficient_balance")
             user.balance = 5 # Only 5 satoshis
             db.session.commit()
 
         slot_id = self._create_slot(name="Another Slot", short_name="slot1") # Use an existing config
         with self.app.app_context():
             # Fetch user and slot within the current session context
-            user_for_session = User.query.filter_by(username="pooruser").first()
+            user_for_session = User.query.get(user_id) # Use user_id
             slot_for_session = Slot.query.get(slot_id)
-            self.assertIsNotNone(user_for_session, "User for session not found")
+            self.assertIsNotNone(user_for_session, "User for session not found (user_for_session)")
             self.assertIsNotNone(slot_for_session, "Slot for session not found")
 
             game_session = GameSession(user_id=user_for_session.id, slot_id=slot_for_session.id, game_type="slot", session_start=datetime.now(timezone.utc))
             db.session.add(game_session)
             db.session.commit()
 
-        bet_amount_sats = 10 # Bet 10 satoshis
+        bet_amount_sats = 100 # Changed to a valid bet amount (e.g. 100 sats)
+        # User balance is 5, so this bet (100) should trigger "Insufficient balance"
         spin_payload = {"bet_amount": bet_amount_sats}
         response = self.client.post('/api/slots/spin', # Corrected URL
                                      headers={'Authorization': f'Bearer {token}'},
                                      json=spin_payload)
         data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 400) # Bad Request or 402 Payment Required
+        self.assertEqual(response.status_code, 400)
         self.assertFalse(data['status'])
         self.assertEqual(data['status_message'], 'Insufficient balance')
+
+    @patch('casino_be.utils.spin_handler_new.load_game_config')
+    @patch('casino_be.utils.spin_handler_new.generate_spin_grid')
+    def test_spin_triggers_bonus(self, mock_generate_grid, mock_load_config):
+        """Test that a spin can trigger a bonus feature."""
+        token, user_id = self._login_and_get_token(username_prefix="bonus_trigger_user")
+
+        # 1. Setup Slot with a scatter symbol ID
+        scatter_sym_id = 3 # Must match a symbol_internal_id in _create_slot symbols
+        slot_id = self._create_slot(short_name="bonus_slot", scatter_symbol_id=scatter_sym_id)
+
+        # 2. Configure mock for load_game_config
+        # This config will be returned when handle_spin calls load_game_config
+        mock_game_config_data = {
+            "game": {
+                "name": "Bonus Slot",
+                "short_name": "bonus_slot",
+                "layout": {
+                    "rows": 3,
+                    "columns": 5,
+                    "paylines": [{"id": 0, "coords": [[0,0],[0,1],[0,2]]}] # Minimal payline
+                },
+                "symbols": [ # Ensure these symbols are consistent with _create_slot or add more if needed
+                    {"id": 1, "name": "A", "value_multipliers": {"3": 1}},
+                    {"id": 2, "name": "B", "value_multipliers": {"3": 1}},
+                    {"id": scatter_sym_id, "name": "Scatter", "is_scatter": True}, # Scatter symbol
+                    {"id": 4, "name": "Wild", "is_wild": True}
+                ],
+                "scatter_symbol_id": scatter_sym_id,
+                "wild_symbol_id": 4,
+                "bonus_features": {
+                    "free_spins": {
+                        "trigger_count": 3, # 3 scatters needed
+                        "spins_awarded": 10,
+                        "multiplier": 2.0
+                    }
+                }
+                # Add any other minimal required fields for game_config structure
+            }
+        }
+        # Ensure the mocked config also has a symbols_map, as spin_handler_new.py creates it internally if not present
+        # but tests for spin_handler_new.py showed it's better to have it pre-made.
+        mock_game_config_data['game']['symbols_map'] = {s['id']: s for s in mock_game_config_data['game']['symbols']}
+        mock_load_config.return_value = mock_game_config_data
+
+        # 3. Configure mock for generate_spin_grid to return 3 scatters
+        # Example: [[S, S, S], [X, X, X], [Y, Y, Y]] (assuming 3x3 for simplicity of grid display)
+        # For a 3x5 grid:
+        mock_generate_grid.return_value = [
+            [scatter_sym_id, 1, scatter_sym_id], # Row 0
+            [1, scatter_sym_id, 1],             # Row 1
+            [2, 2, 2]                           # Row 2
+        ] # This grid has 3 scatter symbols (ID `scatter_sym_id`)
+
+        # Give user some balance
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 1000
+            db.session.commit()
+
+        # Join the slot game to create a session
+        join_payload = {"slot_id": slot_id, "game_type": "slot"}
+        join_response = self.client.post('/api/slots/join', headers={'Authorization': f'Bearer {token}'}, json=join_payload)
+        self.assertEqual(join_response.status_code, 201, "Failed to join slot game")
+        join_data = json.loads(join_response.data.decode())
+        game_session_id = join_data['game_session']['id']
+
+
+        # 4. Call /api/slots/spin endpoint
+        bet_amount_sats = 100 # A valid bet amount from _create_slot defaults
+        spin_payload = {"bet_amount": bet_amount_sats}
+        response = self.client.post('/api/slots/spin',
+                                     headers={'Authorization': f'Bearer {token}'},
+                                     json=spin_payload)
+        spin_data = json.loads(response.data.decode())
+
+        # 5. Assertions
+        self.assertEqual(response.status_code, 200, f"Spin API call failed: {spin_data.get('status_message')}")
+        self.assertTrue(spin_data['status'])
+        self.assertTrue(spin_data['bonus_triggered'], "Bonus was not triggered in API response")
+        self.assertTrue(spin_data['bonus_active'], "Bonus is not active in API response")
+        self.assertEqual(spin_data['bonus_spins_remaining'], 10)
+        self.assertEqual(spin_data['bonus_multiplier'], 2.0)
+
+        # Verify GameSession in DB
+        with self.app.app_context():
+            game_session_db = GameSession.query.get(game_session_id)
+            self.assertIsNotNone(game_session_db)
+            self.assertTrue(game_session_db.bonus_active)
+            self.assertEqual(game_session_db.bonus_spins_remaining, 10)
+            self.assertEqual(game_session_db.bonus_multiplier, 2.0)
+
+        mock_load_config.assert_called_once() # Ensure it was called
+        mock_generate_grid.assert_called_once() # Ensure it was called
+
+    @patch('casino_be.utils.spin_handler_new.load_game_config')
+    @patch('casino_be.utils.spin_handler_new.generate_spin_grid')
+    def test_spin_with_active_bonus(self, mock_generate_grid, mock_load_config):
+        """Test a spin when a bonus is already active."""
+        token, user_id = self._login_and_get_token(username_prefix="active_bonus_user")
+
+        # 1. Setup Slot
+        slot_id = self._create_slot(short_name="active_bonus_slot")
+        default_bet_amount = 100 # from _create_slot defaults
+
+        # 2. Mock game config - standard config, no special bonus trigger needed here
+        # It just needs to be a valid config for win calculation.
+        # Using a simplified version of BASE_GAME_CONFIG from test_spin_handler.py
+        standard_game_config = {
+            "game": {
+                "name": "Active Bonus Slot", "short_name": "active_bonus_slot",
+                "layout": {"rows": 3, "columns": 5, "paylines": [{"id": 0, "coords": [[0,0],[0,1],[0,2]]}]},
+                "symbols": [
+                    {"id": 1, "name": "A", "value_multipliers": {"3": 5.0}}, # 3 'A's pay 5x bet_per_line
+                    {"id": 2, "name": "B"}, {"id": 4, "name": "Wild", "is_wild": True}
+                ],
+                "wild_symbol_id": 4,
+                "symbols_map": { # Pre-generate for simplicity
+                    1: {"id": 1, "name": "A", "value_multipliers": {"3": 5.0}},
+                    2: {"id": 2, "name": "B"},
+                    4: {"id": 4, "name": "Wild", "is_wild": True}
+                }
+            }
+        }
+        mock_load_config.return_value = standard_game_config
+
+        # 3. Mock generate_spin_grid to return a winning grid (e.g., three 'A's on the payline)
+        # Grid: [[1, 1, 1, 2, 2], [2, 2, 2, 2, 2], [2, 2, 2, 2, 2]]
+        # Payline: [[0,0],[0,1],[0,2]]
+        # This should result in a win with symbol 1, count 3.
+        # Base win = bet_per_line * 5.0. If bet_amount_sats is 100, and 1 payline, bet_per_line = 100. Win = 500.
+        mock_generate_grid.return_value = [[1, 1, 1, 2, 2]] + [[2]*5]*2 # 3x5 grid
+
+        initial_bonus_spins = 5
+        bonus_multiplier = 2.0
+        initial_user_balance = 10000
+
+        # 4. Setup GameSession with active bonus
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = initial_user_balance
+
+            # End any other active sessions
+            GameSession.query.filter_by(user_id=user_id, session_end=None).update({"session_end": datetime.now(timezone.utc)})
+
+            game_session = GameSession(
+                user_id=user_id, slot_id=slot_id, game_type="slot",
+                session_start=datetime.now(timezone.utc),
+                bonus_active=True,
+                bonus_spins_remaining=initial_bonus_spins,
+                bonus_multiplier=bonus_multiplier
+            )
+            db.session.add(game_session)
+            db.session.commit()
+            game_session_id = game_session.id
+
+        # 5. Call /api/slots/spin
+        # Bet amount in payload is the "line bet" or "total bet" player would have chosen,
+        # but it shouldn't be deducted for a bonus spin.
+        spin_payload = {"bet_amount": default_bet_amount}
+        response = self.client.post('/api/slots/spin',
+                                     headers={'Authorization': f'Bearer {token}'},
+                                     json=spin_payload)
+        spin_data = json.loads(response.data.decode())
+
+        # 6. Assertions
+        self.assertEqual(response.status_code, 200, f"Spin API call failed: {spin_data.get('status_message')}")
+        self.assertTrue(spin_data['status'])
+
+        self.assertTrue(spin_data['bonus_active'], "Bonus should still be active if spins remain")
+        self.assertEqual(spin_data['bonus_spins_remaining'], initial_bonus_spins - 1)
+
+        # Calculate expected win:
+        # mock_load_config has 1 payline. So bet_per_line is default_bet_amount (100).
+        # Symbol 1, count 3, pays 5.0x. So, base_win = 100 * 5.0 = 500.
+        # Multiplied_win = base_win * bonus_multiplier = 500 * 2.0 = 1000.
+        expected_base_win = default_bet_amount * 5.0
+        expected_multiplied_win = int(expected_base_win * bonus_multiplier)
+        self.assertEqual(spin_data['win_amount'], expected_multiplied_win, "Win amount not correctly multiplied by bonus_multiplier")
+
+        # Verify user balance: only win amount added, no bet deducted
+        with self.app.app_context():
+            user_after_spin = User.query.get(user_id)
+            self.assertEqual(user_after_spin.balance, initial_user_balance + expected_multiplied_win)
+
+            game_session_db = GameSession.query.get(game_session_id)
+            self.assertEqual(game_session_db.bonus_spins_remaining, initial_bonus_spins - 1)
+            self.assertTrue(game_session_db.bonus_active) # Assuming spins_remaining > 0
+
+    def test_spin_invalid_bet_config(self):
+        """Test spin with a bet amount not configured in SlotBet for the slot."""
+        token, user_id = self._login_and_get_token(username_prefix="invalid_bet_user")
+
+        # Create a slot. _create_slot adds default bets (e.g., 100, 200, 500).
+        slot_id = self._create_slot(short_name="bet_config_slot")
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 5000 # Sufficient balance
+            db.session.commit()
+
+        # Join the slot game
+        join_payload = {"slot_id": slot_id, "game_type": "slot"}
+        join_response = self.client.post('/api/slots/join', headers={'Authorization': f'Bearer {token}'}, json=join_payload)
+        self.assertEqual(join_response.status_code, 201, "Failed to join slot game")
+
+        # Attempt spin with a bet amount not in the default SlotBet entries
+        invalid_bet_amount = 1000 # Changed to be a multiple of 100 and not a default SlotBet value
+        # Default SlotBet amounts are 100, 200, 500, and 10 * Config.SATOSHI_FACTOR.
+        # 1000 is chosen as it's a multiple of 100 and distinct from these defaults.
+
+        spin_payload = {"bet_amount": invalid_bet_amount}
+        response = self.client.post('/api/slots/spin',
+                                     headers={'Authorization': f'Bearer {token}'},
+                                     json=spin_payload)
+        spin_data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 400, f"Response: {spin_data}")
+        self.assertFalse(spin_data['status'])
+        self.assertIn("Invalid bet amount for this slot", spin_data['status_message'])
+
+    def test_spin_no_active_session(self):
+        """Test spin attempt without an active game session."""
+        token, user_id = self._login_and_get_token(username_prefix="no_session_user")
+
+        # Create a slot (so it exists in general) but don't join it.
+        self._create_slot(short_name="no_session_slot")
+
+        with self.app.app_context():
+            user = User.query.get(user_id)
+            user.balance = 5000 # Give some balance
+            db.session.commit()
+
+        # Attempt spin without joining the game (no active session)
+        bet_amount_sats = 100 # A valid bet amount for default slots
+        spin_payload = {"bet_amount": bet_amount_sats}
+        response = self.client.post('/api/slots/spin',
+                                     headers={'Authorization': f'Bearer {token}'},
+                                     json=spin_payload)
+        spin_data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 404) # As per route logic
+        self.assertFalse(spin_data['status'])
+        self.assertEqual(spin_data['status_message'], 'No active slot game session. Please join a slot game first.')
 
 
 # === Billing API Tests ===
@@ -516,21 +785,21 @@ class BillingApiTests(BaseTestCase):
 
     def test_withdraw_success(self):
         token, user_id = self._login_and_get_token(username_prefix="withdraw_success_user")
-        withdraw_amount = 1000 # Adjusted to meet min withdrawal
+        withdraw_amount = 10000 # Changed to meet min withdrawal of 10000
 
         with self.app.app_context():
             user = User.query.get(user_id)
-            user.balance = 2000 # Ensure sufficient balance for withdrawal
+            user.balance = 20000 # Ensure sufficient balance
             db.session.commit()
             initial_balance = user.balance
 
-        payload = {"amount_sats": withdraw_amount, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted payload
+        payload = {"amount_sats": withdraw_amount, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"}
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
         data = json.loads(response.data.decode())
 
         self.assertEqual(response.status_code, 201, data.get('status_message'))
         self.assertTrue(data['status'])
-        self.assertEqual(data['status_message'], 'Withdrawal request submitted.')
+        self.assertEqual(data['status_message'], 'Withdrawal request submitted for processing.') # Updated expected message
 
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -545,16 +814,16 @@ class BillingApiTests(BaseTestCase):
 
         with self.app.app_context():
             user = User.query.get(user_id)
-            user.balance = 500 # Initial balance, less than 1000 for test
+            user.balance = 5000 # User has 5000
             db.session.commit()
 
-        payload = {"amount_sats": 1000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted payload
+        payload = {"amount_sats": 10000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Try to withdraw 10000
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
         data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 400, data.get('status_message'))
+        self.assertEqual(response.status_code, 400, data.get('status_message')) # Should be 400 for insufficient funds
         self.assertFalse(data['status'])
-        self.assertEqual(data['status_message'], 'Insufficient funds')
+        self.assertEqual(data['status_message'], 'Insufficient funds') # Correct error message
 
     def test_withdraw_fail_active_bonus_wagering_incomplete(self):
         token, user_id = self._login_and_get_token(username_prefix="withdraw_wagering_user")
@@ -579,7 +848,7 @@ class BillingApiTests(BaseTestCase):
             db.session.add(user_bonus)
             db.session.commit()
 
-        payload = {"amount_sats": 1000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Adjusted amount_sats and address
+        payload = {"amount_sats": 10000, "withdraw_wallet_address": "tb1qtestaddressvalidformorethan26chars"} # Changed to valid amount
         response = self.client.post('/api/withdraw', headers={'Authorization': f'Bearer {token}'}, json=payload)
         data = json.loads(response.data.decode())
 
@@ -657,7 +926,7 @@ class PlinkoApiTests(BaseTestCase):
 
 
     def test_plinko_play_insufficient_funds(self):
-        headers, user_id = self._get_auth_headers(username="plinko_poor_user")
+        headers, user_id = self._get_auth_headers(username_prefix="plinko_poor_user") # Changed username to username_prefix
         
         with self.app.app_context():
             user = User.query.get(user_id)
@@ -678,7 +947,7 @@ class PlinkoApiTests(BaseTestCase):
         self.assertAlmostEqual(data['new_balance'], 0.5) # Balance before bet attempt
 
     def test_plinko_play_validation_errors(self):
-        headers, user_id = self._get_auth_headers(username="plinko_validation_user")
+        headers, user_id = self._get_auth_headers(username_prefix="plinko_validation_user") # Changed username to username_prefix
         with self.app.app_context(): # Ensure user has some balance
             user = User.query.get(user_id)
             user.balance = int(10 * self.SATOSHIS_PER_UNIT)

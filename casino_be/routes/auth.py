@@ -10,10 +10,10 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import secrets
 
-from models import db, User, TokenBlacklist
-from schemas import UserSchema, RegisterSchema, LoginSchema
-from utils.bitcoin import generate_bitcoin_wallet
-from utils.security import require_csrf_token, generate_csrf_token
+from ..models import db, User, TokenBlacklist # Relative import
+from ..schemas import UserSchema, RegisterSchema, LoginSchema # Relative import
+from ..utils.bitcoin import generate_bitcoin_wallet # Relative import
+from ..utils.security import require_csrf_token, generate_csrf_token # Relative import
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api')
 
@@ -62,7 +62,7 @@ def register():
             return jsonify({'status': False, 'status_message': 'Failed to generate wallet address for user.'}), 500
         
         # Import encryption utilities
-        from utils.encryption import encrypt_private_key
+        from ..utils.encryption import encrypt_private_key # Relative import
         
         try:
             # Encrypt the private key
