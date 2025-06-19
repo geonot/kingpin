@@ -197,7 +197,10 @@ const startPhaserGame = (slotId) => {
         bootedGame.registry.set('soundEnabled', soundEnabled.value);
         bootedGame.registry.set('turboEnabled', turboEnabled.value);
         bootedGame.registry.set('eventBus', EventBus);
-        console.log('Phaser game booted. Initial data (API, JSON config, settings) set in registry.');
+        // Set initialBet using the first option from game config if available
+        const firstBetOption = slotGameJsonConfigContent.value?.game?.settings?.betOptions?.[0];
+        bootedGame.registry.set('initialBet', firstBetOption || 10); // Default to 10 if not found
+        console.log('Phaser game booted. Initial data (API, JSON config, settings, initialBet) set in registry.');
         isLoading.value = false;
       }
     }
@@ -286,7 +289,29 @@ onMounted(async () => {
   EventBus.$on('phaserError', handlePhaserError);
   EventBus.$on('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
   EventBus.$on('spinRequest', handlePhaserSpinCommand); // Changed from 'spinCommand' to 'spinRequest'
+  EventBus.$on('bonusWinningsCalculated', handleBonusWinningsCalculated);
 });
+
+const handleBonusWinningsCalculated = (data) => {
+    console.log("Vue: bonusWinningsCalculated received", data);
+    if (data.totalWin > 0) {
+        // Assuming 'updateUserBalance' action exists and updates the balance in Vuex store
+        // and that the balance in the store is reactive.
+        // This is a placeholder for actual balance update logic.
+        // You might need to fetch the new balance or have the backend push it.
+        const currentBalance = store.state.user.balance; // Get current balance
+        const newBalance = currentBalance + data.totalWin; // This is simplified; backend should confirm new balance.
+                                                        // For now, we simulate it.
+        store.commit('updateUserBalance', newBalance); // Update store (assuming mutation exists)
+
+        // Inform UI about the update, especially the win amount from the bonus
+        EventBus.$emit('uiUpdate', {
+            balance: newBalance,
+            winAmount: data.totalWin,
+            isTotalWin: true // Indicate this is a final total win from a feature
+        });
+    }
+};
 
 const handlePhaserSpinCommand = async (payload) => {
     if (isSpinning.value) {
@@ -452,6 +477,7 @@ onBeforeUnmount(async () => {
   EventBus.$off('phaserError', handlePhaserError);
   EventBus.$off('requestBalanceUpdate', handlePhaserRequestBalanceUpdate);
   EventBus.$off('spinRequest', handlePhaserSpinCommand); // Changed from 'spinCommand' to 'spinRequest'
+  EventBus.$off('bonusWinningsCalculated', handleBonusWinningsCalculated);
 
   currentMultiplierDisplay.value = 1; // Reset multiplier on unmount
 

@@ -29,8 +29,8 @@ export default createStore({
     isAuthenticated: false,
   },
   mutations: {
-    setGlobalError(state, errorMessage) {
-      state.globalError = errorMessage;
+    setGlobalError(state, errorPayload) { // Can be string or object
+      state.globalError = errorPayload;
     },
     clearGlobalError(state) {
       state.globalError = null;
@@ -167,10 +167,11 @@ export default createStore({
         }
         return data;
       } catch (error) {
-        // The interceptor in api.js will handle generic network errors or 401s.
-        // Specific error handling for registration (e.g., email already exists) can remain here.
-        console.error("Registration Error:", error.response?.data || error.message);
-        return error.response?.data || { status: false, status_message: "Network error during registration." };
+        commit('setGlobalError', error); // Error object from interceptor
+        console.error("Registration Error:", error);
+        // Return the error structure so UI can potentially use it if needed
+        // Or rely solely on globalError for display. For now, rethrow.
+        throw error;
       }
     },
     
@@ -187,12 +188,11 @@ export default createStore({
         }
         return data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Login failed. Please try again later.";
-        if (error.response && error.response.status !== 401) {
-          commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return errData || { status: false, status_message: defaultMessage };
+        // Interceptor handles 401 (UNAUTHENTICATED) for refresh.
+        // Other errors (like invalid credentials if not 401, or network errors) will be caught here.
+        commit('setGlobalError', error);
+        console.error("Login Error:", error);
+        throw error;
       } finally {
         commit('stopGlobalLoading');
       }
@@ -208,14 +208,18 @@ export default createStore({
           }
           return { status: true };
         } else {
+          // This path might be less likely if interceptor handles failed refresh by logging out
           commit('clearAuth');
+          commit('setGlobalError', { message: data.status_message || "Session refresh failed." });
           return { status: false, status_message: data.status_message || "Session refresh failed." };
         }
       } catch (error) {
-        // Logout will be dispatched by the interceptor in api.js
-        console.error("Token Refresh Action Error:", error.response?.data || error.message);
+        // Interceptor should handle logout on refresh failure.
+        // This catch is for unexpected errors during the refresh call itself.
         commit('clearAuth');
-        return { status: false, status_message: "Session expired. Please log in again." };
+        commit('setGlobalError', error);
+        console.error("Token Refresh Action Error:", error);
+        throw error; // Rethrow to propagate
       }
     },
     
@@ -223,25 +227,24 @@ export default createStore({
       try {
         await apiService.logout();
       } catch (error) {
-        console.error("Logout error:", error);
+        // Even if logout API call fails, clear client-side auth
+        console.error("Logout API error:", error);
+        commit('setGlobalError', error); // Show potential error from API
       } finally {
         commit('clearAuth');
       }
     },
     
     async loadSession({ dispatch, commit }) {
-      // For HTTP-only cookies, we don't check localStorage
-      // Instead, try to fetch user profile which will validate cookies
       commit('startGlobalLoading');
       try {
-        // fetchUserProfile will use the new apiService which has interceptors.
-        // If token is expired, interceptor should try to refresh.
-        // If refresh fails, interceptor should logout.
         await dispatch('fetchUserProfile');
       } catch (error) {
-        // If fetchUserProfile itself fails (e.g. network error not caught by interceptor)
-        // this catch might not be strictly necessary if interceptor handles all logout cases.
-        console.error("Load session error:", error);
+        // fetchUserProfile will commit its own errors if any.
+        // The interceptor in api.js handles refresh/logout for UNAUTHENTICATED.
+        // This catch is for other errors from fetchUserProfile if not already handled.
+        console.error("Load session error (possibly already handled):", error);
+        // No specific commit('setGlobalError', error) here as fetchUserProfile should do it.
       } finally {
         commit('stopGlobalLoading');
       }
@@ -254,22 +257,27 @@ export default createStore({
           commit('setUser', data.user);
           return data;
         } else {
-          commit('clearAuth');
+          // This case might indicate a soft error from backend (status: false but not an HTTP error status)
+          commit('clearAuth'); // Should be handled by interceptor if it was 401
+          commit('setGlobalError', { message: data.status_message || "Failed to fetch user profile." });
           return { status: false, status_message: data.status_message || "Failed to fetch user profile." };
         }
       } catch (error) {
-        const errData = error.response?.data;
-        if (error.response?.status === 401) {
-          commit('clearAuth');
-        }
-        console.error("Error fetching user profile:", errData || error.message);
-        return errData || { status: false, status_message: "Failed to load user profile." };
+        // Interceptor handles 401/UNAUTHENTICATED.
+        // This catch is for other errors (network, non-401 structured errors).
+        commit('setGlobalError', error);
+        // clearAuth is typically done by the interceptor for UNAUTHENTICATED.
+        // If error is NOT UNAUTHENTICATED, we might not want to clearAuth.
+        // Example: if it's a 500 error, user is still technically logged in.
+        // The interceptor's logout for UNAUTHENTICATED is the primary auth clearing mechanism.
+        console.error("Error fetching user profile:", error);
+        throw error; // Rethrow
       }
     },
     
     async setAuthTokensAndFetchUser({ commit, dispatch }, tokens) {
-      // For HTTP-only cookies, we don't need to handle tokens manually
-      // Just fetch user profile to validate cookies
+      // For HTTP-only cookies, this action might be less relevant for setting tokens,
+      // but fetching user profile is still key.
       return await dispatch('fetchUserProfile');
     },
     
@@ -281,33 +289,30 @@ export default createStore({
           return response.data.csrf_token;
         }
       } catch (error) {
+        commit('setGlobalError', error);
         console.error("Error getting CSRF token:", error);
+        throw error; // Rethrow
       }
-      return null;
+      return null; // Should not be reached if error is thrown
     },
 
     // --- Game Data ---
-    // Placeholder for other actions that need to be refactored
-    // Example:
     async fetchSlots({ commit }) {
       try {
-        // const response = await apiClient.get('/slots'); // OLD
-        const response = await apiService.getSlots(); // NEW - assuming getSlots method in apiService
+        const response = await apiService.getSlots();
         if (response.data.status && Array.isArray(response.data.slots)) {
           commit('setSlots', response.data.slots);
           return response.data;
         } else {
+          // Soft error from backend
           const errorMessage = response.data.status_message || 'Failed to parse slots data.';
-          commit('setGlobalError', errorMessage);
+          commit('setGlobalError', { message: errorMessage, errorCode: response.data.error_code });
           return { status: false, status_message: errorMessage };
         }
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Failed to load slot machines. Please try again.";
-        if (error.response && error.response.status !== 401) { // Check error.response exists
-          commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return { status: false, status_message: errData?.status_message || defaultMessage };
+        commit('setGlobalError', error);
+        console.error("Fetch slots error:", error);
+        throw error;
       }
     },
     async fetchSlotConfig({ commit, state, dispatch }, slotId) {
@@ -327,22 +332,19 @@ export default createStore({
     },
     async fetchTables({ commit }) {
       try {
-        // const response = await apiClient.get('/tables'); // OLD
-        const response = await apiService.getTables(); // NEW - assuming getTables method in apiService
+        const response = await apiService.getTables();
         if (response.data.status && Array.isArray(response.data.tables)) {
           commit('setTables', response.data.tables);
           return response.data;
         } else {
            const errorMessage = response.data.status_message || 'Failed to parse tables data.';
+           commit('setGlobalError', { message: errorMessage, errorCode: response.data.error_code });
            return { status: false, status_message: errorMessage };
         }
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Failed to load tables. Please try again.";
-        if (error.response && error.response.status !== 401) { // Check error.response exists
-           // commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return { status: false, status_message: errData?.status_message || defaultMessage };
+        commit('setGlobalError', error);
+        console.error("Fetch tables error:", error);
+        throw error;
       }
     },
     async fetchTableConfig({ commit, state, dispatch }, tableId) {
@@ -364,52 +366,49 @@ export default createStore({
     // --- Gameplay Actions ---
     async endSession({commit}) {
       try {
-        // const response = await apiClient.post('/end_session', {}); // OLD
-        const response = await apiService.endSession({}); // NEW - assuming endSession method in apiService
+        const response = await apiService.endSession({});
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error ending game session.";
-        if (error.response && error.response.status !== 401) { // Check error.response exists
-            commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return errData || { status: false, status_message: defaultMessage };
+        commit('setGlobalError', error);
+        console.error("End session error:", error);
+        throw error;
       }
     },
     async joinGame({ commit }, payload) {
       try {
         payload.game_type = payload.game_type || (payload.slot_id ? 'slot' : (payload.table_id ? 'blackjack' : 'unknown'));
-        // const response = await apiClient.post('/join', payload); // OLD
-        const response = await apiService.joinGame(payload); // NEW - assuming joinGame method in apiService
+        const response = await apiService.joinGame(payload);
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error joining game.";
-        if (error.response && error.response.status !== 401) { // Check error.response exists
-            commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return errData || { status: false, status_message: defaultMessage };
+        commit('setGlobalError', error);
+        console.error("Join game error:", error);
+        throw error;
       }
     },
     async spin({ commit }, payload) {
       try {
         const betAmount = parseInt(payload.bet_amount, 10);
         if (isNaN(betAmount) || betAmount <= 0) {
-            return { status: false, status_message: "Invalid bet amount."};
+            // This is client-side validation, handle it before API call
+            const clientError = { isStructuredError: false, message: "Invalid bet amount."};
+            commit('setGlobalError', clientError);
+            throw clientError; // Or return structure expected by UI
         }
-        // const response = await apiClient.post('/spin', { bet_amount: betAmount }); // OLD
-        const response = await apiService.spin({ bet_amount: betAmount }); // NEW - assuming spin method in apiService
+        const response = await apiService.spin({ bet_amount: betAmount });
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error during spin.";
-         if (error.response && error.response.status !== 400 && error.response.status !== 401 ) { // Check error.response
-            commit('setGlobalError', errData?.status_message || defaultMessage);
+        // If error is from client-side validation above, it will be caught here too.
+        // Ensure it's not double-committed or override if necessary.
+        if (!error.isStructuredError && error.message === "Invalid bet amount.") {
+            // Already handled by client-side validation, re-throw if necessary
+        } else {
+            commit('setGlobalError', error);
         }
-        return errData || { status: false, status_message: defaultMessage };
+        console.error("Spin error:", error);
+        throw error;
       }
     },
     async joinBlackjack({ commit }, payload) {
@@ -417,41 +416,41 @@ export default createStore({
         const betAmount = parseInt(payload.bet_amount, 10);
         const tableId = parseInt(payload.table_id, 10);
         if (isNaN(betAmount) || betAmount <= 0) {
-            return { status: false, status_message: "Invalid bet amount."};
+            const clientError = { isStructuredError: false, message: "Invalid bet amount."};
+            commit('setGlobalError', clientError);
+            throw clientError;
         }
         if (isNaN(tableId) || tableId <= 0) {
-            return { status: false, status_message: "Invalid table ID."};
+            const clientError = { isStructuredError: false, message: "Invalid table ID."};
+            commit('setGlobalError', clientError);
+            throw clientError;
         }
-        // const response = await apiClient.post('/join_blackjack', { table_id: tableId, bet_amount: betAmount }); // OLD
-        const response = await apiService.joinBlackjack({ table_id: tableId, bet_amount: betAmount }); // NEW
+        const response = await apiService.joinBlackjack({ table_id: tableId, bet_amount: betAmount });
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error joining blackjack.";
-        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
-            commit('setGlobalError', errData?.status_message || defaultMessage);
+        if (!error.isStructuredError && (error.message === "Invalid bet amount." || error.message === "Invalid table ID.")) {
+            // Client-side validation already handled
+        } else {
+            commit('setGlobalError', error);
         }
-        return errData || { status: false, status_message: defaultMessage };
+        console.error("Join blackjack error:", error);
+        throw error;
       }
     },
     async blackjackAction({ commit }, payload) {
       try {
-        // const response = await apiClient.post('/blackjack_action', payload); // OLD
-        const response = await apiService.blackjackAction(payload); // NEW
+        const response = await apiService.blackjackAction(payload);
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error during blackjack action.";
-        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
-            commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return errData || { status: false, status_message: defaultMessage };
+        commit('setGlobalError', error);
+        console.error("Blackjack action error:", error);
+        throw error;
       }
     },
 
@@ -460,90 +459,87 @@ export default createStore({
       try {
         const amountSats = parseInt(payload.amount_sats || payload.amount, 10);
         if (isNaN(amountSats) || amountSats <= 0) {
-            return { status: false, status_message: "Invalid withdrawal amount."};
+            const clientError = { isStructuredError: false, message: "Invalid withdrawal amount."};
+            commit('setGlobalError', clientError);
+            throw clientError;
         }
-        // const response = await apiClient.post('/withdraw', { // OLD
-        //     amount_sats: amountSats,
-        //     withdraw_wallet_address: payload.withdraw_wallet_address
-        // });
-        const response = await apiService.withdraw({ // NEW
-            amount_sats: amountSats,
-            withdraw_wallet_address: payload.withdraw_wallet_address
+        const response = await apiService.withdraw({
+            amount: amountSats, // Ensure consistent naming with API expectations
+            address: payload.withdraw_wallet_address // Ensure consistent naming
         });
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error during withdrawal.";
-        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
-            commit('setGlobalError', errData?.status_message || defaultMessage);
+         if (!error.isStructuredError && error.message === "Invalid withdrawal amount.") {
+            // Client-side validation
+        } else {
+            commit('setGlobalError', error);
         }
-        return errData || { status: false, status_message: defaultMessage };
+        console.error("Withdraw error:", error);
+        throw error;
       }
     },
     async updateSettings({ commit }, payload) {
       try {
-        // const response = await apiClient.post('/settings', payload); // OLD
-        const response = await apiService.updateSettings(payload); // NEW
+        const response = await apiService.updateSettings(payload);
         if (response.data.status && response.data.user) {
           commit('setUser', response.data.user);
         }
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error updating settings.";
-        if (error.response && error.response.status !== 400 && error.response.status !== 401 && error.response.status !== 409) { // Check error.response
-            commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return errData || { status: false, status_message: defaultMessage };
+        commit('setGlobalError', error);
+        console.error("Update settings error:", error);
+        throw error;
       }
     },
-    async applyBonusCode({ commit }, payload) {
+    // Assuming applyBonusCode is a distinct endpoint, if it's part of deposit, it needs adjustment.
+    // For now, treating as if apiService.applyBonusCode exists.
+    // If it's part of deposit, the deposit action should be refactored.
+    async deposit({ commit }, payload) { // Renamed from applyBonusCode to deposit for clarity
       try {
-        // const response = await apiClient.post('/deposit', payload); // OLD
-        const response = await apiService.applyBonusCode(payload); // NEW
+        const response = await apiService.deposit(payload); // Assumes apiService.deposit exists
         if (response.data.status && response.data.user) {
           commit('updateUserBalance', response.data.user.balance);
         }
+        // If deposit returns bonus info, handle it here or ensure response.data is sufficient
         return response.data;
       } catch (error) {
-        const errData = error.response?.data;
-        const defaultMessage = "Network error applying bonus code.";
-        if (error.response && error.response.status !== 400 && error.response.status !== 401) { // Check error.response
-            commit('setGlobalError', errData?.status_message || defaultMessage);
-        }
-        return errData || { status: false, status_message: defaultMessage };
+        commit('setGlobalError', error);
+        console.error("Deposit error:", error);
+        throw error;
       }
     },
     async fetchAdminDashboardData({ commit }) {
       commit('setAdminDataLoading');
       try {
-        // const response = await apiClient.get('/admin/dashboard'); // OLD
-        const response = await apiService.fetchAdminDashboardData(); // NEW
+        const response = await apiService.fetchAdminDashboardData();
         if (response.data.status && response.data.dashboard_data) {
           commit('setAdminDashboardData', response.data.dashboard_data);
           return response.data.dashboard_data;
         } else {
           const errorMsg = response.data.status_message || 'Failed to fetch admin dashboard data.';
-          commit('setAdminDashboardError', errorMsg);
+          // Create a structured-like error for consistency if backend returns soft error
+          const customError = { isStructuredError: true, message: errorMsg, errorCode: response.data.error_code || 'ADMIN_DATA_ERROR' };
+          commit('setAdminDashboardError', customError.message); // old mutation expects string
+          commit('setGlobalError', customError); // new global error can take object
           return null;
         }
       } catch (error) {
-        const errorMsg = error.response?.data?.status_message || error.message || 'Network error fetching admin dashboard data.';
-        commit('setAdminDashboardError', errorMsg);
-        return null;
+        commit('setGlobalError', error); // Handles structured errors from interceptor
+        commit('setAdminDashboardError', error.message || 'Network error'); // old mutation
+        console.error("Fetch admin dashboard error:", error);
+        return null; // Or throw error
       }
     },
     async fetchAdminUsers({ commit, state }, page = 1) {
       commit('setAdminUsersLoading', true);
       try {
-        // const response = await apiClient.get(`/admin/users?page=${page}&per_page=${state.adminUsersPerPage}`); // OLD
-        const response = await apiService.fetchAdminUsers(page, state.adminUsersPerPage); // NEW
-        if (response.data.status && response.data.users && response.data.users.items) { // Ensure this matches apiService response
+        const response = await apiService.fetchAdminUsers(page, state.adminUsersPerPage);
+        if (response.data.status && response.data.users && response.data.users.items) {
           commit('setAdminUsersData', {
-            users: response.data.users.items, // Or response.data.items if structure changed
+            users: response.data.users.items,
             page: response.data.users.page,
             pages: response.data.users.pages,
             per_page: response.data.users.per_page,
@@ -552,13 +548,16 @@ export default createStore({
           return response.data.users;
         } else {
           const errorMsg = response.data.status_message || 'Failed to fetch admin users list.';
-          commit('setAdminUsersError', errorMsg);
+          const customError = { isStructuredError: true, message: errorMsg, errorCode: response.data.error_code || 'ADMIN_USERS_ERROR' };
+          commit('setAdminUsersError', customError.message); // old mutation
+          commit('setGlobalError', customError);
           return null;
         }
       } catch (error) {
-        const errorMsg = error.response?.data?.status_message || error.message || 'Network error fetching admin users.';
-        commit('setAdminUsersError', errorMsg);
-        return null;
+        commit('setGlobalError', error);
+        commit('setAdminUsersError', error.message || 'Network error'); // old mutation
+        console.error("Fetch admin users error:", error);
+        return null; // Or throw error
       }
     }
   },

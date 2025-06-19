@@ -18,8 +18,10 @@ from flask_jwt_extended import (
 )
 from flask_jwt_extended.exceptions import NoAuthorizationError # For JWT specific errors
 from sqlalchemy.exc import SQLAlchemyError # For database errors
-from werkzeug.exceptions import HTTPException # For generic HTTP errors
+from werkzeug.exceptions import HTTPException as WerkzeugHTTPException # Renamed to avoid conflict
 from flask_talisman import Talisman
+from casino_be.exceptions import AppException, ValidationException, AuthenticationException, AuthorizationException, NotFoundException, InsufficientFundsException, GameLogicException, InternalServerErrorException
+from casino_be.error_codes import ErrorCodes
 from datetime import datetime, timedelta, timezone
 import logging
 from pythonjsonlogger import jsonlogger
@@ -246,29 +248,58 @@ def create_app(config_class=Config):
     register_jwt_handlers(jwt)
 
     # --- Specific Error Handlers ---
+    # Note: Some of these handlers might be superseded or modified by the global error handler,
+    # but they can be kept for specific logging or if they handle non-AppException cases
+    # that need special formatting before falling through to the global handler.
+
     @app.errorhandler(ValidationError)
     def handle_validation_error(e):
-        current_app.logger.warning(f"Validation error: {e.messages}")
+        # This handler is for Marshmallow's ValidationError specifically.
+        # We can wrap this in our custom ValidationException for consistent response format.
+        request_id = g.get('request_id', 'N/A')
+        current_app.logger.warning(
+            f"Request ID: {request_id} - Validation error: {e.messages} - Error Code: {ErrorCodes.VALIDATION_ERROR}"
+        )
         return jsonify({
+            'request_id': request_id,
             'status': False,
+            'error_code': ErrorCodes.VALIDATION_ERROR,
             'status_message': 'Input validation failed.',
-            'errors': e.messages
+            'details': {'errors': e.messages},
+            'action_button': None
         }), HTTPStatus.UNPROCESSABLE_ENTITY
 
     @app.errorhandler(SQLAlchemyError)
     def handle_database_error(e):
-        current_app.logger.error("Database error:", exc_info=True)
+        # This is a generic database error. We'll map it to our InternalServerErrorException.
+        request_id = g.get('request_id', 'N/A')
+        current_app.logger.error(
+            f"Request ID: {request_id} - Database error. Error Code: {ErrorCodes.INTERNAL_SERVER_ERROR}",
+            exc_info=True
+        )
         return jsonify({
+            'request_id': request_id,
             'status': False,
-            'status_message': 'A database error occurred. Please try again later.'
+            'error_code': ErrorCodes.INTERNAL_SERVER_ERROR,
+            'status_message': 'A database error occurred. Please try again later.',
+            'details': {},
+            'action_button': None
         }), HTTPStatus.INTERNAL_SERVER_ERROR
 
     @app.errorhandler(NoAuthorizationError)
     def handle_no_auth_error(e):
-        current_app.logger.warning(f"Authorization error: {str(e)}")
+        # This is for JWT specific "NoAuthorizationError". Map to our AuthenticationException.
+        request_id = g.get('request_id', 'N/A')
+        current_app.logger.warning(
+            f"Request ID: {request_id} - JWT NoAuthorizationError: {str(e)} - Error Code: {ErrorCodes.UNAUTHENTICATED}"
+        )
         return jsonify({
+            'request_id': request_id,
             'status': False,
-            'status_message': 'Missing or invalid authorization token.'
+            'error_code': ErrorCodes.UNAUTHENTICATED,
+            'status_message': 'Missing or invalid authorization token.',
+            'details': {'original_error': str(e)},
+            'action_button': None
         }), HTTPStatus.UNAUTHORIZED
 
     @jwt.token_in_blocklist_loader
@@ -288,49 +319,101 @@ def create_app(config_class=Config):
             # Fail secure - if we can't check the blacklist, assume token is valid but log the error
             return False
 
-    @app.errorhandler(HTTPException)
-    def handle_http_exception(e):
-        current_app.logger.warning(f"HTTP exception: {e.code} - {e.name}: {e.description}")
+    # This specific handler for WerkzeugHTTPException might be adjusted or removed
+    # depending on how the global Exception handler is structured.
+    # For now, let's keep it to show how it would integrate.
+    @app.errorhandler(WerkzeugHTTPException)
+    def handle_werkzeug_http_exception(e):
+        request_id = g.get('request_id', 'N/A')
+        # Determine appropriate error code based on HTTP status
+        error_code = ErrorCodes.GENERIC_ERROR # Default
+        if e.code == 404:
+            error_code = ErrorCodes.NOT_FOUND
+        elif e.code == 405:
+            error_code = ErrorCodes.METHOD_NOT_ALLOWED
+        elif e.code == 401: # Should ideally be caught by NoAuthorizationError or an AppException
+            error_code = ErrorCodes.UNAUTHENTICATED
+        elif e.code == 403: # Should ideally be caught by an AppException
+            error_code = ErrorCodes.FORBIDDEN
+        elif e.code >= 500:
+            error_code = ErrorCodes.INTERNAL_SERVER_ERROR
+
+        current_app.logger.warning(
+            f"Request ID: {request_id} - Werkzeug HTTPException: {e.code} - {e.name}: {e.description} - Error Code: {error_code}"
+        )
+        response_data = {
+            'request_id': request_id,
+            'status': False,
+            'error_code': error_code,
+            'status_message': e.name,
+            'details': {'description': e.description},
+            'action_button': None
+        }
         # Ensure response is JSON, using Flask's built-in way to get response from HTTPException
         response = e.get_response()
-        # Override content type and set JSON body
-        response.data = jsonify({
-            'status': False,
-            'status_message': e.name,
-            'description': e.description
-        }).data # .data gets the byte string from jsonify's Response object
+        response.data = jsonify(response_data).data
         response.content_type = "application/json"
         return response
 
-    # --- Global Error Handlers (catch-alls) ---
-    @app.errorhandler(404) # Equivalent to werkzeug.exceptions.NotFound
-    def handle_not_found(e):
-        # This will be caught by handle_http_exception if not defined separately,
-        # but having it separate allows for specific 404 logging or custom page if needed.
-        # For JSON API, ensuring it goes through handle_http_exception for consistent format is good.
-        # However, Flask prioritizes more specific handlers.
-        # If handle_http_exception is defined, it will catch NotFound unless this specific one is here.
-        current_app.logger.warning(f"404 Not Found: {request.url}") # Request ID will be added by the filter
-        return jsonify({
-            'status': False,
-            'status_message': 'The requested resource was not found.'
-        }), 404
-
+    # --- Global Error Handler (catch-all for general exceptions) ---
     @app.errorhandler(Exception)
-    def handle_unhandled_exception(e):
-        # If it's an HTTPException, it should have been caught by handle_http_exception
-        # or a more specific one like handle_not_found.
-        # This check ensures that if an HTTPException (that isn't a standard one like 404, 500 if they have own handlers)
-        # somehow reaches here, it gets processed by our JSON-formatting HTTPException handler.
-        if isinstance(e, HTTPException):
-            return handle_http_exception(e) # Ensure JSON response for all HTTP errors
+    def handle_global_exception(e):
+        request_id = g.get('request_id', 'N/A')
 
-        # For truly unhandled exceptions (not HTTPExceptions)
-        current_app.logger.error("Unhandled exception caught by global error handler:", exc_info=True) # Request ID will be added by the filter
+        if isinstance(e, AppException):
+            current_app.logger.error(
+                f"Request ID: {request_id} - AppException: {e.error_code} - {e.status_message} - Details: {e.details}",
+                exc_info=True if e.status_code >= 500 else False # Log stack trace for server errors
+            )
+            return jsonify({
+                'request_id': request_id,
+                'status': False,
+                'error_code': e.error_code,
+                'status_message': e.status_message,
+                'details': e.details,
+                'action_button': e.action_button
+            }), e.status_code
+
+        if isinstance(e, WerkzeugHTTPException):
+            # This will reuse the logic from handle_werkzeug_http_exception
+            # to ensure consistent formatting for Werkzeug's own HTTP exceptions.
+            return handle_werkzeug_http_exception(e)
+
+        # For other unhandled exceptions (not AppException, not WerkzeugHTTPException)
+        current_app.logger.critical(
+            f"Request ID: {request_id} - Unhandled Critical Exception. Error Code: {ErrorCodes.INTERNAL_SERVER_ERROR}",
+            exc_info=True
+        )
         return jsonify({
+            'request_id': request_id,
             'status': False,
-            'status_message': 'An unexpected internal server error occurred. Please try again later.'
+            'error_code': ErrorCodes.INTERNAL_SERVER_ERROR,
+            'status_message': 'An unexpected internal server error occurred. Please try again later.',
+            'details': {}, # No specific details to expose for unknown errors
+            'action_button': None
         }), HTTPStatus.INTERNAL_SERVER_ERROR
+
+    # Specific handler for 404, to ensure it uses NotFoundException or a consistent format.
+    # This should be registered before the generic Exception handler.
+    # Flask tries handlers from most specific to least specific.
+    # So, @app.errorhandler(404) or @app.errorhandler(NotFound) is more specific than @app.errorhandler(Exception).
+    @app.errorhandler(404) # Catches werkzeug.exceptions.NotFound
+    def handle_flask_not_found(e):
+        # This handler ensures that Flask's default 404s (which are WerkzeugHTTPException)
+        # are also formatted consistently with our error structure, using the NOT_FOUND error code.
+        request_id = g.get('request_id', 'N/A')
+        current_app.logger.warning(
+            f"Request ID: {request_id} - HTTP 404 Not Found: {request.url} - Error Code: {ErrorCodes.NOT_FOUND}"
+        )
+        return jsonify({
+            'request_id': request_id,
+            'status': False,
+            'error_code': ErrorCodes.NOT_FOUND,
+            'status_message': 'The requested resource was not found.',
+            'details': {'path': request.path},
+            'action_button': None
+        }), HTTPStatus.NOT_FOUND
+
 
     # --- Response Security Headers ---
     @app.after_request

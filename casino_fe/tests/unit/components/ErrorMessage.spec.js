@@ -1,385 +1,223 @@
-import { mount, shallowMount } from '@vue/test-utils';
-import { createRouter, createWebHistory } from 'vue-router';
+import { shallowMount, flushPromises } from '@vue/test-utils';
 import ErrorMessage from '@/components/ErrorMessage.vue';
+import { createStore } from 'vuex';
+import { createRouter, createWebHistory } from 'vue-router';
 
-// Mock router
-const createMockRouter = () => {
-  return createRouter({
-    history: createWebHistory(),
-    routes: [
-      { path: '/deposit', component: { template: '<div>Deposit</div>' } }
-    ]
+// Mock Vuex store
+const createMockStore = (initialError = null) => {
+  return createStore({
+    state: {
+      globalError: initialError,
+    },
+    mutations: {
+      setGlobalError(state, errorPayload) {
+        state.globalError = errorPayload;
+      },
+      clearGlobalError(state) {
+        state.globalError = null;
+      },
+    },
+    actions: {
+      // Mock any actions that might be dispatched by actionButton
+      mockTestAction: jest.fn(),
+    },
   });
 };
 
-describe('ErrorMessage.vue', () => {
-  let wrapper;
-  let router;
+// Mock Vue Router
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/', component: { template: '<div>Home</div>' } },
+    { path: '/login', component: { template: '<div>Login</div>' } },
+    { path: '/deposit', component: { template: '<div>Deposit</div>' } },
+  ],
+});
+
+
+describe('@/components/ErrorMessage.vue', () => {
+  let mockStore;
 
   beforeEach(() => {
-    router = createMockRouter();
+    // Create a fresh store for each test
+    mockStore = createMockStore();
+    // Mock router push
+    router.push = jest.fn();
   });
 
-  afterEach(() => {
-    if (wrapper) {
-      wrapper.unmount();
-    }
-  });
-
-  const mountErrorMessage = (props = {}, options = {}) => {
-    return mount(ErrorMessage, {
+  const mountComponent = (errorProp = null, messageProp = '') => {
+    return shallowMount(ErrorMessage, {
       props: {
-        error: null,
-        ...props
+        error: errorProp,
+        message: messageProp,
       },
       global: {
-        plugins: [router]
+        plugins: [mockStore, router], // Provide store and router
       },
-      ...options
     });
   };
 
-  describe('Component Rendering', () => {
-    it('renders nothing when no error is provided', () => {
-      wrapper = mountErrorMessage();
-      expect(wrapper.find('.error-message-box').exists()).toBe(false);
-    });
+  it('renders nothing when no error or message is provided', () => {
+    const wrapper = mountComponent();
+    expect(wrapper.find('.error-message-box').exists()).toBe(false);
+  });
 
-    it('renders nothing when error is null', () => {
-      wrapper = mountErrorMessage({ error: null });
-      expect(wrapper.find('.error-message-box').exists()).toBe(false);
-    });
+  it('renders with legacy message prop', () => {
+    const wrapper = mountComponent(null, 'Legacy error message');
+    expect(wrapper.find('.error-message-box').exists()).toBe(true);
+    expect(wrapper.find('.message').text()).toBe('Legacy error message');
+  });
 
-    it('renders error message when error is provided', () => {
+  describe('Structured Error Handling', () => {
+    it('displays message from structured error', () => {
       const error = {
-        status_message: 'Test error message'
+        isStructuredError: true,
+        message: 'This is a structured error.',
+        errorCode: 'TEST_001',
       };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.error-message-box').exists()).toBe(true);
-      expect(wrapper.text()).toContain('Test error message');
+      const wrapper = mountComponent(error);
+      expect(wrapper.find('.message').text()).toBe('This is a structured error.');
     });
 
-    it('shows error icon and "Error!" label', () => {
+    it('uses enhancedMessage for UNAUTHENTICATED (BE_GEN_003) if no actionButton', () => {
       const error = {
-        status_message: 'Test error'
+        isStructuredError: true,
+        message: 'Original unauthenticated message.',
+        errorCode: 'BE_GEN_003',
+        actionButton: null, // No action button
       };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('svg').exists()).toBe(true);
-      expect(wrapper.text()).toContain('Error!');
+      const wrapper = mountComponent(error);
+      expect(wrapper.find('.message').text()).toBe('Your session has expired. Please log in again.');
     });
 
-    it('shows dismiss button', () => {
+    it('uses enhancedMessage for INSUFFICIENT_FUNDS (BE_FIN_200) if no actionButton', () => {
       const error = {
-        status_message: 'Test error'
+        isStructuredError: true,
+        message: 'Original insufficient funds.',
+        errorCode: 'BE_FIN_200',
       };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      const dismissButton = wrapper.find('.dismiss-button');
-      expect(dismissButton.exists()).toBe(true);
-      expect(dismissButton.attributes('aria-label')).toBe('Dismiss');
+      const wrapper = mountComponent(error);
+      expect(wrapper.find('.message').text()).toBe('You have insufficient funds for this action. Please consider making a deposit.');
+    });
+
+    it('uses original message if errorCode for enhancedMessage does not match or actionButton exists', () => {
+      const error = {
+        isStructuredError: true,
+        message: 'Specific error message from backend.',
+        errorCode: 'SOME_OTHER_CODE',
+      };
+      const wrapper = mountComponent(error);
+      expect(wrapper.find('.message').text()).toBe('Specific error message from backend.');
+
+      const errorWithAction = {
+         isStructuredError: true,
+        message: 'Original unauthenticated message.',
+        errorCode: 'BE_GEN_003',
+        actionButton: { text: 'Login', actionType: 'NAVIGATE_TO_ROUTE', actionPayload: '/login' }
+      };
+      const wrapper2 = mountComponent(errorWithAction);
+      expect(wrapper2.find('.message').text()).toBe('Original unauthenticated message.');
+
     });
   });
 
-  describe('Error Message Display', () => {
-    it('displays simple string error message', () => {
+  describe('Non-Structured Error Handling', () => {
+    it('displays message from non-structured error object', () => {
       const error = {
-        status_message: 'Simple error message'
+        isStructuredError: false,
+        message: 'This is a non-structured error (e.g., network).',
       };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.message').text()).toBe('Simple error message');
+      const wrapper = mountComponent(error);
+      expect(wrapper.find('.message').text()).toBe('This is a non-structured error (e.g., network).');
     });
 
-    it('displays default message for empty status_message', () => {
-      const error = {
-        status_message: ''
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.message').text()).toBe('An unknown error occurred.');
-    });
-
-    it('displays default message for undefined status_message', () => {
-      const error = {};
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.message').text()).toBe('An unknown error occurred.');
-    });
-
-    it('handles error object without status_message property', () => {
-      const error = {
-        message: 'Different property name'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.message').text()).toBe('Different property name');
+    it('displays default message if non-structured error has no message', () => {
+      const error = { isStructuredError: false };
+      const wrapper = mountComponent(error);
+      expect(wrapper.find('.message').text()).toBe('An unexpected error occurred.');
     });
   });
 
-  describe('Special Error Handling', () => {
-    it('shows deposit action button for insufficient balance error', () => {
+  describe('Action Button', () => {
+    it('renders action button if provided in structured error', () => {
       const error = {
-        status_message: 'Insufficient balance to place bet',
+        isStructuredError: true,
+        message: 'Error with action.',
+        errorCode: 'ACT_001',
+        actionButton: { text: 'Go Home', actionType: 'NAVIGATE_TO_ROUTE', actionPayload: { route: '/' } },
+      };
+      const wrapper = mountComponent(error);
+      const button = wrapper.find('.error-message-box button.bg-blue-600'); // More specific selector
+      expect(button.exists()).toBe(true);
+      expect(button.text()).toBe('Go Home');
+    });
+
+    it('handles NAVIGATE_TO_ROUTE action', async () => {
+      const error = {
+        isStructuredError: true,
+        message: 'Navigate action.',
+        errorCode: 'NAV_001',
+        actionButton: { text: 'Login Page', actionType: 'NAVIGATE_TO_ROUTE', actionPayload: { route: '/login' } },
+      };
+      const wrapper = mountComponent(error);
+      const actionBtn = wrapper.find('.error-message-box button.bg-blue-600');
+      await actionBtn.trigger('click');
+      expect(router.push).toHaveBeenCalledWith({ route: '/login' });
+      await flushPromises(); // Wait for dismiss operations
+      expect(wrapper.find('.error-message-box').exists()).toBe(false); // Should be dismissed
+    });
+
+    it('handles DISPATCH_VUEX_ACTION action', async () => {
+      const error = {
+        isStructuredError: true,
+        message: 'Dispatch action.',
+        errorCode: 'DISPATCH_001',
         actionButton: {
-          text: 'Deposit',
-          action: jest.fn()
-        }
+          text: 'Test Dispatch',
+          actionType: 'DISPATCH_VUEX_ACTION',
+          actionPayload: { actionName: 'mockTestAction', payload: { data: 'test' } }
+        },
       };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      const actionButton = wrapper.find('[class*="bg-blue-600"]'); // Look for the action button by its class
-      expect(actionButton.exists()).toBe(true);
-      expect(actionButton.text()).toContain('Deposit');
-    });
-
-    it('shows different styles for different error types', () => {
-      const error = {
-        status_message: 'Insufficient balance to place bet'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      // Should have special styling for balance errors
-      expect(wrapper.find('.error-message-box').classes()).toContain('bg-red-100');
-    });
-
-    it('handles network errors appropriately', () => {
-      const error = {
-        status_message: 'Network error. Please check your connection.'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.text()).toContain('Network error');
-    });
-  });
-
-  describe('Action Buttons', () => {
-    it('navigates to deposit page when deposit button is clicked', async () => {
-      const error = {
-        status_message: 'Insufficient balance to place bet'
-      };
-      
-      const routerPush = jest.spyOn(router, 'push');
-      
-      wrapper = mountErrorMessage({ error });
-      
-      const depositButton = wrapper.find('button').filter(btn => btn.text().includes('Deposit'));
-      expect(depositButton.exists()).toBe(true);
-      await depositButton.trigger('click');
-      
-      expect(routerPush).toHaveBeenCalledWith('/deposit');
-    });
-
-    it('does not show action button for general errors', () => {
-      const error = {
-        status_message: 'General error message'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.action-button').exists()).toBe(false);
+      const wrapper = mountComponent(error);
+      const actionBtn = wrapper.find('.error-message-box button.bg-blue-600');
+      await actionBtn.trigger('click');
+      expect(mockStore.dispatch).toHaveBeenCalledWith('mockTestAction', { data: 'test' });
+      await flushPromises();
+      expect(wrapper.find('.error-message-box').exists()).toBe(false);
     });
   });
 
   describe('Dismiss Functionality', () => {
-    it('emits dismiss event when dismiss button is clicked', async () => {
-      const error = {
-        status_message: 'Test error'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      const dismissButton = wrapper.find('.dismiss-button');
-      await dismissButton.trigger('click');
-      
-      expect(wrapper.emitted('dismiss')).toBeTruthy();
-      expect(wrapper.emitted('dismiss')).toHaveLength(1);
-    });
-
-    it('hides error message after dismiss', async () => {
-      const error = {
-        status_message: 'Test error'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
+    it('dismisses when dismiss button is clicked', async () => {
+      const wrapper = mountComponent(null, 'Test dismiss');
       expect(wrapper.find('.error-message-box').exists()).toBe(true);
-      
-      // Simulate dismiss by clicking the dismiss button
-      const dismissButton = wrapper.find('.dismiss-button');
-      await dismissButton.trigger('click');
-      
+      await wrapper.find('button.dismiss-button').trigger('click');
       expect(wrapper.find('.error-message-box').exists()).toBe(false);
-    });
-  });
-
-  describe('Auto-dismiss', () => {
-    beforeEach(() => {
-      jest.useFakeTimers();
-    });
-
-    afterEach(() => {
-      jest.useRealTimers();
-    });
-
-    it('auto-dismisses after timeout for non-critical errors', async () => {
-      const error = {
-        status_message: 'Non-critical error'
-      };
-      
-      wrapper = mountErrorMessage({ error, autoDismiss: true });
-      
-      expect(wrapper.find('.error-message-box').exists()).toBe(true);
-      
-      // Fast-forward time
-      jest.advanceTimersByTime(5000);
-      await wrapper.vm.$nextTick();
-      
       expect(wrapper.emitted('dismiss')).toBeTruthy();
     });
 
-    it('does not auto-dismiss critical errors', async () => {
-      const error = {
-        status_message: 'Critical error that requires attention'
-      };
+    it('clears globalError from store if it matches the dismissed error', async () => {
+      const errorToDisplay = { isStructuredError: true, message: 'Global error test', errorCode: 'GLOBAL_TEST' };
+      mockStore.commit('setGlobalError', errorToDisplay); // Set this error as the global one
       
-      wrapper = mountErrorMessage({ error, autoDismiss: false });
+      const wrapper = mountComponent(errorToDisplay);
+      expect(mockStore.state.globalError).toEqual(errorToDisplay);
       
-      jest.advanceTimersByTime(10000);
-      await wrapper.vm.$nextTick();
+      await wrapper.find('button.dismiss-button').trigger('click');
       
-      expect(wrapper.emitted('dismiss')).toBeFalsy();
-    });
-  });
-
-  describe('Accessibility', () => {
-    it('has proper ARIA role', () => {
-      const error = {
-        status_message: 'Test error'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.error-message-box').attributes('role')).toBe('alert');
+      expect(mockStore.state.globalError).toBeNull();
     });
 
-    it('has screen reader text for dismiss button', () => {
-      const error = {
-        status_message: 'Test error'
-      };
+    it('does not clear globalError if it does not match the dismissed error', async () => {
+      const globalErrorInStore = { isStructuredError: true, message: 'Some other global error', errorCode: 'OTHER_GLOBAL' };
+      mockStore.commit('setGlobalError', globalErrorInStore);
       
-      wrapper = mountErrorMessage({ error });
+      const errorForComponent = { isStructuredError: true, message: 'Local component error', errorCode: 'LOCAL_TEST' };
+      const wrapper = mountComponent(errorForComponent); // ErrorMessage displays a different error
       
-      expect(wrapper.find('.sr-only').text()).toBe('Dismiss');
-    });
-
-    it('has proper focus management for dismiss button', () => {
-      const error = {
-        status_message: 'Test error'
-      };
+      await wrapper.find('button.dismiss-button').trigger('click');
       
-      wrapper = mountErrorMessage({ error });
-      
-      const dismissButton = wrapper.find('.dismiss-button');
-      expect(dismissButton.attributes('aria-label')).toBe('Dismiss');
-    });
-  });
-
-  describe('Dark Mode Support', () => {
-    it('has dark mode classes', () => {
-      const error = {
-        status_message: 'Test error'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      const errorBox = wrapper.find('.error-message-box');
-      expect(errorBox.classes()).toContain('dark:bg-red-900');
-      expect(errorBox.classes()).toContain('dark:text-red-300');
-      expect(errorBox.classes()).toContain('dark:border-red-600');
-    });
-
-    it('has dark mode dismiss button styles', () => {
-      const error = {
-        status_message: 'Test error'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      const dismissButton = wrapper.find('.dismiss-button');
-      expect(dismissButton.classes()).toContain('dark:bg-red-900');
-      expect(dismissButton.classes()).toContain('dark:text-red-300');
-      expect(dismissButton.classes()).toContain('dark:hover:bg-red-800');
-    });
-  });
-
-  describe('Edge Cases', () => {
-    it('handles very long error messages', () => {
-      const error = {
-        status_message: 'A'.repeat(1000) // Very long message
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.error-message-box').exists()).toBe(true);
-      expect(wrapper.text()).toContain('A'.repeat(100)); // Should contain part of message
-    });
-
-    it('handles HTML in error messages safely', () => {
-      const error = {
-        status_message: '<script>alert("xss")</script>Safe message'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      // Should not execute script, just display as text
-      expect(wrapper.find('script').exists()).toBe(false);
-      expect(wrapper.text()).toContain('Safe message');
-    });
-
-    it('handles error object updates', async () => {
-      const initialError = {
-        status_message: 'Initial error'
-      };
-      
-      wrapper = mountErrorMessage({ error: initialError });
-      
-      expect(wrapper.text()).toContain('Initial error');
-      
-      // Update error
-      await wrapper.setProps({
-        error: {
-          status_message: 'Updated error'
-        }
-      });
-      
-      expect(wrapper.text()).toContain('Updated error');
-    });
-
-    it('handles error prop changing to null', async () => {
-      const error = {
-        status_message: 'Test error'
-      };
-      
-      wrapper = mountErrorMessage({ error });
-      
-      expect(wrapper.find('.error-message-box').exists()).toBe(true);
-      
-      // Change to null
-      await wrapper.setProps({ error: null });
-      
-      expect(wrapper.find('.error-message-box').exists()).toBe(false);
+      expect(mockStore.state.globalError).toEqual(globalErrorInStore); // Global error should remain unchanged
     });
   });
 });

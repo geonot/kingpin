@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 from casino_be.app import app, db
 from casino_be.models import User, Slot, GameSession, SlotSymbol, SlotBet, BonusCode, UserBonus
+from casino_be.error_codes import ErrorCodes # Import ErrorCodes
 from flask_jwt_extended import create_access_token
 
 
@@ -206,8 +207,11 @@ class TestAPIIntegration(unittest.TestCase):
         invalid_spin_response = self.client.post('/api/slots/spin',
                                                headers=headers,
                                                json={})
-        
-        self.assertEqual(invalid_spin_response.status_code, 400)
+        invalid_spin_data = json.loads(invalid_spin_response.data.decode())
+        self.assertEqual(invalid_spin_response.status_code, 422) # Marshmallow validation error
+        self.assertFalse(invalid_spin_data['status'])
+        self.assertEqual(invalid_spin_data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn('bet_amount', invalid_spin_data['details']['errors']) # Expecting error about missing bet_amount
         
         # 2. Spin with insufficient balance
         large_bet_payload = {"bet_amount": 999999999}  # More than user balance
@@ -215,19 +219,38 @@ class TestAPIIntegration(unittest.TestCase):
                                                        headers=headers,
                                                        json=large_bet_payload)
         
-        self.assertEqual(insufficient_balance_response.status_code, 400)
         error_data = json.loads(insufficient_balance_response.data.decode())
-        self.assertIn('insufficient', error_data['status_message'].lower())
+        self.assertEqual(insufficient_balance_response.status_code, 400) # InsufficientFundsException
+        self.assertFalse(error_data['status'])
+        self.assertEqual(error_data['error_code'], ErrorCodes.INSUFFICIENT_FUNDS)
+        self.assertEqual(error_data['status_message'], 'Insufficient balance to place bet.')
         
         # 3. Access without authentication
         no_auth_response = self.client.get('/api/me')
-        self.assertEqual(no_auth_response.status_code, 401)
-        
+        no_auth_data = json.loads(no_auth_response.data.decode())
+        self.assertEqual(no_auth_response.status_code, 401) # NoAuthorizationError
+        self.assertFalse(no_auth_data['status'])
+        self.assertEqual(no_auth_data['error_code'], ErrorCodes.UNAUTHENTICATED)
+        self.assertEqual(no_auth_data['status_message'], 'Missing or invalid authorization token.')
+
         # 4. Invalid JSON payload
         invalid_json_response = self.client.post('/api/login',
                                                data="invalid json",
                                                content_type='application/json')
-        self.assertEqual(invalid_json_response.status_code, 400)
+        invalid_json_data = json.loads(invalid_json_response.data.decode())
+        self.assertEqual(invalid_json_response.status_code, 400) # Werkzeug BadRequest
+        self.assertFalse(invalid_json_data['status'])
+        # This will be caught by handle_werkzeug_http_exception, which might assign a generic error code or map 400 to validation
+        # Based on current app.py, it would be GENERIC_ERROR unless specifically mapped.
+        # For a malformed JSON, it's often a BadRequest (400) from Werkzeug.
+        # Our handler for WerkzeugHTTPException should assign ErrorCodes.GENERIC_ERROR or similar for a generic 400.
+        # Or, if Flask/Werkzeug identifies it as a parsing error that maps to VALIDATION_ERROR.
+        # Let's assume it's caught by the WerkzeugHTTPException handler and results in a generic error or specific parse error.
+        # ErrorCodes.VALIDATION_ERROR is also plausible if the framework treats it as such.
+        # Given current global handler, a generic 400 from werkzeug not specifically mapped might fall to GENERIC_ERROR.
+        # Let's check current app.py: handle_werkzeug_http_exception maps 400 to GENERIC_ERROR.
+        self.assertEqual(invalid_json_data['error_code'], ErrorCodes.GENERIC_ERROR)
+        self.assertIn('Failed to decode JSON object', invalid_json_data['details']['description']) # Werkzeug's default message for bad JSON
         
     def test_bonus_system_integration(self):
         """Test bonus system integration with API."""

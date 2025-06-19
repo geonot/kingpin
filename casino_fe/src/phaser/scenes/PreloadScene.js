@@ -223,10 +223,10 @@ export default class PreloadScene extends Phaser.Scene {
         return;
     }
 
-    this.scene.launch('UIScene');
+    this.scene.launch('ModernUIScene'); // Changed from UIScene
     this.scene.launch('SettingsModalScene');
     this.scene.sleep('SettingsModalScene');
 
-    this.scene.start('GameScene');
+    this.scene.start('ModernSlotScene'); // Changed from GameScene
   }
 }
