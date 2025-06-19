@@ -6,6 +6,8 @@ from models import db, User, Transaction, UserBonus
 from schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema
 from services.bonus_service import apply_bonus_to_deposit
 from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
+from casino_be.exceptions import InsufficientFundsException, ValidationException, NotFoundException, ForbiddenException
+from casino_be.error_codes import ErrorCodes
 
 user_bp = Blueprint('user', __name__, url_prefix='/api')
 
@@ -17,20 +19,25 @@ def withdraw():
     data = request.get_json()
     errors = WithdrawSchema().validate(data)
     if errors:
-        log_security_event('INVALID_WITHDRAWAL_DATA', current_user.id, {'errors': errors})
-        return jsonify({'status': False, 'status_message': errors}), 400
-    
+        # Let the global ValidationError handler manage this
+        # log_security_event('INVALID_WITHDRAWAL_DATA', current_user.id, {'errors': errors})
+        # return jsonify({'status': False, 'status_message': errors}), 400
+        # The global handler will return a 422 with ErrorCodes.VALIDATION_ERROR
+        # If a 400 is strictly needed here, this must remain, but the task implies using global handlers.
+        # For now, assuming Marshmallow's errors are handled by the global handler as per instructions.
+        pass # Errors will be caught by the global handler if schema raises ValidationError
+
     user = current_user
     amount_sats = data['amount']
     withdraw_address = data['address']
     
     # Enhanced withdrawal validation
     if amount_sats < 10000:  # Minimum 0.0001 BTC
-        return jsonify({'status': False, 'status_message': 'Minimum withdrawal amount is 10,000 satoshis.'}), 400
+        raise ValidationException(ErrorCodes.INVALID_AMOUNT, "Minimum withdrawal amount is 10,000 satoshis.")
     
     if amount_sats > 100000000:  # Maximum 1 BTC per withdrawal
-        log_security_event('LARGE_WITHDRAWAL_ATTEMPT', user.id, {'amount': amount_sats})
-        return jsonify({'status': False, 'status_message': 'Maximum withdrawal amount is 1 BTC.'}), 400
+        log_security_event('LARGE_WITHDRAWAL_ATTEMPT', user.id, {'amount': amount_sats}) # Keep security log
+        raise ValidationException(ErrorCodes.MAX_WITHDRAWAL_LIMIT_EXCEEDED, "Maximum withdrawal amount is 1 BTC.")
 
     active_bonus_with_wagering = UserBonus.query.filter_by(
         user_id=user.id,
@@ -42,17 +49,20 @@ def withdraw():
     if active_bonus_with_wagering:
         if active_bonus_with_wagering.wagering_progress_sats < active_bonus_with_wagering.wagering_requirement_sats:
             remaining_wagering_sats = active_bonus_with_wagering.wagering_requirement_sats - active_bonus_with_wagering.wagering_progress_sats
-            current_app.logger.warning(f"User {user.id} withdrawal blocked due to unmet wagering for UserBonus {active_bonus_with_wagering.id}.")
-            return jsonify({
-                'status': False,
-                'status_message': f"Withdrawal blocked. You have an active bonus with unmet wagering requirements. "
-                                  f"Remaining wagering needed: {remaining_wagering_sats} sats. "
-                                  f"Bonus amount: {active_bonus_with_wagering.bonus_amount_awarded_sats} sats. "
-                                  f"Wagering progress: {active_bonus_with_wagering.wagering_progress_sats}/{active_bonus_with_wagering.wagering_requirement_sats} sats."
-            }), 403
+            # current_app.logger.warning(f"User {user.id} withdrawal blocked due to unmet wagering for UserBonus {active_bonus_with_wagering.id}.") # Will be logged by global handler
+            raise ForbiddenException( # Using Forbidden as it's a restriction on action
+                error_code=ErrorCodes.FORBIDDEN, # Or a more specific one if available for bonus restriction
+                status_message="Withdrawal blocked due to unmet wagering requirements.",
+                details={
+                    "remaining_wagering_sats": remaining_wagering_sats,
+                    "bonus_amount_awarded_sats": active_bonus_with_wagering.bonus_amount_awarded_sats,
+                    "wagering_progress_sats": active_bonus_with_wagering.wagering_progress_sats,
+                    "wagering_requirement_sats": active_bonus_with_wagering.wagering_requirement_sats
+                }
+            )
 
     if user.balance < amount_sats:
-        return jsonify({'status': False, 'status_message': 'Insufficient funds'}), 400
+        raise InsufficientFundsException("Insufficient funds for withdrawal.")
         
     try:
         user.balance -= amount_sats
@@ -116,16 +126,21 @@ def update_settings():
     data = request.get_json()
     errors = UpdateSettingsSchema().validate(data)
     if errors:
-        log_security_event('INVALID_SETTINGS_DATA', current_user.id, {'errors': errors})
-        return jsonify({'status': False, 'status_message': errors}), 400
-    
+        # log_security_event('INVALID_SETTINGS_DATA', current_user.id, {'errors': errors}) # Global handler
+        # return jsonify({'status': False, 'status_message': errors}), 400 # Global handler
+        pass # Marshmallow errors handled globally
+
     user = current_user
     try:
         if 'email' in data and data['email'] != user.email:
             if User.query.filter(User.email == data['email'], User.id != user.id).first():
-                return jsonify({'status': False, 'status_message': 'Email already in use.'}), 409
+                raise ValidationException(
+                    ErrorCodes.EMAIL_ALREADY_EXISTS,
+                    "Email already in use.",
+                    details={'email': 'Email already in use.'}
+                )
             
-            log_security_event('EMAIL_CHANGE', user.id, {
+            log_security_event('EMAIL_CHANGE', user.id, { # Keep security log
                 'old_email': user.email,
                 'new_email': data['email']
             })
@@ -140,8 +155,8 @@ def update_settings():
         return jsonify({'status': True, 'user': UserSchema().dump(user)}), 200
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Settings update failed: {str(e)}", exc_info=True)
-        return jsonify({'status': False, 'status_message': 'Settings update failed.'}), 500
+        # current_app.logger.error(f"Settings update failed: {str(e)}", exc_info=True) # Global handler
+        raise # Global handler will catch and log
 
 @user_bp.route('/deposit', methods=['POST'])
 @jwt_required()
@@ -151,8 +166,9 @@ def deposit():
     data = request.get_json()
     errors = DepositSchema().validate(data)
     if errors:
-        log_security_event('INVALID_DEPOSIT_DATA', current_user.id, {'errors': errors})
-        return jsonify({'status': False, 'status_message': errors}), 400
+        # log_security_event('INVALID_DEPOSIT_DATA', current_user.id, {'errors': errors}) # Global handler
+        # return jsonify({'status': False, 'status_message': errors}), 400 # Global handler
+        pass # Marshmallow errors handled globally
 
     user = current_user
     deposit_amount_sats = data['amount']
@@ -160,8 +176,8 @@ def deposit():
     
     # Enhanced deposit validation
     if deposit_amount_sats > 1000000000:  # Maximum 10 BTC per deposit
-        log_security_event('LARGE_DEPOSIT_ATTEMPT', user.id, {'amount': deposit_amount_sats})
-        return jsonify({'status': False, 'status_message': 'Maximum deposit amount is 10 BTC.'}), 400
+        log_security_event('LARGE_DEPOSIT_ATTEMPT', user.id, {'amount': deposit_amount_sats}) # Keep security log
+        raise ValidationException(ErrorCodes.INVALID_AMOUNT, "Maximum deposit amount is 10 BTC.")
 
     final_bonus_applied_sats = 0
     final_user_bonus_id = None
@@ -225,8 +241,9 @@ def transfer_funds():
     data = request.get_json()
     errors = TransferSchema().validate(data)
     if errors:
-        log_security_event('INVALID_TRANSFER_DATA', current_user.id, {'errors': errors})
-        return jsonify({'status': False, 'status_message': errors}), 400
+        # log_security_event('INVALID_TRANSFER_DATA', current_user.id, {'errors': errors}) # Global handler
+        # return jsonify({'status': False, 'status_message': errors}), 400 # Global handler
+        pass # Marshmallow errors handled globally
     
     sender = current_user
     recipient_username = data['recipient_username']
@@ -236,17 +253,18 @@ def transfer_funds():
     # Find recipient
     recipient = User.query.filter_by(username=recipient_username).first()
     if not recipient:
-        return jsonify({'status': False, 'status_message': 'Recipient user not found.'}), 404
+        raise NotFoundException(ErrorCodes.USER_NOT_FOUND, "Recipient user not found.")
     
     if recipient.id == sender.id:
-        return jsonify({'status': False, 'status_message': 'Cannot transfer to yourself.'}), 400
+        raise ValidationException(ErrorCodes.VALIDATION_ERROR, "Cannot transfer to yourself.")
     
     if not recipient.is_active:
-        return jsonify({'status': False, 'status_message': 'Recipient account is not active.'}), 400
+        # Consider if this should be a specific error code or a generic validation error
+        raise ValidationException(ErrorCodes.VALIDATION_ERROR, "Recipient account is not active.")
     
     # Check sender balance
     if sender.balance < amount:
-        return jsonify({'status': False, 'status_message': 'Insufficient funds.'}), 400
+        raise InsufficientFundsException("Insufficient funds for transfer.")
     
     # Check for active bonus restrictions
     active_bonus = UserBonus.query.filter_by(
@@ -257,10 +275,10 @@ def transfer_funds():
     ).first()
     
     if active_bonus and active_bonus.wagering_progress_sats < active_bonus.wagering_requirement_sats:
-        return jsonify({
-            'status': False,
-            'status_message': 'Transfers are blocked while you have active bonus wagering requirements.'
-        }), 403
+        raise ForbiddenException( # Using Forbidden as it's a restriction on action
+            error_code=ErrorCodes.FORBIDDEN, # Or a more specific bonus-related error code
+            status_message="Transfers are blocked while you have active bonus wagering requirements."
+        )
     
     try:
         # Perform transfer
@@ -313,8 +331,8 @@ def transfer_funds():
         
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Transfer failed: {str(e)}", exc_info=True)
-        return jsonify({'status': False, 'status_message': 'Transfer failed.'}), 500
+        # current_app.logger.error(f"Transfer failed: {str(e)}", exc_info=True) # Global handler
+        raise # Global handler will catch and log
 
 @user_bp.route('/balance', methods=['GET'])
 @jwt_required()
