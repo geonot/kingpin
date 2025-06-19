@@ -12,7 +12,8 @@ from .models import ( # Relative import
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
     PlinkoDropLog,  # Plinko models
-    BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
+    BaccaratTable, BaccaratHand, BaccaratAction, # Baccarat models
+    AstroMinerXExpedition, AstroMinerXAsteroid, AstroMinerXResource # AstroMinerX models
 )
 from .utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Relative import
 from .utils.security import validate_password_strength, sanitize_input # Relative import
@@ -728,3 +729,49 @@ class PlaceBaccaratBetSchema(Schema):
         if total_bet <= 0:
             raise ValidationError("At least one bet amount must be positive, and the total bet must be greater than zero.")
         return data
+
+# --- AstroMinerX Schemas ---
+class AstroMinerXExpeditionSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = AstroMinerXExpedition
+        load_instance = True
+        sqla_session = db.session
+        include_relationships = True # To include asteroids and resources_collected
+
+    id = auto_field(dump_only=True)
+    user_id = auto_field(dump_only=True) # Usually set by current_user, not via request directly for creation
+    bet_amount = auto_field(required=True, validate=validate.Range(min=0.01))
+    start_time = auto_field(dump_only=True)
+    end_time = auto_field(dump_only=True, allow_none=True)
+    total_value_collected = auto_field(dump_only=True)
+    status = auto_field(dump_only=True)
+
+    user = fields.Nested(UserSchema, only=("id", "username"), dump_only=True)
+    asteroids = fields.Nested("AstroMinerXAsteroidSchema", many=True, dump_only=True)
+    resources_collected = fields.Nested("AstroMinerXResourceSchema", many=True, dump_only=True)
+
+class AstroMinerXAsteroidSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = AstroMinerXAsteroid
+        load_instance = True
+        sqla_session = db.session
+
+    id = auto_field(dump_only=True)
+    expedition_id = auto_field(dump_only=True) # Set internally
+    asteroid_type = auto_field()
+    value = auto_field(allow_none=True)
+    is_empty = auto_field()
+    is_hazard = auto_field()
+    scan_time = auto_field(allow_none=True, dump_only=True)
+
+class AstroMinerXResourceSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = AstroMinerXResource
+        load_instance = True
+        sqla_session = db.session
+
+    id = auto_field(dump_only=True)
+    expedition_id = auto_field(dump_only=True) # Set internally
+    resource_name = auto_field()
+    value = auto_field()
+    collected_time = auto_field(dump_only=True)

@@ -63,7 +63,8 @@ from casino_be.models import User, GameSession, Transaction, BonusCode, Slot, Sl
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus, \
     SpacecrashGame, SpacecrashBet, PokerTable, PokerHand, PokerPlayerState, \
     PlinkoDropLog, RouletteGame, BaccaratTable, BaccaratHand, BaccaratAction, \
-    CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry # NEW MODELS
+    CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry, \
+    AstroMinerXExpedition, AstroMinerXAsteroid, AstroMinerXResource # NEW MODELS
 
 target_metadata = db.metadata
 # --- End Metadata Setup ---
