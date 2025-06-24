@@ -241,7 +241,7 @@ def create_app(config_class=Config):
 
     # --- Database Setup ---
     db.init_app(app)
-    migrate = Migrate(app, db, directory='migrations')
+    migrate = Migrate(app, db, directory=os.path.join(os.path.dirname(__file__), 'migrations'))
 
     # --- JWT Setup ---
     jwt = JWTManager(app)

@@ -2,8 +2,8 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from ..models import db, User, RouletteGame # Relative import
-from ..utils import roulette_helper # Relative import
+from casino_be.models import db, User, RouletteGame
+from casino_be.utils import roulette_helper
 
 roulette_bp = Blueprint('roulette', __name__, url_prefix='/api/roulette')
 

@@ -17,9 +17,9 @@ from pythonjsonlogger import jsonlogger # Added for JSON logging
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 from flask import current_app # To be used within app_context
-from app import create_app, db # Adjusted to import db directly if it's initialized in app.py
-from models import User, Transaction # Assuming Transaction model is appropriately defined
-from utils.bitcoin import get_address_from_private_key_wif, send_to_hot_wallet
+from casino_be.app import create_app, db
+from casino_be.models import User, Transaction
+from casino_be.utils.bitcoin import get_address_from_private_key_wif, send_to_hot_wallet
 # generate_bitcoin_wallet is not directly used by poller's core loop
 
 # --- Configuration ---

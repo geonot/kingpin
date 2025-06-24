@@ -164,6 +164,17 @@ class Slot(db.Model):
     cascade_type = db.Column(db.String(50), nullable=True)  # e.g., "replace_in_place", "fall_from_top"
     min_symbols_to_match = db.Column(db.Integer, nullable=True) # For non-payline wins, e.g. scatter-pays or cluster-pays if is_multiway is False
     win_multipliers = db.Column(JSON, nullable=True)  # e.g., [1, 2, 4, 8, 10] for cascading wins
+
+    # Game type identifier
+    game_type_name = db.Column(db.String(50), nullable=True, index=True, default='CLASSIC') # e.g. CLASSIC, MULTIWAY, SYMPHONY_SPHERES
+
+    # Specific configurations for Symphony of Spheres
+    sphere_colors = db.Column(JSON, nullable=True)  # e.g. {"common": ["red", "blue"], "rare": ["gold"]}
+    sphere_textures = db.Column(JSON, nullable=True)  # e.g. {"normal": ["smooth"], "special": ["metallic"]}
+    winning_patterns = db.Column(JSON, nullable=True)  # Defines winning patterns (clusters, chains, etc.)
+    prism_sphere_config = db.Column(JSON, nullable=True)  # Config for Prism Sphere (wild, multiplier)
+    base_field_dimensions = db.Column(JSON, nullable=True) # e.g. {"width": 10, "height": 10}
+
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     symbols = db.relationship('SlotSymbol', backref='slot', lazy='select')

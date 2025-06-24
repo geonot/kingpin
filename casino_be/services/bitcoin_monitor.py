@@ -5,8 +5,8 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from sqlalchemy import select # Import select
 
-from models import db, User, Transaction
-from utils.encryption import decrypt_private_key
+from casino_be.models import db, User, Transaction
+from casino_be.utils.encryption import decrypt_private_key
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     # Add the parent directory to the Python path
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from app import create_app
+    from casino_be.app import create_app
     
     app = create_app()
     with app.app_context():

@@ -10,6 +10,7 @@ import BonusHoldAndWinScene from './scenes/BonusHoldAndWinScene';
 import CrystalGardenScene from './scenes/crystal_garden_scene'; // Added CrystalGardenScene
 import ModernSlotScene from './scenes/ModernSlotScene';
 import ModernUIScene from './scenes/ModernUIScene';
+import SymphonySpheresScene from './scenes/SymphonySpheresScene'; // Added SymphonySpheresScene
 
 const config = {
   type: Phaser.AUTO, // Auto-detect renderer (WebGL or Canvas)
@@ -50,7 +51,8 @@ const config = {
     SettingsModalScene,
     CrystalGardenScene, // Added CrystalGardenScene to the list
     ModernSlotScene,
-    ModernUIScene
+    ModernUIScene,
+    SymphonySpheresScene // Added SymphonySpheresScene to the list
 ],
 
   // Prevent blur on resized textures (important for pixel art if pixelArt: true)

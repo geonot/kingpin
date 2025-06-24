@@ -10,10 +10,10 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import secrets
 
-from models import db, User, TokenBlacklist
-from schemas import UserSchema, RegisterSchema, LoginSchema
-from utils.bitcoin import generate_bitcoin_wallet
-from utils.security import require_csrf_token, generate_csrf_token
+from casino_be.models import db, User, TokenBlacklist
+from casino_be.schemas import UserSchema, RegisterSchema, LoginSchema
+from casino_be.utils.bitcoin import generate_bitcoin_wallet
+from casino_be.utils.security import require_csrf_token, generate_csrf_token
 from casino_be.exceptions import AuthenticationException, ValidationException
 from casino_be.error_codes import ErrorCodes
 from casino_be.app import is_password_strong

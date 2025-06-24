@@ -223,10 +223,30 @@ export default class PreloadScene extends Phaser.Scene {
         return;
     }
 
-    this.scene.launch('ModernUIScene'); // Changed from UIScene
-    this.scene.launch('SettingsModalScene');
-    this.scene.sleep('SettingsModalScene');
+    this.scene.launch('SettingsModalScene'); // Launch settings modal so it's ready
+    this.scene.sleep('SettingsModalScene');   // But keep it initially inactive
 
-    this.scene.start('ModernSlotScene'); // Changed from GameScene
+    const gameShortName = slotApiData.short_name;
+    const gameConfigData = { config: slotGameJsonConfig, slot_info: slotApiData }; // Pass both to game scene
+
+    if (gameShortName === 'neon_grid') {
+        this.scene.launch('NeonGridUIScene');
+        this.scene.start('NeonGridGameScene', { gameConfigData });
+    } else if (gameShortName === 'symphony_spheres') {
+        // For Symphony of Spheres, we might have a dedicated UI or reuse ModernUIScene
+        // For now, let's assume it can use ModernUIScene or a similar generic UI
+        this.scene.launch('ModernUIScene', { gameConfigData }); // Pass config if UI needs it
+        this.scene.start('SymphonySpheresScene', { gameConfigData });
+        console.log('PreloadScene: Starting SymphonySpheresScene with ModernUIScene.');
+    } else if (gameShortName === 'crystal_garden_slot') { // Example for another game type
+        this.scene.launch('ModernUIScene', { gameConfigData });
+        this.scene.start('CrystalGardenScene', { gameConfigData }); // Assuming CrystalGardenScene is the main game view
+        console.log('PreloadScene: Starting CrystalGardenScene with ModernUIScene.');
+    }
+    else { // Default to ModernSlotScene and ModernUIScene
+        this.scene.launch('ModernUIScene', { gameConfigData });
+        this.scene.start('ModernSlotScene', { gameConfigData });
+        console.log(`PreloadScene: Starting ModernSlotScene for ${gameShortName} with ModernUIScene.`);
+    }
   }
 }

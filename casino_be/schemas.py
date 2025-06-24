@@ -324,6 +324,14 @@ class SlotSchema(SQLAlchemyAutoSchema):
     symbols = fields.Nested(SlotSymbolSchema, many=True)
     bets = fields.Nested(SlotBetSchema, many=True)
 
+    # New fields for Symphony of Spheres
+    game_type_name = fields.String(description="Type of the slot game", allow_none=True)
+    sphere_colors = fields.Raw(nullable=True, description="JSON object or list of available sphere colors/definitions")
+    sphere_textures = fields.Raw(nullable=True, description="JSON object or list of available sphere textures/definitions")
+    winning_patterns = fields.Raw(nullable=True, description="JSON object defining winning patterns and payouts")
+    prism_sphere_config = fields.Raw(nullable=True, description="JSON object for Prism Sphere behavior")
+    base_field_dimensions = fields.Raw(nullable=True, description="JSON object for base field dimensions (e.g., width, height)")
+
 # --- Bonus Code Schemas ---
 class BonusCodeSchema(SQLAlchemyAutoSchema):
     class Meta:

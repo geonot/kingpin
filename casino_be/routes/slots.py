@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 from functools import wraps
 import time
 
-from models import db, User, GameSession, Slot, SlotBet # SlotBet imported
-from schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
-from utils.spin_handler import handle_spin
-from utils.multiway_helper import handle_multiway_spin
-from utils.game_config_manager import GameConfigManager
-from utils.security_logger import SecurityLogger, audit_financial_operation, audit_game_operation
-from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
+from casino_be.models import db, User, GameSession, Slot, SlotBet
+from casino_be.schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
+from casino_be.utils.spin_handler import handle_spin
+from casino_be.utils.multiway_helper import handle_multiway_spin
+from casino_be.utils.symphony_spheres_handler import handle_symphony_spheres_pulse
+from casino_be.utils.game_config_manager import GameConfigManager
+from casino_be.utils.security_logger import SecurityLogger, audit_financial_operation, audit_game_operation
+from casino_be.utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
 from casino_be.exceptions import (
     NotFoundException, ValidationException, GameLogicException, InsufficientFundsException
 )
@@ -151,7 +152,94 @@ def spin():
     balance_before = user.balance
     
     try:
-        if slot.is_multiway:
+        if slot.game_type_name == 'SYMPHONY_SPHERES':
+            # Ensure all necessary configs are present in the slot object
+            if not all([slot.sphere_colors, slot.sphere_textures, slot.winning_patterns, slot.prism_sphere_config, slot.base_field_dimensions]):
+                current_app.logger.error(f"Symphony of Spheres game {slot.id} is missing essential configuration.")
+                raise GameLogicException(ErrorCodes.SLOT_CONFIG_ERROR, "Game configuration is incomplete for Symphony of Spheres.")
+
+            # Deduct bet if not a bonus spin (before calling handler)
+            actual_bet_for_this_spin = bet_amount_sats
+            if not (game_session.bonus_active and game_session.bonus_spins_remaining > 0):
+                user.balance -= bet_amount_sats
+            else: # It's a bonus spin
+                actual_bet_for_this_spin = 0
+
+
+            spin_result_data = handle_symphony_spheres_pulse(user, slot, game_session, bet_amount_sats)
+
+            win_amount = spin_result_data.get('win_amount_sats', 0)
+            user.balance += win_amount
+
+            game_session.num_spins += 1
+            if not (game_session.bonus_active and game_session.bonus_spins_remaining > 0):
+                game_session.amount_wagered = (game_session.amount_wagered or 0) + bet_amount_sats
+            game_session.amount_won = (game_session.amount_won or 0) + win_amount
+
+            # Create SlotSpin record
+            slot_spin = SlotSpin(
+                game_session_id=game_session.id,
+                spin_result={
+                    "final_spheres": spin_result_data.get("final_spheres"),
+                    "winning_events": spin_result_data.get("winning_events"),
+                    "harmony_event_triggered": spin_result_data.get("harmony_event_triggered"),
+                    "is_cascade_active": spin_result_data.get("is_cascade_active")
+                },
+                win_amount=win_amount,
+                bet_amount=actual_bet_for_this_spin,
+                is_bonus_spin= (game_session.bonus_active and game_session.bonus_spins_remaining > 0) # Re-evaluate based on current state
+            )
+            db.session.add(slot_spin)
+            db.session.commit()
+
+            # Security Logging
+            SecurityLogger.log_financial_event(
+                event_type='symphony_spheres_spin',
+                user_id=user.id,
+                amount=-bet_amount_sats,
+                balance_before=balance_before, # Balance before this spin's bet deduction
+                balance_after=user.balance,    # Balance after win/loss of this spin
+                details={
+                    'slot_id': slot.id,
+                    'game_type_name': slot.game_type_name,
+                    'win_amount': win_amount,
+                    'bet_amount': actual_bet_for_this_spin, # Log actual bet for this spin
+                    'game_session_id': game_session.id,
+                    'slot_spin_id': slot_spin.id
+                }
+            )
+            if win_amount > 0:
+                 SecurityLogger.log_financial_event(
+                    event_type='symphony_spheres_win',
+                    user_id=user.id,
+                    amount=win_amount,
+                    balance_before=balance_before - actual_bet_for_this_spin, # Balance after bet, before win
+                    balance_after=user.balance,
+                    details={
+                        'slot_id': slot.id,
+                        'game_type_name': slot.game_type_name,
+                        'bet_amount': actual_bet_for_this_spin,
+                        'winning_events': spin_result_data.get('winning_events', []),
+                        'harmony_event': spin_result_data.get('harmony_event_triggered', False),
+                        'slot_spin_id': slot_spin.id
+                    }
+                )
+
+            response_data = {
+                'status': True,
+                'result': spin_result_data.get('final_spheres'),
+                'win_amount': win_amount,
+                'winning_lines': spin_result_data.get('winning_events', []),
+                'bonus_triggered': spin_result_data.get('harmony_event_triggered', False),
+                'bonus_active': game_session.bonus_active,
+                'bonus_spins_remaining': game_session.bonus_spins_remaining,
+                'bonus_multiplier': game_session.bonus_multiplier,
+                'game_session': GameSessionSchema().dump(game_session),
+                'user': UserSchema().dump(user)
+            }
+            return jsonify(response_data), 200
+
+        elif slot.is_multiway:
             if not slot.reel_configurations:
                 SecurityLogger.log_security_event(
                     event_type='invalid_slot_configuration',
