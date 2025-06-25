@@ -6,3 +6,5 @@ unsplit.py
 code.txt
 outcode.txt
 .DS_Store
+node_modules
+package-lock.json

@@ -40,7 +40,7 @@
       <slot-card
         v-for="slot in filteredSlots"
         :key="slot.id"
-        :slot="slot"
+        :slot-data="slot"
       />
     </div>
   </div>

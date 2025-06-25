@@ -306,7 +306,7 @@ export default class NeonGridGameScene extends Phaser.Scene {
   }
 
   createParticles() {
-     this.winEmitter = this.add.particles(0, 0, , {
+     this.winEmitter = this.add.particles(0, 0, 'particle', {
             speed: { min: 100, max: 300 },
             angle: { min: 220, max: 320 }, // Emit downwards-ish arc
             scale: { start: 0.8, end: 0 },

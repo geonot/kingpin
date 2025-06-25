@@ -1,8 +1,0 @@
-node_modules
-.DS_Store
-out.code
-outcode.txt
-unsplit.py
-split.py
-code.txt
-package-lock.json

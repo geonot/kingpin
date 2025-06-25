@@ -288,6 +288,7 @@ class SpacecrashGame(db.Model):
     crash_point = db.Column(db.Float, nullable=True)
     public_seed = db.Column(db.String(255), nullable=True)
     status = db.Column(db.String(50), nullable=False, default='pending', index=True)
+    betting_start_time = db.Column(db.DateTime(timezone=True), nullable=True)
     game_start_time = db.Column(db.DateTime(timezone=True), nullable=True)
     game_end_time = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

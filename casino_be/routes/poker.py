@@ -10,6 +10,14 @@ from ..schemas import ( # Relative import
 from ..utils import poker_helper # Relative import
 from sqlalchemy.orm import joinedload # For optimized querying
 
+def get_websocket_manager():
+    """Get WebSocket manager instance"""
+    try:
+        from services.websocket_manager import websocket_manager
+        return websocket_manager
+    except ImportError:
+        return None
+
 poker_bp = Blueprint('poker', __name__, url_prefix='/api/poker')
 
 @poker_bp.route('/tables', methods=['GET'])
@@ -63,6 +71,23 @@ def join_poker_table(table_id):
         return jsonify({'status': False, 'status_message': result['error']}), status_code
 
     updated_user_data = UserSchema().dump(user)
+    
+    # Broadcast poker table state update via WebSocket
+    websocket_manager = get_websocket_manager()
+    if websocket_manager:
+        try:
+            # Get updated table state after join
+            current_hand = PokerHand.query.filter_by(table_id=table_id)\
+                .filter(PokerHand.status.in_(['betting', 'preflop', 'flop', 'turn', 'river', 'showdown', 'in_progress'])) \
+                .order_by(PokerHand.start_time.desc())\
+                .first()
+            hand_id_to_pass = current_hand.id if current_hand else None
+            state_data = poker_helper.get_table_state(table_id=table_id, hand_id=hand_id_to_pass, user_id=user.id)
+            if "error" not in state_data:
+                websocket_manager.broadcast_poker_update(table_id, state_data)
+        except Exception as e:
+            current_app.logger.warning(f"Failed to broadcast poker join update: {e}")
+    
     current_app.logger.info(f"User {user.id} successfully joined poker table {table_id} at seat {seat_id} with buy-in {buy_in_amount}.")
     return jsonify({
         'status': True,
@@ -83,6 +108,23 @@ def leave_poker_table(table_id):
         return jsonify({'status': False, 'status_message': result['error']}), status_code
 
     updated_user_data = UserSchema().dump(user)
+    
+    # Broadcast poker table state update via WebSocket
+    websocket_manager = get_websocket_manager()
+    if websocket_manager:
+        try:
+            # Get updated table state after leave
+            current_hand = PokerHand.query.filter_by(table_id=table_id)\
+                .filter(PokerHand.status.in_(['betting', 'preflop', 'flop', 'turn', 'river', 'showdown', 'in_progress'])) \
+                .order_by(PokerHand.start_time.desc())\
+                .first()
+            hand_id_to_pass = current_hand.id if current_hand else None
+            state_data = poker_helper.get_table_state(table_id=table_id, hand_id=hand_id_to_pass, user_id=user.id)
+            if "error" not in state_data:
+                websocket_manager.broadcast_poker_update(table_id, state_data)
+        except Exception as e:
+            current_app.logger.warning(f"Failed to broadcast poker leave update: {e}")
+    
     current_app.logger.info(f"User {user.id} successfully left poker table {table_id}.")
     return jsonify({
         'status': True,
@@ -209,6 +251,27 @@ def poker_hand_action(table_id, hand_id):
 
     updated_user_data = UserSchema().dump(user)
     game_flow_data = result.get("game_flow", {}) if result else {}
+    
+    # Broadcast poker action via WebSocket
+    websocket_manager = get_websocket_manager()
+    if websocket_manager:
+        try:
+            # Get updated table state
+            state_data = poker_helper.get_table_state(table_id=table_id, hand_id=hand_id, user_id=user.id)
+            if "error" not in state_data:
+                websocket_manager.broadcast_poker_update(table_id, state_data)
+                
+                # Also broadcast the specific action
+                action_data = {
+                    'user_id': user.id,
+                    'action_type': action_type,
+                    'amount': amount,
+                    'hand_id': hand_id
+                }
+                websocket_manager.broadcast_poker_action(table_id, action_data)
+        except Exception as e:
+            current_app.logger.warning(f"Failed to broadcast poker action update: {e}")
+    
     current_app.logger.info(f"User {user.id} performed action '{action_type}' (amount: {amount if amount is not None else 'N/A'}) on hand {hand_id} at table {table_id}.")
     return jsonify({
         'status': True,

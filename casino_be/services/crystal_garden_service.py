@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import random
 import json # Though direct dict access for JSON field is usually fine with SQLAlchemy
 
-from casino_be.models import db, User, CrystalSeed, CrystalFlower, PlayerGarden, CrystalCodexEntry
+from models import db, User, CrystalSeed, CrystalFlower, PlayerGarden, CrystalCodexEntry
 
 # --- Custom Exceptions ---
 class ServiceError(Exception):

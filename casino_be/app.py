@@ -12,6 +12,7 @@ from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
+from flask_socketio import SocketIO
 from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token, jwt_required,
     get_jwt_identity, get_jti, current_user, verify_jwt_in_request
@@ -201,6 +202,12 @@ def create_app(config_class=Config):
             pass
 
         if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+            try:
+                user_id = getattr(current_user, 'id', None) if hasattr(current_user, 'id') else None
+            except RuntimeError:
+                # JWT not available in this context
+                user_id = None
+            
             log_security_event('REQUEST', 
                              user_id=user_id_to_log,
                              details={
@@ -242,6 +249,41 @@ def create_app(config_class=Config):
     # --- Database Setup ---
     db.init_app(app)
     migrate = Migrate(app, db, directory='migrations')
+
+    # --- WebSocket Setup ---
+    socketio = SocketIO(app, 
+                       cors_allowed_origins=allowed_origins,
+                       async_mode='threading',
+                       logger=app.logger,
+                       engineio_logger=app.logger)
+    
+    # Initialize WebSocket Manager
+    from services.websocket_manager import websocket_manager
+    websocket_manager.socketio = socketio
+    websocket_manager.init_app(app)
+    
+    # Initialize SpaceCrash Game Loop
+    from services.spacecrash_game_loop import spacecrash_game_loop
+    spacecrash_game_loop.websocket_manager = websocket_manager
+    spacecrash_game_loop.app = app
+    
+    # Start game loop after app context is ready
+    if not app.config.get('TESTING', False):
+        # Use app context for initialization instead of deprecated before_first_request
+        with app.app_context():
+            # Delay start slightly to allow app to fully initialize
+            import threading
+            def delayed_start():
+                import time
+                time.sleep(1)  # Wait 1 second for app to be ready
+                spacecrash_game_loop.start()
+            
+            thread = threading.Thread(target=delayed_start, daemon=True)
+            thread.start()
+    
+    # Store socketio and game loop in app for access in routes
+    app.socketio = socketio
+    app.spacecrash_game_loop = spacecrash_game_loop
 
     # --- JWT Setup ---
     jwt = JWTManager(app)
@@ -536,7 +578,7 @@ def create_app(config_class=Config):
                 db.session.rollback()
                 click.echo(f"Failed to create admin user: {e}")
 
-    return app
+    return app, socketio
 
 def log_production_warnings(app):
     if not app.debug: # Corresponds to FLASK_DEBUG=False
@@ -576,7 +618,7 @@ def log_production_warnings(app):
 
 
 # Create the app instance for direct usage
-# app = create_app() # This line is usually present for Gunicorn/uWSGI or direct run.
+app, socketio = create_app() # This line is usually present for Gunicorn/uWSGI or direct run.
                     # If manage.py or similar is the entry point, it might call create_app().
                     # For running directly with `python app.py`, it's needed.
 
@@ -586,6 +628,5 @@ if __name__ == '__main__':
     # Ensure app.debug is correctly set based on FLASK_DEBUG env var for this direct run scenario.
     # The create_app() function already handles app.debug based on config_class.DEBUG,
     # which in turn reads FLASK_DEBUG.
-    current_app_instance = create_app() # Use a different variable name to avoid confusion with flask.current_app proxy
-    current_app_instance.run(host='0.0.0.0', port=5000) # debug is controlled by FLASK_DEBUG in Config
+    socketio.run(app, host='0.0.0.0', port=5000, debug=app.debug) # debug is controlled by FLASK_DEBUG in Config
 

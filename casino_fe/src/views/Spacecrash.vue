@@ -184,6 +184,12 @@ import SpacecrashBootScene from '@/phaser/scenes/SpacecrashBootScene';
 import SpacecrashPreloadScene from '@/phaser/scenes/SpacecrashPreloadScene';
 import SpacecrashGameScene from '@/phaser/scenes/SpacecrashGameScene';
 import SpacecrashUIScene from '@/phaser/scenes/SpacecrashUIScene';
+import { useWebSocket } from '@/composables/useWebSocket';
+import { useStore } from 'vuex';
+
+// Store and WebSocket
+const store = useStore();
+const { isConnected, connect, joinRoom, leaveRoom, on, off } = useWebSocket();
 
 // Phaser game instance
 const game = shallowRef(null); // Use shallowRef for Phaser game instance
@@ -350,11 +356,8 @@ async function placeBet() {
       isInGame.value = true;
       
       // If the game immediately starts or is already in progress due to this bet (simplified flow)
-      // This part is tricky because game start is usually server-driven after betting phase.
-      // For now, let's assume placing a bet when game is 'betting' implies user is ready.
-      // The actual 'START_GAME' signal to Phaser should ideally come when the game *status* changes to 'in_progress'.
-      // The fetchCurrentGame() polling will handle emitting START_GAME to Phaser when status changes.
-      await fetchCurrentGame(); // Refresh game state, which will then trigger Phaser via watchers or direct emit.
+      // The real-time updates will come via WebSocket, so we don't need to poll
+      // await fetchCurrentGame(); // Removed - WebSocket will handle updates
       
     } else {
       betError.value = response.data.status_message || 'Failed to place bet.';
@@ -391,8 +394,10 @@ async function ejectBet() {
         isInGame.value = false; // User is out (busted)
       }
     }
-    await fetchCurrentGame(); // Refresh game state
-    // TODO: Refresh user balance from store if not handled by fetchCurrentGame implicitly
+    // Real-time updates will come via WebSocket, so we don't need to poll
+    // await fetchCurrentGame(); // Removed - WebSocket will handle updates
+    
+    // TODO: Refresh user balance from store if not handled by WebSocket updates implicitly
     // const authStore = useStore(); authStore.dispatch('fetchUser');
   } catch (error) {
     console.error('Error ejecting bet:', error);
@@ -407,23 +412,95 @@ async function ejectBet() {
 }
 
 // --- Lifecycle Hooks & Watchers ---
-let gameUpdateInterval;
 
-onMounted(() => {
-  // Initial fetch
-  fetchCurrentGame();
-  fetchGameHistory();
+// WebSocket event handlers
+function handleSpacecrashUpdate(data) {
+  console.log('Received spacecrash update:', data);
+  
+  if (data.game) {
+    const oldGameStatus = currentGame.value?.status;
+    const newGameData = data.game;
+    currentGame.value = newGameData; // Update reactive ref
 
-  // Poll for game updates
-  gameUpdateInterval = setInterval(() => {
-    if (game.value) { // Only poll if Phaser instance exists
-      fetchCurrentGame();
-      // Fetch history less frequently or only when game is not active
-      if (!isGameInProgress.value && !isBettingPhase.value) {
-        fetchGameHistory();
+    // Check if current user is in this game
+    const currentUserId = store.state.user?.id;
+    let userBet = null;
+    
+    if (currentUserId && newGameData.player_bets) {
+      userBet = newGameData.player_bets.find(bet => bet.user_id === currentUserId);
+    }
+
+    // Update user's in-game state based on their bet status
+    if (userBet) {
+      isInGame.value = userBet.status === 'placed'; // User is in game if bet is still placed
+      activeBetAmount.value = userBet.bet_amount;
+      activeAutoEjectAt.value = userBet.auto_eject_at;
+      
+      // Handle bet status changes
+      if (userBet.status === 'ejected' && userBet.win_amount > 0) {
+        ejectMessage.value = `Successfully ejected at ${userBet.ejected_at.toFixed(2)}x! You won ${userBet.win_amount} sats.`;
+        isEjectSuccess.value = true;
+      } else if (userBet.status === 'busted') {
+        ejectMessage.value = `Game crashed at ${newGameData.crash_point.toFixed(2)}x. You busted.`;
+        isEjectSuccess.value = false;
+      }
+    } else if (newGameData.status === 'betting') {
+      // Reset user state for new betting phase
+      isInGame.value = false;
+      activeBetAmount.value = 0;
+      activeAutoEjectAt.value = null;
+      ejectMessage.value = '';
+      betSuccessMessage.value = '';
+      betError.value = '';
+    }
+
+    // Phaser game instance interaction
+    if (game.value && game.value.scene && game.value.scene.isActive('SpacecrashGameScene')) {
+      game.value.registry.events.emit('updateGameStatus', newGameData); // General update
+
+      if (newGameData.status === 'in_progress' && oldGameStatus !== 'in_progress') {
+        console.log("Vue: Game status changed to in_progress. Emitting START_GAME to Phaser.");
+        game.value.registry.events.emit('START_GAME', {});
+      } else if (newGameData.status === 'completed' && oldGameStatus === 'in_progress') {
+        console.log("Vue: Game status changed to completed. Emitting CRASH_AT to Phaser.");
+        game.value.registry.events.emit('CRASH_AT', { crashPoint: newGameData.crash_point });
+      } else if (newGameData.status === 'betting' && oldGameStatus !== 'betting') {
+         console.log("Vue: Game status changed to betting. Emitting RESET_GAME_VIEW to Phaser.");
+        game.value.registry.events.emit('RESET_GAME_VIEW');
       }
     }
-  }, 2500); // Adjusted polling interval
+
+    // Update Vue's local currentMultiplier for display purposes
+    if (newGameData.status === 'in_progress' && newGameData.current_multiplier) {
+      currentMultiplier.value = newGameData.current_multiplier;
+    } else if (newGameData.status === 'completed' && newGameData.crash_point) {
+      currentMultiplier.value = newGameData.crash_point;
+    } else if (newGameData.status === 'betting') {
+      currentMultiplier.value = 1.0;
+    }
+  }
+}
+
+onMounted(() => {
+  // Fetch game history (non-real-time data)
+  fetchGameHistory();
+
+  // Set up WebSocket connection for spacecrash if user is authenticated
+  if (store.state.isAuthenticated && store.state.user) {
+    // Connect WebSocket with user authentication
+    connect(store.state.user);
+    
+    // Join spacecrash room for real-time updates
+    joinRoom('spacecrash');
+    
+    // Set up WebSocket event listeners
+    on('spacecrash:update', handleSpacecrashUpdate);
+  } else {
+    // If not authenticated, still fetch initial game state once
+    fetchCurrentGame();
+  }
+
+  // Initialize Phaser game
   const config = {
     type: Phaser.AUTO,
     parent: 'spacecrash-game-container',
@@ -448,11 +525,10 @@ onMounted(() => {
 
   // Setup event listeners from Phaser to Vue
   if (game.value && game.value.registry) { // Check if Phaser game is initialized
-    // game.value.registry.events.on('PLAYER_EJECT', ejectBet, this); // REMOVED - Eject flow simplified
     game.value.registry.events.on('PHASER_GAME_OVER', (data) => {
       console.log('Vue: PHASER_GAME_OVER event received', data);
       // This event is more for Phaser to inform Vue that its animation/state is "game over".
-      // Vue's game logic (like isInGame) should primarily be driven by API responses via fetchCurrentGame.
+      // Vue's game logic (like isInGame) should primarily be driven by WebSocket updates.
       // However, we can use this to update UI elements that reflect the crash immediately.
       if (currentGame.value && data.crashPoint) {
         currentGame.value.crash_point = data.crashPoint; // Update local model
@@ -468,16 +544,18 @@ onMounted(() => {
     });
   } else {
     // Retry setting up listeners if game initializes late, or handle error
-    console.warn("Phaser game instance not ready in onMounted to set up PLAYER_EJECT listener.");
+    console.warn("Phaser game instance not ready in onMounted to set up listeners.");
   }
 });
 
 onUnmounted(() => {
-  clearInterval(gameUpdateInterval);
+  // Clean up WebSocket listeners
+  off('spacecrash:update', handleSpacecrashUpdate);
+  leaveRoom();
+  
   if (game.value) {
     // Clean up Phaser-to-Vue event listeners
     if (game.value.registry) {
-        // game.value.registry.events.off('PLAYER_EJECT', ejectBet, this); // REMOVED
         game.value.registry.events.off('PHASER_GAME_OVER');
     }
     game.value.destroy(true);

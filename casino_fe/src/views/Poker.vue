@@ -111,6 +111,7 @@ import PokerGameScene from '@/phaser/scenes/PokerGameScene'
 import PokerUIScene from '@/phaser/scenes/PokerUIScene'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationStore } from '@/stores/notifications'
+import { useWebSocket } from '@/composables/useWebSocket'
 
 export default {
   name: 'Poker',
@@ -123,6 +124,7 @@ export default {
   setup(props) {
     const authStore = useAuthStore()
     const notificationStore = useNotificationStore()
+    const { joinRoom, leaveRoom, on, off } = useWebSocket()
 
     // Reactive state
     const game = ref(null)
@@ -248,28 +250,24 @@ export default {
 
     // WebSocket connection for real-time game updates
     const setupWebSocket = () => {
-      const wsUrl = `ws://localhost:8000/ws/poker/${props.tableId}?token=${authStore.token}`
-      const ws = new WebSocket(wsUrl)
+      // Join poker table room
+      const tableRoom = `poker_table_${props.tableId}`
+      joinRoom(tableRoom)
       
-      ws.onopen = () => {
-        console.log('Poker WebSocket connected')
-        loadingMessage.value = 'Connected to table'
-      }
+      // Set up event listeners
+      on('poker:update', (data) => {
+        if (data.table_id === parseInt(props.tableId)) {
+          handleWebSocketMessage({ type: 'game_state_update', game_state: data.table_state })
+        }
+      })
       
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        handleWebSocketMessage(data)
-      }
+      on('poker:action', (data) => {
+        if (data.table_id === parseInt(props.tableId)) {
+          handleWebSocketMessage({ type: 'player_action', ...data })
+        }
+      })
       
-      ws.onclose = () => {
-        console.log('Poker WebSocket disconnected')
-        // Attempt to reconnect
-        setTimeout(setupWebSocket, 3000)
-      }
-      
-      ws.onerror = (error) => {
-        console.error('Poker WebSocket error:', error)
-      }
+      console.log('Poker WebSocket setup complete')
     }
 
     // Handle WebSocket messages

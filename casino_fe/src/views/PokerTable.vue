@@ -91,19 +91,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '@/services/api'; // Use the existing api service
+import { useWebSocket } from '@/composables/useWebSocket';
+import { useStore } from 'vuex';
 
 const route = useRoute();
+const store = useStore();
+const { isConnected, joinRoom, leaveRoom, on, off } = useWebSocket();
+
 const id = ref(route.params.id); // Table ID from route params
 
 const tableState = ref(null);
 const loading = ref(true);
 const error = ref(null);
 
-// Placeholder for logged-in user ID (replace with actual store/auth logic)
-const loggedInUserId = ref(1); // TODO: Replace with actual user ID from auth store
+// Get logged-in user ID from store
+const loggedInUserId = computed(() => store.state.user?.id || 1);
 
 const joinSeatId = ref(null);
 const joinBuyInAmount = ref(null);
@@ -165,7 +170,10 @@ const handleApiResponse = async (promise, successMessage) => {
   try {
     const response = await promise;
     actionMessage.value = response.data.message || successMessage || 'Action successful!';
-    await fetchTableState(id.value); // Refresh state
+    
+    // Note: We don't need to manually refresh state since WebSocket will provide real-time updates
+    // await fetchTableState(id.value); // Removed: WebSocket will handle state updates
+    
     if (response.data.game_flow) { // Log game flow if present
         console.log("Game flow response:", response.data.game_flow);
     }
@@ -261,12 +269,63 @@ const formatHandHistoryEvent = (event) => {
 
 onMounted(() => {
   fetchTableState(id.value);
-  // setInterval(() => {
-  //   if (tableState.value && tableState.value.current_hand_id && !isCurrentTurn(loggedInUserId.value) && !actionInProgress.value) {
-  //     fetchTableState(id.value);
-  //   }
-  // }, 5000); // Poll if hand active, not your turn, and no action in progress
+  
+  // Set up WebSocket room for poker table updates if user is authenticated
+  if (store.state.isAuthenticated && store.state.user) {
+    const tableRoom = `poker_table_${id.value}`;
+    joinRoom(tableRoom);
+    
+    // Set up WebSocket event listeners for poker updates
+    on('poker:update', handlePokerUpdate);
+    on('poker:action', handlePokerAction);
+  }
 });
+
+onUnmounted(() => {
+  // Clean up WebSocket listeners
+  off('poker:update', handlePokerUpdate);
+  off('poker:action', handlePokerAction);
+  leaveRoom();
+});
+
+// WebSocket event handlers
+function handlePokerUpdate(data) {
+  console.log('Received poker table update:', data);
+  
+  if (data.table_id === parseInt(id.value) && data.table_state) {
+    // Update table state from WebSocket data
+    tableState.value = data.table_state;
+    
+    // Clear any action messages if this is a general state update
+    if (!actionInProgress.value) {
+      actionMessage.value = '';
+      actionError.value = false;
+    }
+  }
+}
+
+function handlePokerAction(data) {
+  console.log('Received poker action update:', data);
+  
+  if (data.table_id === parseInt(id.value)) {
+    // Handle specific action updates (player actions, hand events, etc.)
+    if (data.action && data.user_id && data.user_id !== loggedInUserId.value) {
+      // Show action performed by other players
+      const player = tableState.value?.player_states?.find(p => p.user_id === data.user_id);
+      const playerName = player?.username || `User ${data.user_id}`;
+      
+      let actionText = data.action.replace(/_/g, ' ');
+      if (data.amount) actionText += ` ${data.amount}`;
+      
+      console.log(`${playerName} performed action: ${actionText}`);
+    }
+    
+    // Update table state if provided
+    if (data.table_state) {
+      tableState.value = data.table_state;
+    }
+  }
+}
 
 watch(() => route.params.id, (newId) => {
   if (newId) {

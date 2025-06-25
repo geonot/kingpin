@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from marshmallow import ValidationError
+from datetime import datetime, timezone
 
 from ..models import db, User, SpacecrashGame, SpacecrashBet # Relative import
 from ..schemas import ( # Relative import
@@ -9,6 +10,14 @@ from ..schemas import ( # Relative import
 )
 from ..utils import spacecrash_handler # Relative import
 from .admin import is_admin # Relative import for sibling module
+
+def get_websocket_manager():
+    """Get WebSocket manager instance"""
+    try:
+        from services.websocket_manager import websocket_manager
+        return websocket_manager
+    except ImportError:
+        return None
 
 spacecrash_bp = Blueprint('spacecrash', __name__, url_prefix='/api/spacecrash')
 
@@ -44,6 +53,22 @@ def spacecrash_place_bet():
         user.balance -= bet_amount
         db.session.add(new_bet)
         db.session.commit()
+
+        # Broadcast game state update via WebSocket
+        websocket_manager = get_websocket_manager()
+        if websocket_manager:
+            try:
+                # Get updated game data with new bet
+                updated_game = SpacecrashGame.query.get(current_game.id)
+                game_data = SpacecrashGameSchema().dump(updated_game)
+                
+                # Add current bets to game data
+                bets_query = SpacecrashBet.query.filter_by(game_id=updated_game.id).all()
+                game_data['player_bets'] = SpacecrashPlayerBetSchema(many=True).dump(bets_query)
+                
+                websocket_manager.broadcast_spacecrash_update(game_data)
+            except Exception as e:
+                current_app.logger.warning(f"Failed to broadcast Spacecrash bet update: {e}")
 
         current_app.logger.info(f"User {user.id} placed Spacecrash bet {new_bet.id} for {bet_amount} on game {current_game.id}")
         return jsonify({'status': True, 'status_message': 'Bet placed successfully.', 'bet': SpacecrashPlayerBetSchema().dump(new_bet)}), 201
@@ -98,6 +123,23 @@ def spacecrash_eject_bet():
 
     try:
         db.session.commit()
+        
+        # Broadcast game state update via WebSocket
+        websocket_manager = get_websocket_manager()
+        if websocket_manager:
+            try:
+                # Get updated game data with ejected bet
+                updated_game = SpacecrashGame.query.get(active_bet.game_id)
+                game_data = SpacecrashGameSchema().dump(updated_game)
+                
+                # Add current bets to game data
+                bets_query = SpacecrashBet.query.filter_by(game_id=updated_game.id).all()
+                game_data['player_bets'] = SpacecrashPlayerBetSchema(many=True).dump(bets_query)
+                
+                websocket_manager.broadcast_spacecrash_update(game_data)
+            except Exception as e:
+                current_app.logger.warning(f"Failed to broadcast Spacecrash eject update: {e}")
+        
         return jsonify({
             'status': True, 'status_message': message,
             'ejected_at': active_bet.ejected_at,
@@ -111,6 +153,7 @@ def spacecrash_eject_bet():
 
 @spacecrash_bp.route('/current_game', methods=['GET'])
 def spacecrash_current_game_state():
+    """Get current SpaceCrash game state with real-time multiplier"""
     game = SpacecrashGame.query.filter(
         SpacecrashGame.status.in_(['in_progress', 'betting'])
     ).order_by(
@@ -129,10 +172,17 @@ def spacecrash_current_game_state():
 
     game_data = SpacecrashGameSchema().dump(game)
 
+    # Add real-time multiplier and timing information
     if game.status == 'in_progress' and game.game_start_time:
         game_data['current_multiplier'] = spacecrash_handler.get_current_multiplier(game)
     elif game.status == 'betting': # Game is betting, multiplier is 1.0 before start
         game_data['current_multiplier'] = 1.0
+        # Add betting time remaining
+        if game.betting_start_time:
+            from services.spacecrash_game_loop import spacecrash_game_loop
+            betting_elapsed = (datetime.now(timezone.utc) - game.betting_start_time).total_seconds()
+            time_remaining = max(0, spacecrash_game_loop.BETTING_PHASE_DURATION - betting_elapsed)
+            game_data['betting_time_remaining'] = time_remaining
     elif game.status == 'completed': # Game is completed, show actual crash point
         game_data['current_multiplier'] = game.crash_point
 

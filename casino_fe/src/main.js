@@ -5,6 +5,7 @@ import store from './store';
 import './assets/tailwind.css'; // Tailwind directives
 import './assets/styles.css'; // Custom global styles
 import mitt from 'mitt'; // Import mitt
+import { globalWebSocket } from '@/composables/useWebSocket';
 
 // Create event emitter instance
 const emitter = mitt();
@@ -27,6 +28,29 @@ injectStore(store);
 
 app.use(router);
 
+// Initialize WebSocket connection when user is authenticated
+store.watch(
+  (state) => ({ isAuthenticated: state.isAuthenticated, user: state.user }),
+  ({ isAuthenticated, user }) => {
+    if (isAuthenticated && user && !globalWebSocket.isConnected.value) {
+      console.log('User authenticated, connecting WebSocket...');
+      globalWebSocket.connect(user);
+    } else if (!isAuthenticated && globalWebSocket.isConnected.value) {
+      console.log('User logged out, disconnecting WebSocket...');
+      globalWebSocket.disconnect();
+    }
+  },
+  { immediate: true }
+);
+
+// For testing: Connect WebSocket immediately (remove in production)
+setTimeout(() => {
+  if (!globalWebSocket.isConnected.value) {
+    console.log('Testing WebSocket connection...');
+    globalWebSocket.connect({ id: 'test', username: 'test' });
+  }
+}, 2000);
+
 // Global error handler for Vue
 app.config.errorHandler = (err, instance, info) => {
   console.error("Vue error:", err);
@@ -40,6 +64,15 @@ app.config.errorHandler = (err, instance, info) => {
 
 // Mount the app
 app.mount('#app');
+
+// Global handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', event => {
+  console.error('Unhandled promise rejection:', event.reason);
+  // Again, consider sending to a logging service
+  // For example: Sentry.captureException(event.reason);
+  // Or display a generic error message
+  // emitter.emit('global-error', 'An unexpected error occurred (async).');
+});
 
 // Global handler for unhandled promise rejections
 window.addEventListener('unhandledrejection', event => {
