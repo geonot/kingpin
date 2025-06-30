@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Import the Flask app directly
 from app import app
 from models import db, User, Transaction, BonusCode, GameSession
+from sqlalchemy import select, func # Added for SQLAlchemy 2.0 compatibility
 from schemas import UserSchema, AdminUserSchema, TransactionSchema, BonusCodeSchema
 from utils.bitcoin import generate_bitcoin_wallet
 
@@ -76,15 +77,15 @@ def bonus():
 def dashboard(ctx):
     """Display casino dashboard statistics."""
     try:
-        total_users = db.session.query(User.id).count()
-        total_sessions = db.session.query(GameSession.id).count()
-        total_transactions = db.session.query(Transaction.id).count()
-        pending_withdrawals = db.session.query(Transaction.id).filter_by(
+        total_users = db.session.scalar(select(func.count(User.id)))
+        total_sessions = db.session.scalar(select(func.count(GameSession.id)))
+        total_transactions = db.session.scalar(select(func.count(Transaction.id)))
+        pending_withdrawals = db.session.scalar(select(func.count(Transaction.id)).filter_by(
             status='pending', transaction_type='withdraw'
-        ).count()
-        total_bonus_codes = db.session.query(BonusCode.id).count()
-        active_bonus_codes = db.session.query(BonusCode.id).filter_by(is_active=True).count()
-        total_balance_sats = db.session.query(db.func.sum(User.balance)).scalar() or 0
+        ))
+        total_bonus_codes = db.session.scalar(select(func.count(BonusCode.id)))
+        active_bonus_codes = db.session.scalar(select(func.count(BonusCode.id)).filter_by(is_active=True))
+        total_balance_sats = db.session.scalar(select(func.sum(User.balance))) or 0
         
         click.echo("\n🎰 Casino Dashboard Statistics")
         click.echo("=" * 40)
@@ -128,12 +129,12 @@ def update_balance(ctx, user_id, username, amount, notes, external_tx_id, dry_ru
         
         # Find user
         if user_id:
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
             if not user:
                 click.echo(f"❌ Error: User with ID {user_id} not found", err=True)
                 sys.exit(1)
         else:
-            user = User.query.filter_by(username=username).first()
+            user = db.session.scalar(select(User).filter_by(username=username))
             if not user:
                 click.echo(f"❌ Error: User with username '{username}' not found", err=True)
                 sys.exit(1)
@@ -210,20 +211,21 @@ def user_info(ctx, user_id, username, email):
     try:
         # Find user
         if user_id:
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
         elif username:
-            user = User.query.filter_by(username=username).first()
+            user = db.session.scalar(select(User).filter_by(username=username))
         else:
-            user = User.query.filter_by(email=email).first()
+            user = db.session.scalar(select(User).filter_by(email=email))
         
         if not user:
             click.echo(f"❌ Error: User not found", err=True)
             sys.exit(1)
         
         # Get recent transactions
-        recent_transactions = Transaction.query.filter_by(user_id=user.id)\
-                                              .order_by(Transaction.created_at.desc())\
-                                              .limit(5).all()
+        recent_transactions = db.session.scalars(select(Transaction)
+                                                .filter_by(user_id=user.id)
+                                                .order_by(Transaction.created_at.desc())
+                                                .limit(5)).all()
         
         click.echo(f"\n👤 User Information")
         click.echo("=" * 50)
@@ -300,9 +302,9 @@ def create_user(ctx, username, email, password, admin, balance):
     """Create a new user."""
     try:
         # Check if user already exists
-        existing_user = User.query.filter(
+        existing_user = db.session.scalar(select(User).filter(
             (User.username == username) | (User.email == email)
-        ).first()
+        ))
         
         if existing_user:
             if existing_user.username == username:
@@ -372,7 +374,7 @@ def list_transactions(ctx, user_id, username, tx_type, status, limit):
         if user_id:
             query = query.filter_by(user_id=user_id)
         elif username:
-            user = User.query.filter_by(username=username).first()
+            user = db.session.scalar(select(User).filter_by(username=username))
             if not user:
                 click.echo(f"❌ Error: User '{username}' not found", err=True)
                 sys.exit(1)
@@ -543,7 +545,7 @@ def create_bonus_code(ctx, code, bonus_type, value, description, uses, min_depos
     """Create a new bonus code."""
     try:
         # Check if code already exists
-        existing_code = BonusCode.query.filter_by(code_id=code).first()
+        existing_code = db.session.scalar(select(BonusCode).filter_by(code_id=code))
         if existing_code:
             click.echo(f"❌ Error: Bonus code '{code}' already exists", err=True)
             sys.exit(1)
@@ -635,10 +637,10 @@ def cleanup(ctx):
         
         # Clean up old game sessions (older than 7 days)
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=7)
-        old_sessions = GameSession.query.filter(GameSession.created_at < cutoff_date).count()
+        old_sessions = db.session.scalar(select(func.count(GameSession.id)).filter(GameSession.created_at < cutoff_date))
         
         if old_sessions > 0:
-            GameSession.query.filter(GameSession.created_at < cutoff_date).delete()
+            db.session.execute(select(GameSession).filter(GameSession.created_at < cutoff_date)).delete()
             click.echo(f"🧹 Cleaned up {old_sessions} old game sessions")
         
         db.session.commit()

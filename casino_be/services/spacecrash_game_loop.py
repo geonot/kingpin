@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from flask import current_app
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import sessionmaker
 
 from models import SpacecrashGame, SpacecrashBet, User, db
@@ -110,9 +110,9 @@ class SpacecrashGameLoop:
             
     def _get_current_game(self) -> Optional[SpacecrashGame]:
         """Get the current active game"""
-        return self.db_session.query(SpacecrashGame).filter(
+        return self.db_session.scalar(select(SpacecrashGame).filter(
             SpacecrashGame.status.in_(['pending', 'betting', 'in_progress'])
-        ).order_by(SpacecrashGame.created_at.desc()).first()
+        ).order_by(SpacecrashGame.created_at.desc()))
         
     def _create_and_start_betting(self) -> SpacecrashGame:
         """Create new game and start betting phase"""
@@ -158,9 +158,9 @@ class SpacecrashGameLoop:
         
         if betting_elapsed >= self.BETTING_PHASE_DURATION:
             # Check if there are any bets
-            bet_count = self.db_session.query(SpacecrashBet).filter_by(
+            bet_count = self.db_session.scalar(select(func.count(SpacecrashBet.id)).filter_by(
                 game_id=game.id, status='placed'
-            ).count()
+            ))
             
             if bet_count > 0:
                 # Start the game
@@ -239,7 +239,7 @@ class SpacecrashGameLoop:
                 game_data['current_multiplier'] = game.crash_point
                 
             # Add current bets
-            bets_query = self.db_session.query(SpacecrashBet).filter_by(game_id=game.id).all()
+            bets_query = self.db_session.scalars(select(SpacecrashBet).filter_by(game_id=game.id)).all()
             game_data['player_bets'] = SpacecrashPlayerBetSchema(many=True).dump(bets_query)
             
             # Calculate betting time remaining

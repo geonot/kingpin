@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
+from sqlalchemy import select, func # Added for SQLAlchemy 2.0 compatibility
 
 from ..models import db, User, GameSession, Transaction, BonusCode # Relative import
 from ..schemas import ( # Relative import
@@ -19,13 +20,13 @@ def admin_dashboard():
     if not is_admin():
         return jsonify({'status': False, 'status_message': 'Access denied'}), 403
     try:
-        total_users = db.session.query(User.id).count()
-        total_sessions = db.session.query(GameSession.id).count()
-        total_transactions = db.session.query(Transaction.id).count()
-        pending_withdrawals = db.session.query(Transaction.id).filter_by(status='pending', transaction_type='withdraw').count()
-        total_bonus_codes = db.session.query(BonusCode.id).count()
-        active_bonus_codes = db.session.query(BonusCode.id).filter_by(is_active=True).count()
-        total_balance_sats = db.session.query(db.func.sum(User.balance)).scalar() or 0
+        total_users = db.session.scalar(select(func.count(User.id)))
+        total_sessions = db.session.scalar(select(func.count(GameSession.id)))
+        total_transactions = db.session.scalar(select(func.count(Transaction.id)))
+        pending_withdrawals = db.session.scalar(select(func.count(Transaction.id)).filter_by(status='pending', transaction_type='withdraw'))
+        total_bonus_codes = db.session.scalar(select(func.count(BonusCode.id)))
+        active_bonus_codes = db.session.scalar(select(func.count(BonusCode.id)).filter_by(is_active=True))
+        total_balance_sats = db.session.scalar(select(func.sum(User.balance))) or 0
         dashboard_data = {
             'total_users': total_users, 'total_sessions': total_sessions,
             'total_transactions': total_transactions, 'pending_withdrawals': pending_withdrawals,
@@ -78,7 +79,7 @@ def admin_update_user(user_id):
         return jsonify({'status': False, 'status_message': errors}), 400
     try:
         if 'email' in data and data['email'] != user.email:
-            if User.query.filter(User.email == data['email'], User.id != user_id).first():
+            if db.session.scalar(select(User).filter(User.email == data['email'], User.id != user_id)):
                 return jsonify({'status': False, 'status_message': 'Email already in use.'}), 409
 
         # Iterate over validated data from the schema load, not raw data, if possible.

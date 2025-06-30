@@ -1,5 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP # For precise calculations
 from flask import current_app # To access logger if needed, or pass logger
+from sqlalchemy import select # Added for SQLAlchemy 2.0 compatibility
 # Assuming 'casino_be' is the root package for the application context
 # For tools, direct relative imports like 'from ..models' are usually preferred if the structure is flat.
 # If 'casino_be' is not directly in python path but a sub-module is, this might need adjustment.
@@ -26,17 +27,17 @@ def apply_bonus_to_deposit(user: User, bonus_code_str: str, requested_deposit_am
     '''
     logger = current_app.logger # Use Flask's current_app logger
 
-    bonus_code = BonusCode.query.filter_by(code_id=bonus_code_str.strip().upper(), is_active=True).first()
+    bonus_code = db.session.scalar(select(BonusCode).filter_by(code_id=bonus_code_str.strip().upper(), is_active=True))
 
     if not bonus_code:
         return {'success': False, 'bonus_value_sats': 0, 'user_bonus_id': None, 'message': 'Invalid or expired bonus code', 'status_code': 400, 'bonus_code_obj': None}
 
     # Check if user already has an active, non-cancelled bonus
-    active_user_bonus = UserBonus.query.filter_by(
+    active_user_bonus = db.session.scalar(select(UserBonus).filter_by(
         user_id=user.id,
         is_active=True,
         is_cancelled=False
-    ).first()
+    ))
     if active_user_bonus:
         logger.warning(f"User {user.id} attempted to apply bonus '{bonus_code_str}' while already having an active bonus {active_user_bonus.id}.")
         return {'success': False, 'bonus_value_sats': 0, 'user_bonus_id': None, 'message': 'You already have an active bonus. Please complete or cancel it before applying a new one.', 'status_code': 400, 'bonus_code_obj': bonus_code}

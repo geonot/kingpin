@@ -1,45 +1,32 @@
+"""
+Secure configuration module with fail-fast validation.
+
+All configuration values are validated at startup with no insecure defaults.
+Production environments must provide all required environment variables.
+"""
 import os
+from config_validator import validate_production_config
 
 class Config:
-    # Database configuration - PostgreSQL for both development and production
-    DATABASE_URL = os.getenv('DATABASE_URL')
+    """Production-ready configuration with fail-fast validation."""
     
-    if DATABASE_URL:
-        # Use provided DATABASE_URL
-        SQLALCHEMY_DATABASE_URI = DATABASE_URL
-    else:
-        # Build from individual components for local development
-        DB_HOST = os.getenv('DB_HOST', 'localhost')
-        DB_PORT = os.getenv('DB_PORT', '5432')
-        DB_NAME = os.getenv('DB_NAME', 'kingpin_casino')
-        DB_USER = os.getenv('DB_USER', 'kingpin_user')
-        DB_PASSWORD = os.getenv('DB_PASSWORD', 'password123')
-        
-        SQLALCHEMY_DATABASE_URI = f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
+    # Validate configuration and get secure values
+    _validated_config = validate_production_config()
     
+    # Database Configuration
+    SQLALCHEMY_DATABASE_URI = _validated_config['SQLALCHEMY_DATABASE_URI']
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-
-    # JWT Configuration - Enhanced Security
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
-    if not JWT_SECRET_KEY:
-        import secrets
-        import warnings
-        # Generate a secure random key for development
-        JWT_SECRET_KEY = secrets.token_urlsafe(64)
-        warnings.warn(
-            "JWT_SECRET_KEY not set in environment. Using generated key for development. "
-            "Set JWT_SECRET_KEY environment variable for production!",
-            UserWarning
-        )
     
-    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', '3600'))  # 1 hour
-    JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', str(86400 * 7)))  # 7 days
+    # JWT Configuration - Enhanced Security
+    JWT_SECRET_KEY = _validated_config['JWT_SECRET_KEY']
+    JWT_ACCESS_TOKEN_EXPIRES = _validated_config['JWT_ACCESS_TOKEN_EXPIRES']
+    JWT_REFRESH_TOKEN_EXPIRES = _validated_config['JWT_REFRESH_TOKEN_EXPIRES']
     JWT_BLACKLIST_ENABLED = True
     JWT_BLACKLIST_TOKEN_CHECKS = ['access', 'refresh']
     
     # JWT Cookie Configuration for enhanced security
     JWT_TOKEN_LOCATION = ['cookies']
-    JWT_COOKIE_SECURE = os.getenv('JWT_COOKIE_SECURE', 'True').lower() in ('true', '1', 't')
+    JWT_COOKIE_SECURE = _validated_config['JWT_COOKIE_SECURE']
     JWT_COOKIE_HTTPONLY = True
     JWT_COOKIE_SAMESITE = 'Strict'
     JWT_COOKIE_CSRF_PROTECT = True
@@ -56,49 +43,31 @@ class Config:
     # Security Headers
     SECURITY_HEADERS = True
 
-    # Rate Limiter Storage URI
-    # For production, set e.g., RATELIMIT_STORAGE_URI='redis://localhost:6379/0'
-    RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
+    # Rate Limiter Storage URI - Validated for production
+    RATELIMIT_STORAGE_URI = _validated_config['RATELIMIT_STORAGE_URI']
 
-    # Flask Debug Mode - SECURE DEFAULT
-    # Debug mode is DISABLED by default for security
-    # Set FLASK_DEBUG=True explicitly for development
-    DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
+    # Flask Debug Mode - Validated and secure
+    DEBUG = _validated_config['DEBUG']
 
     # Satoshi Conversion Factor (1 BTC = 100,000,000 Satoshis)
     SATOSHI_FACTOR = 100_000_000
 
-    # Admin settings - MUST be set in production
-    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
-    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
-    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
+    # Admin settings - Validated with fail-fast for production
+    ADMIN_USERNAME = _validated_config['ADMIN_USERNAME']
+    ADMIN_PASSWORD = _validated_config['ADMIN_PASSWORD']
+    ADMIN_EMAIL = _validated_config['ADMIN_EMAIL']
+
+    # Service API Token - Validated for production security
+    SERVICE_API_TOKEN = _validated_config['SERVICE_API_TOKEN']
+
+    # Encryption key for private key storage - Validated and secure
+    ENCRYPTION_SECRET = _validated_config['ENCRYPTION_SECRET']
     
-    # Validate required admin settings
-    if not all([ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_EMAIL]):
-        import warnings
-        warnings.warn(
-            "Admin credentials not fully configured in environment variables. "
-            "Set ADMIN_USERNAME, ADMIN_PASSWORD, and ADMIN_EMAIL for production!",
-            UserWarning
-        )
-        # Fallback values for development only
-        ADMIN_USERNAME = ADMIN_USERNAME or 'admin'
-        ADMIN_PASSWORD = ADMIN_PASSWORD or 'admin123'
-        ADMIN_EMAIL = ADMIN_EMAIL or 'admin@kingpincasino.local'
-
-    # Service API Token for internal services (e.g., polling service)
-    SERVICE_API_TOKEN = os.getenv('SERVICE_API_TOKEN', 'default_service_token_please_change')
-
-    # Encryption key for private key storage
-    ENCRYPTION_SECRET = os.getenv('ENCRYPTION_SECRET')
-    if not ENCRYPTION_SECRET:
-        import warnings
-        warnings.warn(
-            "ENCRYPTION_SECRET not set in environment. Using default for development. "
-            "Set ENCRYPTION_SECRET environment variable for production!",
-            UserWarning
-        )
-        ENCRYPTION_SECRET = 'default-encryption-secret-change-in-production'
+    # CORS Configuration - Validated for production
+    CORS_ORIGINS_LIST = _validated_config['CORS_ORIGINS']
+    
+    # Feature Flags
+    CRYSTAL_GARDEN_ENABLED = _validated_config['CRYSTAL_GARDEN_ENABLED']
 
     # Feature Flags
     CRYSTAL_GARDEN_ENABLED = os.getenv('CRYSTAL_GARDEN_ENABLED', 'True').lower() in ('true', '1', 't')

@@ -1,4 +1,5 @@
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select # Added for SQLAlchemy 2.0 compatibility
 from datetime import datetime, timezone
 import random
 import json # Though direct dict access for JSON field is usually fine with SQLAlchemy
@@ -57,9 +58,9 @@ class CrystalGardenService:
         Retrieves an existing PlayerGarden for the user or creates a new one.
         Raises ItemNotFoundError if user does not exist.
         """
-        garden = PlayerGarden.query.filter_by(user_id=user_id).first()
+        garden = db.session.scalar(select(PlayerGarden).filter_by(user_id=user_id))
         if not garden:
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
             if not user:
                 raise ItemNotFoundError(f"User with ID {user_id} not found.")
             try:
@@ -82,11 +83,11 @@ class CrystalGardenService:
         Allows a user to buy a crystal seed.
         Raises ItemNotFoundError, InsufficientFundsError.
         """
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise ItemNotFoundError(f"User with ID {user_id} not found.")
 
-        seed = CrystalSeed.query.get(seed_id)
+        seed = db.session.get(CrystalSeed, seed_id)
         if not seed:
             raise ItemNotFoundError(f"CrystalSeed with ID {seed_id} not found.")
 
@@ -110,18 +111,18 @@ class CrystalGardenService:
         """
         garden = self.get_or_create_player_garden(user_id) # Ensures garden exists or raises if user not found
 
-        seed = CrystalSeed.query.get(seed_id) # Assuming buy_seed was called prior, so seed should exist
+        seed = db.session.get(CrystalSeed, seed_id) # Assuming buy_seed was called prior, so seed should exist
         if not seed:
             raise ItemNotFoundError(f"CrystalSeed with ID {seed_id} not found.")
 
         if not (0 <= garden_plot_x < garden.grid_size_x and 0 <= garden_plot_y < garden.grid_size_y):
             raise InvalidPlotError(f"Plot ({garden_plot_x}, {garden_plot_y}) is outside garden boundaries.")
 
-        existing_flower = CrystalFlower.query.filter_by(
+        existing_flower = db.session.scalar(select(CrystalFlower).filter_by(
             player_garden_id=garden.id,
             position_x=garden_plot_x,
             position_y=garden_plot_y
-        ).first()
+        ))
         if existing_flower:
             raise PlotOccupiedError(f"Plot ({garden_plot_x}, {garden_plot_y}) is already occupied.")
 
@@ -150,7 +151,7 @@ class CrystalGardenService:
         """
         garden = self.get_or_create_player_garden(user_id)
 
-        flowers = CrystalFlower.query.filter_by(player_garden_id=garden.id).all()
+        flowers = db.session.scalars(select(CrystalFlower).filter_by(player_garden_id=garden.id)).all()
 
         flower_list = []
         for flower in flowers:
@@ -174,21 +175,21 @@ class CrystalGardenService:
         """
         Retrieves all CrystalCodexEntry items for a user.
         """
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user: # Should not happen if user_id comes from auth
             raise ItemNotFoundError(f"User with ID {user_id} not found.")
-        return CrystalCodexEntry.query.filter_by(user_id=user_id).all()
+        return db.session.scalars(select(CrystalCodexEntry).filter_by(user_id=user_id)).all()
 
     def apply_power_up(self, user_id: int, flower_id: int, power_up_type: str) -> CrystalFlower:
         """
         Applies a power-up to a crystal flower.
         Raises ItemNotFoundError, InsufficientFundsError.
         """
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise ItemNotFoundError(f"User {user_id} not found.")
 
-        flower = CrystalFlower.query.filter_by(id=flower_id, user_id=user_id).first()
+        flower = db.session.scalar(select(CrystalFlower).filter_by(id=flower_id, user_id=user_id))
         if not flower:
             raise ItemNotFoundError(f"CrystalFlower {flower_id} not found for user {user_id}.")
 
@@ -257,11 +258,11 @@ class CrystalGardenService:
         """
         Processes one growth cycle for all flowers in a garden.
         """
-        garden = PlayerGarden.query.get(garden_id)
+        garden = db.session.get(PlayerGarden, garden_id)
         if not garden:
             raise ItemNotFoundError(f"PlayerGarden {garden_id} not found.")
 
-        flowers = CrystalFlower.query.filter_by(player_garden_id=garden.id).all()
+        flowers = db.session.scalars(select(CrystalFlower).filter_by(player_garden_id=garden.id)).all()
         summary = {"updated_flowers": 0, "newly_bloomed": 0}
 
         for flower in flowers:
@@ -272,7 +273,7 @@ class CrystalGardenService:
                 flower.growth_stage = 'blooming'
                 summary["newly_bloomed"] += 1
 
-                seed = CrystalSeed.query.get(flower.crystal_seed_id)
+                seed = db.session.get(CrystalSeed, flower.crystal_seed_id)
                 if seed and seed.potential_outcomes:
                     # Ensure potential_outcomes is a dict
                     outcomes = seed.potential_outcomes if isinstance(seed.potential_outcomes, dict) else {}
@@ -312,11 +313,11 @@ class CrystalGardenService:
         """
         Appraises a crystal flower and sets its value.
         """
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             raise ItemNotFoundError(f"User {user_id} not found.")
 
-        flower = CrystalFlower.query.filter_by(id=flower_id, user_id=user_id).first()
+        flower = db.session.scalar(select(CrystalFlower).filter_by(id=flower_id, user_id=user_id))
         if not flower:
             raise ItemNotFoundError(f"CrystalFlower {flower_id} not found for user {user_id}.")
 

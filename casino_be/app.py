@@ -70,6 +70,7 @@ from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STA
 from .utils import baccarat_helper # Relative import
 from .config import Config # Relative import
 from sqlalchemy.orm import joinedload # Added for poker join logic
+from sqlalchemy import select, func # Added for SQLAlchemy 2.0 compatibility
 from decimal import Decimal
 from .services.bonus_service import apply_bonus_to_deposit # Relative import
 from http import HTTPStatus
@@ -141,10 +142,9 @@ def create_app(config_class=Config):
             "http://127.0.0.1:8082"
         ])
     
-    # Production origins from environment
-    production_origins = os.getenv('CORS_ORIGINS', '').split(',')
-    production_origins = [origin.strip() for origin in production_origins if origin.strip()]
-    allowed_origins.extend(production_origins)
+    # Production origins from validated configuration
+    if hasattr(config_class, 'CORS_ORIGINS_LIST') and config_class.CORS_ORIGINS_LIST:
+        allowed_origins.extend(config_class.CORS_ORIGINS_LIST)
     
     # Apply CORS with enhanced security
     if allowed_origins:
@@ -349,7 +349,7 @@ def create_app(config_class=Config):
         jti = jwt_payload['jti']
         try:
             # Check if token exists in blacklist
-            token = db.session.query(TokenBlacklist.id).filter_by(jti=jti).scalar()
+            token = db.session.scalar(select(TokenBlacklist.id).filter_by(jti=jti))
             is_blacklisted = token is not None
             
             if is_blacklisted:
@@ -479,8 +479,8 @@ def create_app(config_class=Config):
     def db_cleanup_expired_tokens_command():
         now = datetime.now(timezone.utc)
         try:
-            count = db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).count()
-            db.session.query(TokenBlacklist).filter(TokenBlacklist.expires_at < now).delete()
+            count = db.session.scalar(select(func.count(TokenBlacklist.id)).filter(TokenBlacklist.expires_at < now))
+            db.session.execute(select(TokenBlacklist).filter(TokenBlacklist.expires_at < now)).delete()
             db.session.commit()
             print(f"Successfully deleted {count} expired token(s).")
         except Exception as e:
@@ -548,7 +548,7 @@ def create_app(config_class=Config):
                 return
 
         with app.app_context(): # Ensure we are within application context for db operations
-            existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
+            existing_user = db.session.scalar(select(User).filter((User.username == username) | (User.email == email)))
             if existing_user:
                 if existing_user.username == username:
                     click.echo(f"Error: User with username '{username}' already exists.")
