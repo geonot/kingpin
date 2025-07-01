@@ -258,12 +258,12 @@ def create_app(config_class=Config):
                        engineio_logger=app.logger)
     
     # Initialize WebSocket Manager
-    from services.websocket_manager import websocket_manager
+    from .services.websocket_manager import websocket_manager
     websocket_manager.socketio = socketio
     websocket_manager.init_app(app)
     
     # Initialize SpaceCrash Game Loop
-    from services.spacecrash_game_loop import spacecrash_game_loop
+    from .services.spacecrash_game_loop import spacecrash_game_loop
     spacecrash_game_loop.websocket_manager = websocket_manager
     spacecrash_game_loop.app = app
     

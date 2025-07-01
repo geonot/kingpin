@@ -10,9 +10,9 @@ class AppException(Exception):
         self.action_button = action_button if action_button is not None else {}
 
 class ValidationException(AppException):
-    def __init__(self, status_message="Validation failed", details=None, action_button=None):
+    def __init__(self, status_message="Validation failed", details=None, action_button=None, error_code=ErrorCodes.VALIDATION_ERROR):
         super().__init__(
-            error_code=ErrorCodes.VALIDATION_ERROR,
+            error_code=error_code,
             status_message=status_message,
             status_code=422,
             details=details,
@@ -20,9 +20,9 @@ class ValidationException(AppException):
         )
 
 class AuthenticationException(AppException):
-    def __init__(self, status_message="Authentication required", details=None, action_button=None):
+    def __init__(self, status_message="Authentication required", details=None, action_button=None, error_code=ErrorCodes.UNAUTHENTICATED):
         super().__init__(
-            error_code=ErrorCodes.UNAUTHENTICATED,
+            error_code=error_code,
             status_message=status_message,
             status_code=401,
             details=details,
@@ -30,9 +30,9 @@ class AuthenticationException(AppException):
         )
 
 class AuthorizationException(AppException):
-    def __init__(self, status_message="Forbidden", details=None, action_button=None):
+    def __init__(self, status_message="Forbidden", details=None, action_button=None, error_code=ErrorCodes.FORBIDDEN):
         super().__init__(
-            error_code=ErrorCodes.FORBIDDEN,
+            error_code=error_code,
             status_message=status_message,
             status_code=403,
             details=details,
@@ -40,9 +40,9 @@ class AuthorizationException(AppException):
         )
 
 class NotFoundException(AppException):
-    def __init__(self, status_message="Resource not found", details=None, action_button=None):
+    def __init__(self, status_message="Resource not found", details=None, action_button=None, error_code=ErrorCodes.NOT_FOUND):
         super().__init__(
-            error_code=ErrorCodes.NOT_FOUND,
+            error_code=error_code,
             status_message=status_message,
             status_code=404,
             details=details,
@@ -50,9 +50,9 @@ class NotFoundException(AppException):
         )
 
 class InsufficientFundsException(AppException):
-    def __init__(self, status_message="Insufficient funds", details=None, action_button=None):
+    def __init__(self, status_message="Insufficient funds", details=None, action_button=None, error_code=ErrorCodes.INSUFFICIENT_FUNDS):
         super().__init__(
-            error_code=ErrorCodes.INSUFFICIENT_FUNDS,
+            error_code=error_code,
             status_message=status_message,
             status_code=400,
             details=details,
@@ -60,9 +60,9 @@ class InsufficientFundsException(AppException):
         )
 
 class GameLogicException(AppException):
-    def __init__(self, status_message="Game logic error", details=None, action_button=None, status_code=400):
+    def __init__(self, status_message="Game logic error", details=None, action_button=None, status_code=400, error_code=ErrorCodes.GAME_LOGIC_ERROR):
         super().__init__(
-            error_code=ErrorCodes.GAME_LOGIC_ERROR,
+            error_code=error_code,
             status_message=status_message,
             status_code=status_code, # Can be 400 or 500
             details=details,
@@ -70,9 +70,9 @@ class GameLogicException(AppException):
         )
 
 class InternalServerErrorException(AppException):
-    def __init__(self, status_message="Internal server error", details=None, action_button=None):
+    def __init__(self, status_message="Internal server error", details=None, action_button=None, error_code=ErrorCodes.INTERNAL_SERVER_ERROR):
         super().__init__(
-            error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            error_code=error_code,
             status_message=status_message,
             status_code=500,
             details=details,

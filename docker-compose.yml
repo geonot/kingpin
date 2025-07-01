@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: casino_db
+    environment:
+      POSTGRES_USER: casino_user
+      POSTGRES_PASSWORD: casino_password
+      POSTGRES_DB: casino_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Expose for direct access if needed, but backend will use service name
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U casino_user -d casino_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - casino_network
+
+  backend:
+    container_name: casino_backend
+    build:
+      context: ./casino_be
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_APP: app.py
+      FLASK_ENV: development # Can be overridden to 'production'
+      FLASK_DEBUG: 'True' # Set to 'False' for production
+      DATABASE_URL: postgresql://casino_user:casino_password@db:5432/casino_db
+      JWT_SECRET_KEY: 'your-super-secret-jwt-key-for-compose' # CHANGE THIS
+      # For development, allow broader CORS. For production, this should be specific.
+      CORS_ALLOWED_ORIGINS: 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000'
+      RATELIMIT_STORAGE_URI: memory:// # Use redis in production
+      # For docker-entrypoint.sh to create an admin user on first run (optional)
+      # CREATE_ADMIN_USER: "true"
+      # ADMIN_USERNAME: "admincompose"
+      # ADMIN_EMAIL: "admincompose@example.com"
+      # ADMIN_PASSWORD: "password123"
+      TESTING: "False" # Ensure this is not set to true for normal operation
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./casino_be:/home/appuser/web
+      # Add this line to ensure __pycache__ from host doesn't interfere if using volumes for dev
+      # - /home/appuser/web/__pycache__
+    networks:
+      - casino_network
+
+  frontend:
+    container_name: casino_frontend
+    build:
+      context: ./casino_fe
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80" # Nginx serves on port 80 inside the container
+    depends_on:
+      - backend
+    networks:
+      - casino_network
+    # To make frontend aware of backend through nginx proxy,
+    # VUE_APP_API_BASE_URL is not strictly needed at runtime if frontend uses relative /api paths
+    # and nginx.conf in frontend image proxies /api to http://backend:5000
+
+volumes:
+  postgres_data:
+
+networks:
+  casino_network:
+    driver: bridge

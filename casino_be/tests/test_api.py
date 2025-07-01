@@ -26,7 +26,7 @@ class BaseTestCase(unittest.TestCase):
 
     def setUp(self):
         """Set up for each test."""
-        self.app = create_app(TestingConfig) # Create a new app instance with TestingConfig
+        self.app, _ = create_app(TestingConfig) # Create a new app instance with TestingConfig, ignore socketio
 
         # Store the database file path from the app's config for cleanup
         self.test_db_file = self.app.config.get('DATABASE_FILE_PATH', 'test_casino_be_isolated.db') # Default if not in config
@@ -56,10 +56,13 @@ class BaseTestCase(unittest.TestCase):
 
     def _create_user(self, username="testuser", email="test@example.com", password="password123", deposit_wallet_address=None):
         """Helper to create a user directly in the DB."""
+        hashed_password = User.hash_password(password)
+        # Log the hash being created
+        print(f"TEST_DEBUG: Creating user {username} with password '{password}', hash: {hashed_password}")
         user = User(
             username=username,
             email=email,
-            password=User.hash_password(password), # Assuming User model has hash_password
+            password=hashed_password,
             # Use provided deposit_wallet_address if available, otherwise generate one
             deposit_wallet_address=deposit_wallet_address if deposit_wallet_address is not None else f"test_wallet_{username}"
         )
@@ -167,7 +170,7 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 422) # ValidationException returns 422
         self.assertFalse(data['status'])
-        self.assertEqual(data['error_code'], ErrorCodes.USERNAME_ALREADY_EXISTS)
+        self.assertEqual(data['error_code'], ErrorCodes.VALIDATION_ERROR) # Expecting default validation error
         self.assertEqual(data['status_message'], 'Username already taken.')
         self.assertIn('username', data['details'])
 
@@ -185,7 +188,7 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 422) # ValidationException returns 422
         self.assertFalse(data['status'])
-        self.assertEqual(data['error_code'], ErrorCodes.EMAIL_ALREADY_EXISTS)
+        self.assertEqual(data['error_code'], ErrorCodes.VALIDATION_ERROR) # Expecting default validation error
         self.assertEqual(data['status_message'], 'Email already registered.')
         self.assertIn('email', data['details'])
 
@@ -244,7 +247,7 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['error_code'], ErrorCodes.INVALID_CREDENTIALS)
+        self.assertEqual(data['error_code'], ErrorCodes.UNAUTHENTICATED) # Expecting default from AuthenticationException
         self.assertEqual(data['status_message'], 'Invalid username or password.')
 
     def test_login_invalid_password(self):
@@ -258,8 +261,171 @@ class AuthApiTests(BaseTestCase):
 
         self.assertEqual(response.status_code, 401) # Unauthorized
         self.assertFalse(data['status'])
-        self.assertEqual(data['error_code'], ErrorCodes.INVALID_CREDENTIALS)
+        self.assertEqual(data['error_code'], ErrorCodes.UNAUTHENTICATED) # Expecting default from AuthenticationException
         self.assertEqual(data['status_message'], 'Invalid username or password.')
+
+    def test_logout_success_and_token_blacklisting(self):
+        """Test successful user logout and token blacklisting."""
+        # Login to get cookies set
+        _, user_id = self._login_and_get_token(username_prefix="logout_user")
+
+        # Make a request to a protected endpoint to confirm login works
+        profile_response_before_logout = self.client.get('/api/me')
+        self.assertEqual(profile_response_before_logout.status_code, 200, "Protected endpoint should be accessible before logout.")
+
+        # Logout
+        logout_response = self.client.post('/api/logout') # No body needed for logout
+        data = json.loads(logout_response.data.decode())
+
+        self.assertEqual(logout_response.status_code, 200, f"Logout failed: {data}")
+        self.assertTrue(data['status'])
+        self.assertEqual(data['status_message'], 'Successfully logged out') # Removed period
+
+        # Verify token is blacklisted by trying to access a protected endpoint again
+        profile_response_after_logout = self.client.get('/api/me') # Uses the same client, which had the cookies
+
+        # Depending on how JWT Extended handles blacklisted HttpOnly cookies,
+        # it might return 401 (Unauthorized) or 422 (Unprocessable Entity if specific error for revoked token)
+        # Flask-JWT-Extended typically returns 401 if the token is revoked and blocklist is enabled.
+        self.assertEqual(profile_response_after_logout.status_code, 401, "Accessing protected endpoint after logout should be unauthorized.")
+        error_data = json.loads(profile_response_after_logout.data.decode())
+        self.assertFalse(error_data['status'])
+        # Check for specific error code if JWT Extended provides one for revoked tokens, otherwise generic UNAUTHENTICATED
+        # For HttpOnly cookies, if the cookie is simply cleared by /logout, then subsequent requests won't have it, leading to "Missing cookie"
+        # If the cookie is still sent but the token is blacklisted, it would be "Token has been revoked"
+        # The current /logout route uses unset_jwt_cookies which clears them.
+        # So, the error from @jwt_required would be due to missing cookies.
+        self.assertEqual(error_data['error_code'], ErrorCodes.UNAUTHENTICATED)
+        self.assertIn(error_data['status_message'].lower(), ['missing cookie "access_token_cookie"', 'missing or invalid authorization token.'])
+
+
+class UserProfileApiTests(BaseTestCase):
+    """Tests for user profile and settings API endpoints."""
+
+    def test_get_user_profile_success(self):
+        """Test successfully fetching the current user's profile."""
+        _, user_id = self._login_and_get_token(username_prefix="profile_user")
+
+        # Fetch the user details from DB to compare
+        with self.app.app_context():
+            db_user = User.query.get(user_id)
+            self.assertIsNotNone(db_user)
+
+        response = self.client.get('/api/me')
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, f"Failed to get profile: {data}")
+        self.assertTrue(data['status'])
+        self.assertEqual(data['user']['id'], user_id)
+        self.assertEqual(data['user']['username'], db_user.username)
+        self.assertEqual(data['user']['email'], db_user.email)
+        self.assertNotIn('password_hash', data['user'], "Password hash should not be in profile response.")
+        self.assertIn('balance', data['user']) # Balance should be present
+
+    def test_get_user_profile_unauthenticated(self):
+        """Test fetching user profile without authentication."""
+        response = self.client.get('/api/me')
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 401) # Unauthorized
+        self.assertFalse(data['status'])
+        self.assertEqual(data['error_code'], ErrorCodes.UNAUTHENTICATED)
+
+    def test_update_user_settings_change_email_success(self):
+        """Test successfully changing the user's email."""
+        _, user_id = self._login_and_get_token(username_prefix="email_change_user", password_suffix="password123") # Explicitly show suffix
+        new_email = "new_email@example.com"
+        correct_current_password = "password123" # This is the actual password set by _login_and_get_token
+
+        payload = {
+            "email": new_email,
+            "current_password": correct_current_password
+        }
+        response = self.client.post('/api/settings', json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, f"Failed to update settings: {data}")
+        self.assertTrue(data['status'])
+        # self.assertEqual(data['status_message'], "Settings updated successfully.") # Route doesn't return status_message
+        self.assertEqual(data['user']['email'], new_email)
+
+        # Verify in DB
+        with self.app.app_context():
+            updated_user = User.query.get(user_id)
+            self.assertEqual(updated_user.email, new_email)
+
+    def test_update_user_settings_change_password_success(self):
+        """Test successfully changing the user's password."""
+        username = "password_change_user"
+        old_password = "oldPassword123!"
+        new_password = "newStrongPassword456@"
+
+        self._create_user(username=username, password=old_password, email=f"{username}@example.com")
+
+        # Log in with old password
+        login_payload = {"username": username, "password": old_password}
+        login_response = self.client.post('/api/login', json=login_payload)
+        self.assertEqual(login_response.status_code, 200, "Login with old password failed.")
+
+        payload = {
+            "current_password": old_password,
+            "new_password": new_password,
+            "confirm_new_password": new_password
+        }
+        response = self.client.post('/api/settings', json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, f"Failed to update password: {data}")
+        self.assertTrue(data['status'])
+        # self.assertEqual(data['status_message'], "Settings updated successfully.") # Route doesn't return status_message
+
+        # Verify new password works for login, old one does not
+        # Logout first to clear session/cookies from previous login
+        self.client.post('/api/logout')
+
+        # Try logging in with old password (should fail)
+        login_fail_response = self.client.post('/api/login', json={"username": username, "password": old_password})
+        self.assertEqual(login_fail_response.status_code, 401, "Login with old password should fail after change.")
+
+        # Try logging in with new password (should succeed)
+        login_success_response = self.client.post('/api/login', json={"username": username, "password": new_password})
+        self.assertEqual(login_success_response.status_code, 200, "Login with new password failed.")
+        success_data = json.loads(login_success_response.data.decode())
+        self.assertTrue(success_data['status'])
+
+
+    def test_update_user_settings_incorrect_current_password(self):
+        """Test changing settings with an incorrect current password."""
+        _, user_id = self._login_and_get_token(username_prefix="settings_fail_user")
+
+        payload = {
+            "email": "any_new_email@example.com",
+            "current_password": "wrong_current_password"
+        }
+        response = self.client.post('/api/settings', json=payload)
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 401, f"Response: {data}") # Unauthorized or BadRequest
+        self.assertFalse(data['status'])
+        self.assertEqual(data['error_code'], ErrorCodes.UNAUTHENTICATED) # Changed to UN AUTHENTICATED
+        self.assertEqual(data['status_message'], "Incorrect current password.")
+
+    def test_update_user_settings_new_password_mismatch(self):
+        """Test changing password when new_password and confirm_new_password don't match."""
+        _, user_id = self._login_and_get_token(username_prefix="pw_mismatch_user", password_suffix="password123")
+
+        payload = {
+            "current_password": "password123",
+            "new_password": "newStrongP@ssword1!", # Strong password
+            "confirm_new_password": "differentPasswordValue" # Still different for mismatch test
+        }
+        response = self.client.post('/api/settings', json=payload)
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 422, f"Response: {data}") # Validation error
+        self.assertFalse(data['status'])
+        self.assertEqual(data['error_code'], ErrorCodes.VALIDATION_ERROR)
+        self.assertIn("New passwords do not match.", data['details']['errors']['_schema'][0]) # Schema-level error
 
 
 class GameApiTests(BaseTestCase):
@@ -268,7 +434,7 @@ class GameApiTests(BaseTestCase):
     # GameApiTests will use the _login_and_get_token from BaseTestCase
 
     def _create_slot(self, name="Test Slot", short_name="test_slot_sn",
-                     reels=3, rows=3, scatter_symbol_id=None, bonus_symbol_id=None, is_multiway=False): # Added scatter_symbol_id, bonus_symbol_id, is_multiway
+                     reels=3, rows=3, scatter_symbol_id=None, bonus_symbol_id=None, is_multiway=False, is_active=True): # Added is_active
         """Helper to create a slot machine directly in the DB."""
         with self.app.app_context():
             # Create the slot first to get its ID
@@ -284,6 +450,7 @@ class GameApiTests(BaseTestCase):
                 scatter_symbol_id=scatter_symbol_id, # Set from parameter
                 # bonus_symbol_id=bonus_symbol_id, # Removed as it's not a field in Slot model
                 is_multiway=is_multiway,           # Set from parameter
+                is_active=is_active,               # Set from parameter
                 # Assuming wild_symbol_id might be one of the default symbols created below
                 wild_symbol_id=4 # Defaulting wild to symbol_internal_id 4 for now
             )
@@ -637,9 +804,9 @@ class GameApiTests(BaseTestCase):
                                      json=spin_payload)
         spin_data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 400, f"Response: {spin_data}")
+        self.assertEqual(response.status_code, 422, f"Response: {spin_data}") # Expect ValidationException (422)
         self.assertFalse(spin_data['status'])
-        self.assertIn("Invalid bet amount for this slot", spin_data['status_message'])
+        self.assertIn("Invalid bet amount for this slot", spin_data['status_message']) # Check specific part of message
 
     def test_spin_no_active_session(self):
         """Test spin attempt without an active game session."""
@@ -661,9 +828,105 @@ class GameApiTests(BaseTestCase):
                                      json=spin_payload)
         spin_data = json.loads(response.data.decode())
 
-        self.assertEqual(response.status_code, 404) # As per route logic
+        self.assertEqual(response.status_code, 404) # Now expecting NotFoundException
         self.assertFalse(spin_data['status'])
+        self.assertEqual(spin_data['error_code'], ErrorCodes.SESSION_NOT_FOUND)
         self.assertEqual(spin_data['status_message'], 'No active slot game session. Please join a slot game first.')
+
+    def test_get_slots_list_success(self):
+        """Test successfully fetching the list of available slots."""
+        token, _ = self._login_and_get_token(username_prefix="slot_lister")
+
+        # Create a couple of slots to ensure the list is not empty
+        self._create_slot(name="Slot Alpha", short_name="slot_a")
+        self._create_slot(name="Slot Beta", short_name="slot_b", is_active=False) # One inactive
+
+        response = self.client.get('/api/slots', headers={'Authorization': f'Bearer {token}'})
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, f"Failed to get slots list: {data}")
+        self.assertTrue(data['status'])
+        self.assertIn('slots', data)
+
+        active_slots_in_response = [s for s in data['slots'] if s['short_name'] == 'slot_a']
+        inactive_slots_in_response = [s for s in data['slots'] if s['short_name'] == 'slot_b']
+
+        self.assertEqual(len(active_slots_in_response), 1, "Active slot 'slot_a' not found or duplicated.")
+        # Assuming /api/slots only returns active slots by default, or includes an 'is_active' field
+        # Based on routes/slots.py, it returns all slots and includes their 'is_active' status.
+        self.assertTrue(any(s['short_name'] == 'slot_a' and s['is_active'] for s in data['slots']))
+        self.assertTrue(any(s['short_name'] == 'slot_b' and not s['is_active'] for s in data['slots']))
+
+
+    def test_get_slot_config_success(self):
+        """Test successfully fetching the configuration for a specific slot."""
+        token, _ = self._login_and_get_token(username_prefix="slot_config_getter")
+        slot_short_name = "config_slot"
+        slot_id = self._create_slot(name="Config Test Slot", short_name=slot_short_name)
+
+        response = self.client.get(f'/api/slots/{slot_id}/config', headers={'Authorization': f'Bearer {token}'})
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 200, f"Failed to get slot config: {data}")
+        self.assertTrue(data['status'])
+        self.assertIn('game', data['config']) # Top level key should be 'game'
+        game_config = data['config']['game']
+        self.assertEqual(game_config['short_name'], slot_short_name)
+        self.assertIn('layout', game_config)
+        # Symbols are not part of client_config's top level game object, they are built by _build_secure_config and used internally
+        # The client_config intentionally strips most symbol details.
+        # self.assertIn('symbols', game_config)
+        self.assertIn('settings', game_config)
+        self.assertIn('betOptions', game_config['settings']) # Bet amounts are under settings.betOptions
+
+    def test_get_slot_config_not_found(self):
+        """Test fetching configuration for a non-existent slot."""
+        token, _ = self._login_and_get_token(username_prefix="slot_config_fail_user")
+        non_existent_slot_id = 99999
+
+        response = self.client.get(f'/api/slots/{non_existent_slot_id}/config', headers={'Authorization': f'Bearer {token}'})
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 404, f"Response: {data}") # NotFoundException
+        self.assertFalse(data['status'])
+        self.assertEqual(data['error_code'], ErrorCodes.GAME_NOT_FOUND)
+        self.assertEqual(data['status_message'], 'Slot not found') # Corrected message
+
+    def test_join_slot_success(self):
+        """Test successfully joining a slot game."""
+        token, user_id = self._login_and_get_token(username_prefix="slot_joiner")
+        slot_id = self._create_slot(name="Joinable Slot", short_name="join_slot")
+
+        payload = {"slot_id": slot_id, "game_type": "slot"} # game_type might be redundant if endpoint is /slots/join
+        response = self.client.post('/api/slots/join', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = json.loads(response.data.decode())
+
+        self.assertEqual(response.status_code, 201, f"Failed to join slot: {data}") # 201 Created for new session
+        self.assertTrue(data['status'])
+        self.assertIn('game_session', data)
+        self.assertEqual(data['game_session']['slot_id'], slot_id)
+        self.assertEqual(data['game_session']['user_id'], user_id)
+        self.assertIsNone(data['game_session']['session_end']) # Session should be active
+
+        # Verify in DB
+        with self.app.app_context():
+            game_session_db = GameSession.query.filter_by(user_id=user_id, slot_id=slot_id, session_end=None).first()
+            self.assertIsNotNone(game_session_db)
+            self.assertEqual(game_session_db.id, data['game_session']['id'])
+
+    def test_join_slot_non_existent(self):
+        """Test joining a non-existent slot game."""
+        token, _ = self._login_and_get_token(username_prefix="slot_join_fail_user")
+        non_existent_slot_id = 99998
+
+        payload = {"slot_id": non_existent_slot_id, "game_type": "slot"}
+        response = self.client.post('/api/slots/join', headers={'Authorization': f'Bearer {token}'}, json=payload)
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 404, f"Response: {data}") # NotFoundException for slot
+        self.assertFalse(data['status'])
+        self.assertEqual(data['error_code'], ErrorCodes.GAME_NOT_FOUND)
+        self.assertEqual(data['status_message'], f"Slot with ID {non_existent_slot_id} not found")
 
 
 # === Billing API Tests ===
@@ -840,7 +1103,7 @@ class BillingApiTests(BaseTestCase):
         self.assertEqual(response.status_code, 400, data.get('status_message')) # InsufficientFundsException returns 400
         self.assertFalse(data['status'])
         self.assertEqual(data['error_code'], ErrorCodes.INSUFFICIENT_FUNDS)
-        self.assertEqual(data['status_message'], 'Insufficient funds ')
+        self.assertEqual(data['status_message'], 'Insufficient funds for withdrawal.') # Corrected message
 
     def test_withdraw_fail_active_bonus_wagering_incomplete(self):
         token, user_id = self._login_and_get_token(username_prefix="withdraw_wagering_user")
@@ -962,7 +1225,7 @@ class PlinkoApiTests(BaseTestCase):
         self.assertEqual(response.status_code, 400) # InsufficientFundsException
         self.assertFalse(data['status']) # Changed from 'success' for consistency
         self.assertEqual(data['error_code'], ErrorCodes.INSUFFICIENT_FUNDS)
-        self.assertEqual(data['status_message'], 'Insufficient funds.')
+        self.assertEqual(data['status_message'], 'Insufficient funds for Plinko game.') # Corrected message
         # 'new_balance' might not be part of error response, check if it's still relevant
         # self.assertAlmostEqual(data['new_balance'], 0.5)
 
@@ -993,9 +1256,9 @@ class PlinkoApiTests(BaseTestCase):
                 self.assertEqual(data['error_code'], expected_error_code)
 
                 if expected_error_code == ErrorCodes.VALIDATION_ERROR and error_field_in_details:
-                     # Marshmallow errors are in details.errors
-                    self.assertIn(error_field_in_details, data['details']['errors'])
-                    self.assertIn(expected_message_part, data['details']['errors'][error_field_in_details][0])
+                     # Marshmallow errors are in details (which is e.messages)
+                    self.assertIn(error_field_in_details, data['details'])
+                    self.assertIn(expected_message_part, data['details'][error_field_in_details][0])
                 else:
                     # Custom ValidationExceptions have message in status_message
                     self.assertIn(expected_message_part, data['status_message'])

@@ -78,8 +78,8 @@ class GameConfigManager:
                 "animations": config["game"].get("animations", {}),
                 "sound": config["game"].get("sound", {}),
                 "settings": {
-                    "soundDefault": config["game"]["settings"].get("soundDefault", True),
-                    "turboDefault": config["game"]["settings"].get("turboDefault", False)
+                    "soundDefault": config["game"].get("settings", {}).get("soundDefault", True), # Ensuring safe get
+                    "turboDefault": config["game"].get("settings", {}).get("turboDefault", False) # Ensuring safe get
                     # Remove betOptions - these come from SlotBet table
                 }
             }
@@ -93,28 +93,30 @@ class GameConfigManager:
         
         # Build symbols from database relationships
         symbols = []
-        for symbol in slot.symbols:
+        for symbol_model in slot.symbols: # Renamed variable for clarity
             symbol_data = {
-                "id": symbol.id,
-                "name": symbol.name,
-                "value": float(symbol.value) if symbol.value else None,
-                "weight": symbol.weight,
-                "is_wild": symbol.is_wild,
-                "is_scatter": symbol.is_scatter,
-                "icon": symbol.icon_path
+                "id": symbol_model.symbol_internal_id,
+                "name": symbol_model.name,
+                "img_link": symbol_model.img_link,
+                # "value" or "value_multiplier" for config based on how game logic consumes it.
+                # SlotSymbol model has value_multiplier (Float). Game logic might expect a dict.
+                # For now, providing what's directly on the model.
+                "value_multiplier": float(symbol_model.value_multiplier) if symbol_model.value_multiplier is not None else 0.0,
+                "is_wild": slot.wild_symbol_id is not None and symbol_model.symbol_internal_id == slot.wild_symbol_id,
+                "is_scatter": slot.scatter_symbol_id is not None and symbol_model.symbol_internal_id == slot.scatter_symbol_id
             }
+            # If symbol_model.data contains 'value_multipliers' or 'scatter_payouts', add them.
+            if symbol_model.data:
+                if 'value_multipliers' in symbol_model.data:
+                    symbol_data['value_multipliers'] = symbol_model.data['value_multipliers']
+                if 'scatter_payouts' in symbol_model.data:
+                    symbol_data['scatter_payouts'] = symbol_model.data['scatter_payouts']
             
-            # Add multipliers if they exist
-            if symbol.value_multipliers:
-                symbol_data["value_multipliers"] = symbol.value_multipliers
-            if symbol.scatter_payouts:
-                symbol_data["scatter_payouts"] = symbol.scatter_payouts
-                
             symbols.append(symbol_data)
         
         # Build paylines from slot configuration
         paylines = []
-        if slot.paylines:
+        if hasattr(slot, 'paylines') and slot.paylines: # Guard access
             for i, payline in enumerate(slot.paylines):
                 paylines.append({
                     "id": f"payline_{i+1}",
@@ -129,21 +131,33 @@ class GameConfigManager:
                 "short_name": slot.short_name,
                 "asset_dir": f"/slots/{slot.short_name}/",
                 "layout": {
-                    "rows": slot.rows,
-                    "columns": slot.columns,
+                    "rows": slot.num_rows, # Corrected attribute
+                    "columns": slot.num_columns, # Corrected attribute
                     "paylines": paylines
                 },
                 "symbols": symbols,
-                "wild_symbol_id": next((s.id for s in slot.symbols if s.is_wild), None),
-                "scatter_symbol_id": next((s.id for s in slot.symbols if s.is_scatter), None),
+                "wild_symbol_id": slot.wild_symbol_id, # Directly from slot model
+                "scatter_symbol_id": slot.scatter_symbol_id, # Directly from slot model
                 "is_multiway": slot.is_multiway,
                 "reel_configurations": slot.reel_configurations if slot.is_multiway else None
             }
         }
         
         # Add bonus features if configured
-        if slot.bonus_features:
-            config["game"]["bonus_features"] = slot.bonus_features
+        # Construct bonus_features from individual fields if they exist and are relevant
+        bonus_features_data = {}
+        if hasattr(slot, 'bonus_type') and slot.bonus_type and slot.bonus_type == "free_spins": # Example check
+            bonus_features_data["free_spins"] = {}
+            if hasattr(slot, 'bonus_spins_trigger_count'):
+                bonus_features_data["free_spins"]["trigger_count"] = slot.bonus_spins_trigger_count
+            if hasattr(slot, 'bonus_spins_awarded'):
+                bonus_features_data["free_spins"]["spins_awarded"] = slot.bonus_spins_awarded
+            if hasattr(slot, 'bonus_multiplier'):
+                bonus_features_data["free_spins"]["multiplier"] = slot.bonus_multiplier
+            # Add other bonus types or sub-configurations as needed based on model fields
+
+        if bonus_features_data.get("free_spins"): # Only add if "free_spins" key was populated
+            config["game"]["bonus_features"] = bonus_features_data
         
         return config
     

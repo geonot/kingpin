@@ -39,6 +39,7 @@ class ErrorCodes:
     INVALID_BET = "BE_GAME_304"
     GAME_LOGIC_ERROR = "BE_GAME_305"
     SLOT_CONFIG_ERROR = "BE_GAME_306"
+    SESSION_NOT_FOUND = "BE_GAME_307" # For when a required active session is missing
 
     # Admin Errors (400-499)
     ADMIN_ACTION_FAILED = "BE_ADM_400"

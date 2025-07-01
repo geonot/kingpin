@@ -107,6 +107,10 @@ class ConfigValidator:
             if not database_url.startswith(('postgresql://', 'postgresql+psycopg2://', 'sqlite://')):
                 self.errors.append("CRITICAL: DATABASE_URL must use a supported database driver")
             return database_url
+
+        # If TESTING is true and no DATABASE_URL, default to in-memory SQLite for initial app load
+        if self.is_testing:
+            return 'sqlite:///:memory:' # Default for testing if no other DB config is present
         
         # If no DATABASE_URL, validate individual components
         db_components = {
