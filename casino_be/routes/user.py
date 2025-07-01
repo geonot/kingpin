@@ -1,12 +1,13 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
+from marshmallow import ValidationError # Ensure ValidationError is imported
 
-from models import db, User, Transaction, UserBonus
-from schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema
-from services.bonus_service import apply_bonus_to_deposit
-from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
-from casino_be.exceptions import InsufficientFundsException, ValidationException, NotFoundException, ForbiddenException
+from ..models import db, User, Transaction, UserBonus
+from ..schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema
+from ..services.bonus_service import apply_bonus_to_deposit
+from ..utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
+from casino_be.exceptions import InsufficientFundsException, ValidationException, NotFoundException, AuthorizationException, AuthenticationException # Ensure AuthenticationException is here
 from casino_be.error_codes import ErrorCodes
 
 user_bp = Blueprint('user', __name__, url_prefix='/api')
@@ -50,9 +51,8 @@ def withdraw():
         if active_bonus_with_wagering.wagering_progress_sats < active_bonus_with_wagering.wagering_requirement_sats:
             remaining_wagering_sats = active_bonus_with_wagering.wagering_requirement_sats - active_bonus_with_wagering.wagering_progress_sats
             # current_app.logger.warning(f"User {user.id} withdrawal blocked due to unmet wagering for UserBonus {active_bonus_with_wagering.id}.") # Will be logged by global handler
-            raise ForbiddenException( # Using Forbidden as it's a restriction on action
-                error_code=ErrorCodes.FORBIDDEN, # Or a more specific one if available for bonus restriction
-                status_message="Withdrawal blocked due to unmet wagering requirements.",
+            raise AuthorizationException( # Using AuthorizationException as it's defined
+                status_message="Withdrawal blocked due to unmet wagering requirements.", # error_code is set by default
                 details={
                     "remaining_wagering_sats": remaining_wagering_sats,
                     "bonus_amount_awarded_sats": active_bonus_with_wagering.bonus_amount_awarded_sats,
@@ -124,39 +124,68 @@ def withdraw():
 @rate_limit_by_ip("5 per hour")
 def update_settings():
     data = request.get_json()
-    errors = UpdateSettingsSchema().validate(data)
-    if errors:
-        # log_security_event('INVALID_SETTINGS_DATA', current_user.id, {'errors': errors}) # Global handler
-        # return jsonify({'status': False, 'status_message': errors}), 400 # Global handler
-        pass # Marshmallow errors handled globally
+    try:
+        # Use load() for validation, which will raise ValidationError caught by global handler
+        validated_data = UpdateSettingsSchema().load(data)
+    except ValidationError as err:
+        raise # Let global handler manage Marshmallow validation errors
 
     user = current_user
+    updated_fields = []
+
+    # If current_password is provided for any change (email or password), it must be correct.
+    # This handles the case where only email is changed but current_password is provided for verification.
+    if 'current_password' in validated_data and validated_data['current_password'] is not None:
+        current_app.logger.info(f"Verifying current_password for user {user.id}. Provided: '{validated_data['current_password']}'. Stored hash: '{user.password}'")
+        password_verified = User.verify_password(user.password, validated_data['current_password'])
+        current_app.logger.info(f"Password verification result: {password_verified}")
+        if not password_verified:
+            raise AuthenticationException(status_message="Incorrect current password.")
+
+    # Password change logic
+    if validated_data.get('new_password'):
+        # current_password must have been provided and validated by schema if new_password is set
+        # The check above also covers if current_password was incorrect.
+        # (Schema ensures current_password is present if new_password is present)
+
+        # new_password and confirm_new_password mismatch is handled by schema's @validates_schema
+        # Password strength for new_password is handled by field validation in schema
+
+        user.password = User.hash_password(validated_data['new_password'])
+        log_security_event('PASSWORD_CHANGE', user.id)
+        updated_fields.append("password")
+
+    # Email change logic
+    if validated_data.get('email') and validated_data['email'] != user.email:
+        new_email = validated_data['email']
+        if User.query.filter(User.email == new_email, User.id != user.id).first():
+            # This specific validation needs to stay in the route as it requires a DB query.
+            raise ValidationException(
+                status_message="Email already in use.",
+                details={'email': 'Email already in use.'}
+            ) # error_code is set by default in ValidationException
+
+        log_security_event('EMAIL_CHANGE', user.id, {
+            'old_email': user.email,
+            'new_email': new_email
+        })
+        user.email = new_email
+        updated_fields.append("email")
+
+    if not updated_fields:
+        # This case should ideally be caught by schema validation if 'at least one field' is enforced
+        # but as a fallback or if schema allows empty valid payload:
+        return jsonify({'status': True, 'status_message': "No settings were changed.", 'user': UserSchema().dump(user)}), 200
+
     try:
-        if 'email' in data and data['email'] != user.email:
-            if User.query.filter(User.email == data['email'], User.id != user.id).first():
-                raise ValidationException(
-                    ErrorCodes.EMAIL_ALREADY_EXISTS,
-                    "Email already in use.",
-                    details={'email': 'Email already in use.'}
-                )
-            
-            log_security_event('EMAIL_CHANGE', user.id, { # Keep security log
-                'old_email': user.email,
-                'new_email': data['email']
-            })
-            user.email = data['email']
-            
-        if 'password' in data and data['password']:
-            log_security_event('PASSWORD_CHANGE', user.id)
-            user.password = User.hash_password(data['password'])
-            
         db.session.commit()
-        current_app.logger.info(f"Settings updated for user {user.id}")
+        current_app.logger.info(f"Settings updated for user {user.id}: {', '.join(updated_fields)}")
+        # Return a more specific success message if desired, or a generic one
+        # The tests currently expect no 'status_message' on success, just 'status' and 'user'.
         return jsonify({'status': True, 'user': UserSchema().dump(user)}), 200
     except Exception as e:
         db.session.rollback()
-        # current_app.logger.error(f"Settings update failed: {str(e)}", exc_info=True) # Global handler
-        raise # Global handler will catch and log
+        raise # Let global handler manage other exceptions
 
 @user_bp.route('/deposit', methods=['POST'])
 @jwt_required()
@@ -254,7 +283,7 @@ def transfer_funds():
     # Find recipient
     recipient = User.query.filter_by(username=recipient_username).first()
     if not recipient:
-        raise NotFoundException(ErrorCodes.USER_NOT_FOUND, "Recipient user not found.")
+        raise NotFoundException(error_code=ErrorCodes.USER_NOT_FOUND, status_message="Recipient user not found.")
     
     if recipient.id == sender.id:
         raise ValidationException(ErrorCodes.VALIDATION_ERROR, "Cannot transfer to yourself.")
@@ -276,9 +305,8 @@ def transfer_funds():
     ).first()
     
     if active_bonus and active_bonus.wagering_progress_sats < active_bonus.wagering_requirement_sats:
-        raise ForbiddenException( # Using Forbidden as it's a restriction on action
-            error_code=ErrorCodes.FORBIDDEN, # Or a more specific bonus-related error code
-            status_message="Transfers are blocked while you have active bonus wagering requirements."
+        raise AuthorizationException( # Using AuthorizationException as it's defined
+            status_message="Transfers are blocked while you have active bonus wagering requirements." # error_code is set by default
         )
     
     try:

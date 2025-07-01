@@ -8,6 +8,9 @@ from ..utils.plinko_helper import ( # Relative import
     validate_plinko_params, calculate_winnings,
     PAYOUT_MULTIPLIERS, SATOSHIS_PER_UNIT
 )
+from casino_be.exceptions import ValidationException, InsufficientFundsException
+from casino_be.error_codes import ErrorCodes
+from marshmallow import ValidationError # Import ValidationError
 
 plinko_bp = Blueprint('plinko', __name__, url_prefix='/api/plinko')
 
@@ -24,39 +27,40 @@ def plinko_play():
     try:
         json_data = request.get_json()
         if not json_data:
-            return jsonify({'error': 'Invalid JSON payload.'}), HTTPStatus.BAD_REQUEST
+            # Let global handler for WerkzeugHTTPException handle this if it's a bad request.
+            # Or raise ValidationException for consistent error format.
+            raise ValidationException(status_message="Invalid JSON payload.")
 
         schema = PlinkoPlayRequestSchema()
         # Marshmallow load will raise ValidationError if validation fails
-        loaded_data = schema.load(json_data)
-    except Exception as e: # Catch Marshmallow's ValidationError
-        current_app.logger.warning(f"Plinko play validation error for user {current_user_id}: {str(e)}")
-        # Use e.messages if available (Marshmallow specific)
-        error_messages = e.messages if hasattr(e, 'messages') else str(e)
-        return jsonify({'error': 'Validation failed', 'messages': error_messages}), HTTPStatus.BAD_REQUEST
+        loaded_data = schema.load(json_data) # This will raise ValidationError on issues
+    except ValidationError as e: # Catch Marshmallow's ValidationError specifically
+        # Let global handler process this. It expects details to be e.messages.
+        raise ValidationException(status_message="Input validation failed.", details=e.messages)
+    except Exception as e: # Catch other potential errors during JSON parsing or initial load
+        current_app.logger.error(f"Unexpected error during Plinko request parsing for user {current_user_id}: {str(e)}", exc_info=True)
+        raise ValidationException(status_message="Invalid request format.")
+
 
     stake_amount_float = loaded_data['stake_amount']
     chosen_stake_label = loaded_data['chosen_stake_label']
     slot_landed_label = loaded_data['slot_landed_label']
 
     # This validation can be removed if schema handles it fully, but good for defense in depth
+    # Assuming validate_plinko_params raises ValidationException or returns a dict
     validation_result = validate_plinko_params(stake_amount_float, chosen_stake_label, slot_landed_label)
     if not validation_result['success']:
-        current_app.logger.warning(f"Plinko parameter validation failed for user {user.id}: {validation_result['error']}")
-        return jsonify(PlinkoPlayResponseSchema().dump({
-            'success': False,
-            'error': validation_result['error']
-        })), HTTPStatus.BAD_REQUEST
+        # Convert this specific validation error into ValidationException
+        specific_error_code = ErrorCodes.VALIDATION_ERROR
+        if "Stake amount" in validation_result['error'] and "out of range" in validation_result['error']:
+            specific_error_code = ErrorCodes.INVALID_AMOUNT
+        raise ValidationException(status_message=validation_result['error'], error_code=specific_error_code)
 
     stake_amount_sats = int(stake_amount_float * SATOSHIS_PER_UNIT)
 
     if user.balance < stake_amount_sats:
         current_app.logger.warning(f"User {user.id} insufficient funds for Plinko: Balance {user.balance} sats, Stake {stake_amount_sats} sats")
-        return jsonify(PlinkoPlayResponseSchema().dump({
-            'success': False,
-            'error': 'Insufficient funds',
-            'new_balance': float(user.balance) / SATOSHIS_PER_UNIT
-        })), HTTPStatus.BAD_REQUEST
+        raise InsufficientFundsException(status_message='Insufficient funds for Plinko game.')
 
     try:
         multiplier = PAYOUT_MULTIPLIERS.get(slot_landed_label)

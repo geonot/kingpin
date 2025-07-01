@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    # In a real Swarm, use pre-built images from a registry for backend & frontend
+    # For local Swarm testing, 'build' can work if Swarm node has build capability & context
+    # build: ./db_image_if_custom # Or just use official postgres as is
+    environment:
+      POSTGRES_USER: casino_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: casino_db
+      # Example: Forcing a specific data directory if needed inside the container
+      # PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U casino_user -d casino_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - casino_network
+    secrets:
+      - db_password
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.role == manager] # Example: run DB on a manager node
+      restart_policy:
+        condition: on-failure
+
+  backend:
+    image: casino-backend-image:latest # PRE-BUILD THIS IMAGE: docker build -t casino-backend-image:latest ./casino_be
+    # Or use build context if your Swarm setup supports it well for development/testing:
+    # build:
+    #   context: ./casino_be
+    #   dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_APP: app.py
+      FLASK_ENV: production # Should be production for Swarm typically
+      FLASK_DEBUG: 'False'
+      DATABASE_URL: postgresql://casino_user:$(cat /run/secrets/db_password)@db:5432/casino_db
+      JWT_SECRET_KEY_FILE: /run/secrets/jwt_secret_key
+      CORS_ALLOWED_ORIGINS: 'http://your-frontend-domain.com' # IMPORTANT: Set this to your actual frontend URL
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0 # Example: if using Redis for rate limiting
+      # TESTING: "False" # Ensure not in testing mode
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - casino_network
+    secrets:
+      - db_password # For DATABASE_URL construction if backend reads the secret directly
+      - jwt_secret_key
+    deploy:
+      replicas: 2 # Example: run 2 replicas of the backend
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+
+  frontend:
+    image: casino-frontend-image:latest # PRE-BUILD THIS IMAGE: docker build -t casino-frontend-image:latest ./casino_fe
+    # Or use build context:
+    # build:
+    #   context: ./casino_fe
+    #   dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - casino_network
+    deploy:
+      replicas: 2 # Example: run 2 replicas of the frontend
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+
+# Optional: Redis service if used by Flask-Limiter or other components
+#  redis:
+#    image: redis:alpine
+#    networks:
+#      - casino_network
+#    deploy:
+#      replicas: 1
+#      placement:
+#        constraints: [node.role == manager]
+
+volumes:
+  postgres_data:
+    driver: local # Or a Swarm-compatible volume driver for multi-node
+
+networks:
+  casino_network:
+    driver: overlay # Overlay network for Swarm
+
+secrets:
+  db_password:
+    file: ./db_password.txt # Create this file with the password
+  jwt_secret_key:
+    file: ./jwt_secret_key.txt # Create this file with the JWT secret

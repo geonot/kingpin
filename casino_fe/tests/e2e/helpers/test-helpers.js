@@ -63,3 +63,51 @@ export async function logoutUser(page) {
   await page.click('[data-testid="logout-button"]');
   await page.waitForURL('/login');
 }
+
+/**
+ * Register a new unique user
+ */
+export async function registerUniqueUser(page, password = 'password123') {
+  await page.goto('/register');
+
+  const timestamp = Date.now();
+  const username = `testuser${timestamp}`;
+  const email = `test${timestamp}@example.com`;
+
+  // Adjust selectors based on actual registration form input fields
+  // Using data-testid attributes is more robust if they exist
+  const usernameInput = page.locator('input[name="username"], [data-testid="username-input"]').first();
+  const emailInput = page.locator('input[name="email"], [data-testid="email-input"]').first();
+  const passwordInput = page.locator('input[name="password"], [data-testid="password-input"]').first();
+  const confirmPasswordInput = page.locator('input[name="confirmPassword"], [data-testid="confirm-password-input"]').first(); // Assuming a confirm password field
+
+  await usernameInput.fill(username);
+  await emailInput.fill(email);
+  await passwordInput.fill(password);
+
+  // Fill confirm password if the field exists and is separate
+  if (await confirmPasswordInput.isVisible() && (await passwordInput.getAttribute('name')) !== (await confirmPasswordInput.getAttribute('name'))) {
+    await confirmPasswordInput.fill(password);
+  } else if (await page.locator('input[name="password_confirmation"]').isVisible()) { // Common alternative name
+    await page.locator('input[name="password_confirmation"]').fill(password);
+  } else {
+    // Attempt to find by type if multiple password fields exist for confirmation
+    const passwordFields = await page.locator('input[type="password"]').all();
+    if (passwordFields.length > 1) {
+        await passwordFields[1].fill(password);
+    }
+  }
+
+  const termsCheckbox = page.locator('input[type="checkbox"][name="terms"], [data-testid="terms-checkbox"]').first();
+  if (await termsCheckbox.isVisible()) {
+    await termsCheckbox.check();
+  }
+
+  // Adjust selector for submit button
+  await page.click('button[type="submit"], [data-testid="register-button"]');
+
+  // Wait for successful registration redirect (e.g., to dashboard or slots page)
+  await page.waitForURL(/\/dashboard|\/slots/, { timeout: 10000 });
+
+  return { username, email, password };
+}

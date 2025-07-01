@@ -10,10 +10,10 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import secrets
 
-from models import db, User, TokenBlacklist
-from schemas import UserSchema, RegisterSchema, LoginSchema
-from utils.bitcoin import generate_bitcoin_wallet
-from utils.security import require_csrf_token, generate_csrf_token
+from ..models import db, User, TokenBlacklist
+from ..schemas import UserSchema, RegisterSchema, LoginSchema
+from ..utils.bitcoin import generate_bitcoin_wallet
+from ..utils.security import require_csrf_token, generate_csrf_token
 from casino_be.exceptions import AuthenticationException, ValidationException
 from casino_be.error_codes import ErrorCodes
 from casino_be.app import is_password_strong
@@ -46,39 +46,33 @@ def get_current_user():
 @require_csrf_token
 def register():
     data = request.get_json()
-    errors = RegisterSchema().validate(data)
-    if errors:
-        # The global ValidationError handler will catch this if we raise it,
-        # or we can format it here if preferred.
-        # For consistency with the new pattern, let the global handler do its job.
-        # However, the spec says: "Let Marshmallow validation errors be handled by the existing @app.errorhandler(ValidationError)"
-        # The current code returns 400, global handler returns 422. Let's keep this as is for now,
-        # as it's specific to Marshmallow's validation structure.
-        # The task asks to *throw* custom exceptions for *other* validation like email/username exists.
-        return jsonify({'status': False, 'status_message': errors}), 400
+    try:
+        # Use load() which raises ValidationError on failure
+        validated_data = RegisterSchema().load(data)
+    except ValidationError as err:
+        # Let the global handler (@app.errorhandler(ValidationError)) in app.py handle this.
+        # It will log and return a 422 response.
+        raise err
 
     # Password strength check
-    is_strong, message = is_password_strong(data['password'])
+    is_strong, message = is_password_strong(validated_data['password'])
     if not is_strong:
         raise ValidationException(
-            error_code=ErrorCodes.PASSWORD_TOO_WEAK,
             status_message=message or "Password does not meet complexity requirements.",
             details={'password': message or "Password does not meet complexity requirements."}
-        )
+        ) # error_code is set by default
 
-    if User.query.filter_by(username=data['username']).first():
+    if User.query.filter_by(username=validated_data['username']).first():
         raise ValidationException(
-            error_code=ErrorCodes.USERNAME_ALREADY_EXISTS,
             status_message="Username already taken.",
             details={'username': 'Username already taken.'}
-        )
+        ) # error_code is set by default
     
-    if User.query.filter_by(email=data['email']).first():
+    if User.query.filter_by(email=validated_data['email']).first():
         raise ValidationException(
-            error_code=ErrorCodes.EMAIL_ALREADY_EXISTS,
             status_message="Email already registered.",
             details={'email': 'Email already exists.'}
-        )
+        ) # error_code is set by default
     
     try:
         # Generate_bitcoin_wallet now returns (address, private_key_wif)
@@ -98,9 +92,9 @@ def register():
             encrypted_private_key = encrypt_private_key(private_key_wif)
             
             new_user = User(
-                username=data['username'],
-                email=data['email'],
-                password=User.hash_password(data['password']),
+                username=validated_data['username'],
+                email=validated_data['email'],
+                password=User.hash_password(validated_data['password']),
                 deposit_wallet_address=address  # Store the address
             )
             
@@ -112,9 +106,9 @@ def register():
             current_app.logger.warning(f"Could not store private key (column may not exist): {e}")
             # Continue with just the address for now
             new_user = User(
-                username=data['username'],
-                email=data['email'],
-                password=User.hash_password(data['password']),
+                username=validated_data['username'],
+                email=validated_data['email'],
+                password=User.hash_password(validated_data['password']),
                 deposit_wallet_address=address  # Store the address
             )
         
@@ -171,9 +165,8 @@ def login():
         # Logging of failed attempt can be kept here or moved to exception logic if sensitive
         current_app.logger.warning(f"Failed login attempt for username: {validated_data['username']} from IP: {request.remote_addr}")
         raise AuthenticationException(
-            error_code=ErrorCodes.INVALID_CREDENTIALS,
             status_message="Invalid username or password."
-        )
+        ) # error_code is set by default in the exception
 
     # Update last login time
     user.last_login_at = datetime.now(timezone.utc)

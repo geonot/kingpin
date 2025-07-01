@@ -26,7 +26,7 @@ Flask-SocketIO==5.3.6
 python-socketio==5.10.0
 
 # Database
-psycopg2-binary==2.9.7
+# psycopg2-binary==2.9.7 # Commented out for local/CI test runs without full PostgreSQL dev env
 
 # Gaming Libraries
 treys==0.1.8

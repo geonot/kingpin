@@ -15,9 +15,9 @@ from flask import current_app
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import sessionmaker
 
-from models import SpacecrashGame, SpacecrashBet, User, db
-from utils import spacecrash_handler
-from schemas import SpacecrashGameSchema, SpacecrashPlayerBetSchema
+from ..models import SpacecrashGame, SpacecrashBet, User, db
+from ..utils import spacecrash_handler
+from ..schemas import SpacecrashGameSchema, SpacecrashPlayerBetSchema
 
 logger = logging.getLogger(__name__)
 

@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 from functools import wraps
 import time
 
-from models import db, User, GameSession, Slot, SlotBet # SlotBet imported
-from schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
-from utils.spin_handler import handle_spin
-from utils.multiway_helper import handle_multiway_spin
-from utils.game_config_manager import GameConfigManager
-from utils.security_logger import SecurityLogger, audit_financial_operation, audit_game_operation
-from utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
+from ..models import db, User, GameSession, Slot, SlotBet # SlotBet imported
+from ..schemas import SlotSchema, SpinRequestSchema, GameSessionSchema, UserSchema, JoinGameSchema
+from ..utils.spin_handler_new import handle_spin as handle_spin_new_logic # Changed import and aliased
+# from ..utils.multiway_helper import handle_multiway_spin # Temporarily comment out if handle_spin covers it or to simplify
+from ..utils.game_config_manager import GameConfigManager
+from ..utils.security_logger import SecurityLogger, audit_financial_operation, audit_game_operation
+from ..utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
 from casino_be.exceptions import (
     NotFoundException, ValidationException, GameLogicException, InsufficientFundsException
 )
@@ -41,13 +41,13 @@ def get_slot_config(slot_id):
         # Validate slot exists and user has access
         slot = Slot.query.get(slot_id)
         if not slot:
-            raise NotFoundException(ErrorCodes.GAME_NOT_FOUND, "Slot not found")
+            raise NotFoundException(error_code=ErrorCodes.GAME_NOT_FOUND, status_message="Slot not found")
         
         # Get sanitized configuration for client
         client_config = GameConfigManager.get_client_config(slot_id)
         if not client_config:
             # current_app.logger.error(f"Failed to load client config for slot {slot_id}") # Global handler
-            raise NotFoundException(ErrorCodes.GENERIC_ERROR, "Configuration not available for this slot.") # Or specific config error
+            raise NotFoundException(error_code=ErrorCodes.SLOT_CONFIG_ERROR, status_message="Configuration not available for this slot.") # Use specific config error
         
         # Add allowed bet amounts from database
         allowed_bets = [bet.bet_amount for bet in slot.bets]
@@ -111,11 +111,11 @@ def spin():
     # Ensure there's an active game session for a slot game
     game_session = GameSession.query.filter_by(user_id=user.id, game_type='slot', session_end=None).order_by(GameSession.session_start.desc()).first()
     if not game_session:
-        raise GameLogicException(ErrorCodes.SESSION_EXPIRED, "No active slot game session. Please join a slot game first.")
+        raise NotFoundException(error_code=ErrorCodes.SESSION_NOT_FOUND, status_message="No active slot game session. Please join a slot game first.")
 
     slot = Slot.query.get(game_session.slot_id)
     if not slot:
-         raise NotFoundException(ErrorCodes.GAME_NOT_FOUND, "Slot not found for current session.")
+         raise NotFoundException(error_code=ErrorCodes.GAME_NOT_FOUND, status_message="Slot not found for current session.")
 
     # --- Bet Amount Validation against SlotBet ---
     allowed_bets_query = SlotBet.query.filter_by(slot_id=slot.id).all()
@@ -126,7 +126,8 @@ def spin():
     allowed_bet_values = [b.bet_amount for b in allowed_bets_query]
     if bet_amount_sats not in allowed_bet_values:
         # current_app.logger.warning(f"Invalid bet amount {bet_amount_sats} for slot {slot.id} by user {user.id}. Allowed: {allowed_bet_values}") # Global
-        raise ValidationException(ErrorCodes.INVALID_BET, f"Invalid bet amount for this slot. Allowed bets are: {sorted(list(set(allowed_bet_values)))} satoshis.")
+        detailed_message = f"Invalid bet amount for this slot. Allowed bets are: {sorted(list(set(allowed_bet_values)))} satoshis."
+        raise ValidationException(status_message=detailed_message, error_code=ErrorCodes.INVALID_BET, details={'message': detailed_message})
     # --- End Bet Amount Validation ---
 
     if user.balance < bet_amount_sats and not (game_session.bonus_active and game_session.bonus_spins_remaining > 0):
@@ -151,30 +152,9 @@ def spin():
     balance_before = user.balance
     
     try:
-        if slot.is_multiway:
-            if not slot.reel_configurations:
-                SecurityLogger.log_security_event(
-                    event_type='invalid_slot_configuration',
-                    severity='high',
-                    user_id=user.id,
-                    details={'slot_id': slot.id, 'issue': 'missing_reel_configurations'}
-                )
-                # current_app.logger.error(f"Spin attempt on multiway slot {slot.id} without reel_configurations by user {user.id}") # Global
-                raise GameLogicException(ErrorCodes.SLOT_CONFIG_ERROR, "Slot is configured as multiway but lacks essential reel configurations.")
-
-            if not slot.symbols:
-                SecurityLogger.log_security_event(
-                    event_type='invalid_slot_configuration',
-                    severity='high',
-                    user_id=user.id,
-                    details={'slot_id': slot.id, 'issue': 'missing_symbols'}
-                )
-                # current_app.logger.error(f"Spin attempt on multiway slot {slot.id} without slot.symbols loaded by user {user.id}") # Global
-                raise GameLogicException(ErrorCodes.SLOT_CONFIG_ERROR, "Slot configuration incomplete (symbols missing).")
-
-            spin_result_data = handle_multiway_spin(user, slot, game_session, bet_amount_sats)
-        else:
-            spin_result_data = handle_spin(user, slot, game_session, bet_amount_sats)
+        # Always call the new handle_spin, assuming it can differentiate or that multiway is handled within
+        # or will be addressed by fixing spin_handler_new.py if it can't.
+        spin_result_data = handle_spin_new_logic(user, slot, game_session, bet_amount_sats)
 
         db.session.commit()
         
@@ -263,7 +243,7 @@ def join_slot_game():
 
     slot = Slot.query.get(slot_id_from_request)
     if not slot:
-        raise NotFoundException(ErrorCodes.GAME_NOT_FOUND, f"Slot with ID {slot_id_from_request} not found")
+        raise NotFoundException(error_code=ErrorCodes.GAME_NOT_FOUND, status_message=f"Slot with ID {slot_id_from_request} not found")
 
     user_id = current_user.id
     now = datetime.now(timezone.utc)

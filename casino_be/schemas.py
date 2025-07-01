@@ -155,13 +155,34 @@ class LoginSchema(Schema):
         return sanitize_input(data)
 
 class UpdateSettingsSchema(Schema):
-    email = fields.Email(validate=validate_email_enhanced)
-    password = fields.Str(validate=validate_password)
-    
+    email = fields.Email(validate=validate_email_enhanced, required=False, allow_none=True)
+    current_password = fields.Str(required=False, allow_none=True)
+    new_password = fields.Str(validate=validate_password, required=False, allow_none=True)
+    confirm_new_password = fields.Str(required=False, allow_none=True)
+
     @validates_schema
-    def validate_at_least_one_field(self, data, **kwargs):
-        if not any(data.values()):
-            raise ValidationError('At least one field must be provided.')
+    def validate_passwords(self, data, **kwargs):
+        new_password = data.get('new_password')
+        confirm_new_password = data.get('confirm_new_password')
+        current_password = data.get('current_password')
+
+        if new_password:
+            if not current_password:
+                raise ValidationError("Current password is required to set a new password.", "current_password")
+            if not confirm_new_password:
+                raise ValidationError("Please confirm your new password.", "confirm_new_password")
+            if new_password != confirm_new_password:
+                raise ValidationError("New passwords do not match.", "_schema") # Field-agnostic error or target one field
+        elif confirm_new_password and not new_password: # If confirm is provided, new should be too
+             raise ValidationError("New password is required when confirming password.", "new_password")
+
+        # Ensure at least one change is being made (email or password or other future fields)
+        # This check might need to be more dynamic if more optional fields are added.
+        # For now, if only email or password fields are present:
+        if not data.get('email') and not new_password:
+            # Check if any data was provided at all. If only current_password was sent without new_password, that's also an issue.
+            if not current_password and not confirm_new_password : # only if all possible fields are empty
+                 raise ValidationError('At least email or new password details must be provided for an update.')
 
 class WithdrawSchema(Schema):
     amount = fields.Int(required=True, validate=[validate_amount, Range(min=10000)])  # Min 0.0001 BTC
@@ -194,6 +215,14 @@ class GameSessionSchema(SQLAlchemyAutoSchema):
         model = GameSession
         load_instance = True
         sqla_session = db.session
+        # Explicitly list fields to ensure they are included, especially foreign keys.
+        fields = (
+            "id", "user_id", "slot_id", "table_id", "game_type",
+            "session_start", "session_end", "amount_wagered", "amount_won",
+            "bonus_active", "bonus_spins_remaining", "bonus_multiplier",
+            "created_at", "updated_at"
+        )
+        # Add other fields from GameSession model as needed for responses like 'details' if it exists.
 
 class SpinRequestSchema(Schema):
     bet_amount = fields.Int(
