@@ -1,5 +1,14 @@
 from dotenv import load_dotenv
 import os
+import sys # Add sys import
+import pathlib # Add pathlib import
+
+# Add project root to sys.path
+# This allows absolute imports from 'casino_be' (e.g., from casino_be.models)
+# instead of relative imports (e.g., from .models)
+# Assumes app.py is in casino_be/
+project_root = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
 
 # Load environment variables from .env file
 load_dotenv()
@@ -35,7 +44,7 @@ class RequestIdFilter(logging.Filter):
         return True
 
 # Import all models - combining Spacecrash, Poker, and Plinko models
-from .models import ( # Relative import
+from casino_be.models import ( # Absolute import
     db, User, GameSession, Transaction, BonusCode, Slot, SlotSymbol, SlotBet, TokenBlacklist,
     BlackjackTable, BlackjackHand, BlackjackAction, UserBonus,
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
@@ -45,8 +54,8 @@ from .models import ( # Relative import
     # Crystal Garden Models
     CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry
 )
-from .utils.security import secure_headers, log_security_event # Relative import
-from .schemas import ( # Relative import
+from casino_be.utils.security import secure_headers, log_security_event # Absolute import
+from casino_be.schemas import ( # Absolute import
     UserSchema, RegisterSchema, LoginSchema, GameSessionSchema, SpinSchema, SpinRequestSchema,
     WithdrawSchema, UpdateSettingsSchema, DepositSchema, SlotSchema, JoinGameSchema,
     BonusCodeSchema, AdminUserSchema, TransactionSchema, UserListSchema, BonusCodeListSchema, TransactionListSchema,
@@ -58,21 +67,21 @@ from .schemas import ( # Relative import
     # Baccarat schemas will be defined below for now, or imported if moved to a separate file
     BaccaratTableSchema, BaccaratHandSchema, PlaceBaccaratBetSchema, BaccaratActionSchema # Actual Baccarat Schemas
 )
-from .utils.auth import register_jwt_handlers # Relative import
-from .utils.bitcoin import generate_bitcoin_wallet # Relative import
-from .utils.spin_handler_new import handle_spin # Corrected and relative import
-from .utils.multiway_helper import handle_multiway_spin # Relative import
-from .utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action # Relative import
-from .utils import spacecrash_handler # Relative import
-from .utils import poker_helper # Relative import
-from .utils import roulette_helper # Relative import
-from .utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS # Relative import
-from .utils import baccarat_helper # Relative import
-from .config import Config # Relative import
+from casino_be.utils.auth import register_jwt_handlers # Absolute import
+from casino_be.utils.bitcoin import generate_bitcoin_wallet # Absolute import
+from casino_be.utils.spin_handler_new import handle_spin # Corrected and absolute import
+from casino_be.utils.multiway_helper import handle_multiway_spin # Absolute import
+from casino_be.utils.blackjack_helper import handle_join_blackjack, handle_blackjack_action # Absolute import
+from casino_be.utils import spacecrash_handler # Absolute import
+from casino_be.utils import poker_helper # Absolute import
+from casino_be.utils import roulette_helper # Absolute import
+from casino_be.utils.plinko_helper import validate_plinko_params, calculate_winnings, STAKE_CONFIG, PAYOUT_MULTIPLIERS # Absolute import
+from casino_be.utils import baccarat_helper # Absolute import
+from casino_be.config import Config # Absolute import
 from sqlalchemy.orm import joinedload # Added for poker join logic
 from sqlalchemy import select, func # Added for SQLAlchemy 2.0 compatibility
 from decimal import Decimal
-from .services.bonus_service import apply_bonus_to_deposit # Relative import
+from casino_be.services.bonus_service import apply_bonus_to_deposit # Absolute import
 from http import HTTPStatus
 import click # For CLI commands
 import re # For password validation
@@ -92,21 +101,21 @@ def is_password_strong(password):
         return False, "Password must contain at least one special character (e.g., !@#$%^&*)."
     return True, ""
 
-# --- Blueprint Imports (moved to top and made relative) ---
-from .routes.auth import auth_bp
-from .routes.user import user_bp
-from .routes.admin import admin_bp
-from .routes.slots import slots_bp
-from .routes.blackjack import blackjack_bp
-from .routes.poker import poker_bp
-from .routes.plinko import plinko_bp
-from .routes.roulette import roulette_bp
-from .routes.spacecrash import spacecrash_bp
-from .routes.meta_game import meta_game_bp
-from .routes.baccarat import baccarat_bp
-from .routes.internal import internal_bp
-from .routes.crystal_garden import crystal_garden_bp
-from .routes.bitcoin import bitcoin_bp
+# --- Blueprint Imports (moved to top and made absolute) ---
+from casino_be.routes.auth import auth_bp
+from casino_be.routes.user import user_bp
+from casino_be.routes.admin import admin_bp
+from casino_be.routes.slots import slots_bp
+from casino_be.routes.blackjack import blackjack_bp
+from casino_be.routes.poker import poker_bp
+from casino_be.routes.plinko import plinko_bp
+from casino_be.routes.roulette import roulette_bp
+from casino_be.routes.spacecrash import spacecrash_bp
+from casino_be.routes.meta_game import meta_game_bp
+from casino_be.routes.baccarat import baccarat_bp
+from casino_be.routes.internal import internal_bp
+from casino_be.routes.crystal_garden import crystal_garden_bp
+from casino_be.routes.bitcoin import bitcoin_bp
 
 def create_app(config_class=Config):
     """Application factory pattern with enhanced security."""

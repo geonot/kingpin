@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import random
 import secrets # Added import
 # import json # Not strictly needed if BlackjackHand.details is handled by SQLAlchemy's JSON type directly
-from ..models import db, User, GameSession, BlackjackHand, BlackjackAction, BlackjackTable, Transaction, UserBonus # Relative import
+from casino_be.models import db, User, GameSession, BlackjackHand, BlackjackAction, BlackjackTable, Transaction, UserBonus # Absolute import
 
 # --- Card Constants ---
 SUITS = ['H', 'D', 'C', 'S']  # Hearts, Diamonds, Clubs, Spades

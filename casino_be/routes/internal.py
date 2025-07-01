@@ -1,9 +1,9 @@
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime, timezone
 
-from ..models import db, User, Transaction # Relative import
-from ..utils.decorators import service_token_required # Relative import
-from ..schemas import UserSchema # Relative import
+from casino_be.models import db, User, Transaction # Absolute import
+from casino_be.utils.decorators import service_token_required # Absolute import
+from casino_be.schemas import UserSchema # Absolute import
 
 internal_bp = Blueprint('internal', __name__, url_prefix='/api/internal')
 

@@ -2,9 +2,9 @@ from flask import Blueprint, request, jsonify, current_app # Added current_app f
 from flask_jwt_extended import jwt_required, current_user
 
 # models import was missing from the previous read, but error trace shows it's needed
-from ..models import db, User, CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry # Ensure all needed models are here
-from ..services.crystal_garden_service import CrystalGardenService, ServiceError, ItemNotFoundError
-from ..utils.decorators import feature_flag_required
+from casino_be.models import db, User, CrystalSeed, PlayerGarden, CrystalFlower, CrystalCodexEntry # Ensure all needed models are here
+from casino_be.services.crystal_garden_service import CrystalGardenService, ServiceError, ItemNotFoundError
+from casino_be.utils.decorators import feature_flag_required
 
 crystal_garden_bp = Blueprint('crystal_garden_bp', __name__, url_prefix='/api/crystal-garden')
 service = CrystalGardenService()

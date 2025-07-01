@@ -2,8 +2,8 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from ..models import db, GameSession, BlackjackTable, BaccaratTable, PokerTable # Relative import
-from ..schemas import BlackjackTableSchema, BaccaratTableSchema, PokerTableSchema # Relative import
+from casino_be.models import db, GameSession, BlackjackTable, BaccaratTable, PokerTable # Absolute import
+from casino_be.schemas import BlackjackTableSchema, BaccaratTableSchema, PokerTableSchema # Absolute import
 
 meta_game_bp = Blueprint('meta_game', __name__, url_prefix='/api')
 

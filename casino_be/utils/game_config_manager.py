@@ -7,7 +7,7 @@ import json
 import os
 from typing import Dict, Any, Optional
 from flask import current_app
-from ..models import db, Slot # Relative import
+from casino_be.models import db, Slot # Absolute import
 import time # Moved time import to top
 
 class GameConfigManager:

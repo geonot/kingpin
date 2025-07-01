@@ -2,12 +2,12 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 
-from ..models import db, User, PokerTable, PokerHand, PokerPlayerState # Relative import
-from ..schemas import ( # Relative import
+from casino_be.models import db, User, PokerTable, PokerHand, PokerPlayerState # Absolute import
+from casino_be.schemas import ( # Absolute import
     PokerTableSchema, JoinPokerTableSchema, PokerActionSchema,
     UserSchema, PokerHandSchema, PokerPlayerStateSchema
 )
-from ..utils import poker_helper # Relative import
+from casino_be.utils import poker_helper # Absolute import
 from sqlalchemy.orm import joinedload # For optimized querying
 
 def get_websocket_manager():

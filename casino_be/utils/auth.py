@@ -1,5 +1,5 @@
 from flask_jwt_extended import get_jwt_identity, get_jti
-from ..models import db, User, TokenBlacklist # Changed to relative import
+from casino_be.models import db, User, TokenBlacklist # Changed to absolute import
 from datetime import datetime, timezone
 
 def user_identity_lookup(user):

@@ -4,7 +4,7 @@ import math
 import os
 from datetime import datetime, timezone
 
-from ..models import db, SpacecrashGame, SpacecrashBet, User # Relative import
+from casino_be.models import db, SpacecrashGame, SpacecrashBet, User # Absolute import
 # If your app instance 'app' is needed for config, you might need to import it or pass config values.
 # from casino_be.app import app # Or from casino_be.config import Config
 

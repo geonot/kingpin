@@ -8,9 +8,9 @@ import secrets
 # Ensure models are imported relatively for consistency if this file is part of a package structure.
 # However, the error was in app.py importing this file, and this file importing models.
 # The fix here is for this file's own imports.
-from ..models import db, SlotSpin, GameSession, User, Transaction, UserBonus # Relative import for models
-from .game_config_manager import GameConfigManager # Relative import for game_config_manager
-from .spin_handler_new import check_bonus_trigger # Corrected and relative import for check_bonus_trigger
+from casino_be.models import db, SlotSpin, GameSession, User, Transaction, UserBonus # Absolute import for models
+from casino_be.utils.game_config_manager import GameConfigManager # Absolute import for game_config_manager
+from casino_be.utils.spin_handler_new import check_bonus_trigger # Corrected and absolute import for check_bonus_trigger
 
 
 def load_multiway_game_config(slot_short_name):
