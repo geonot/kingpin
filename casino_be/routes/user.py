@@ -3,10 +3,10 @@ from flask_jwt_extended import jwt_required, current_user
 from datetime import datetime, timezone
 from marshmallow import ValidationError # Ensure ValidationError is imported
 
-from ..models import db, User, Transaction, UserBonus
-from ..schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema
-from ..services.bonus_service import apply_bonus_to_deposit
-from ..utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
+from casino_be.models import db, User, Transaction, UserBonus
+from casino_be.schemas import UserSchema, WithdrawSchema, UpdateSettingsSchema, DepositSchema, TransferSchema
+from casino_be.services.bonus_service import apply_bonus_to_deposit
+from casino_be.utils.security import require_csrf_token, rate_limit_by_ip, log_security_event
 from casino_be.exceptions import InsufficientFundsException, ValidationException, NotFoundException, AuthorizationException, AuthenticationException # Ensure AuthenticationException is here
 from casino_be.error_codes import ErrorCodes
 
@@ -83,8 +83,8 @@ def withdraw():
         auto_processed = False
         if hasattr(user, 'deposit_wallet_private_key') and user.deposit_wallet_private_key:
             try:
-                from ..utils.encryption import decrypt_private_key # Relative import
-                from ..utils.bitcoin import send_to_hot_wallet # Relative import
+                from casino_be.utils.encryption import decrypt_private_key # Absolute import
+                from casino_be.utils.bitcoin import send_to_hot_wallet # Absolute import
                 
                 private_key_wif = decrypt_private_key(user.deposit_wallet_private_key)
                 fee_sats = 5000  # Fixed fee for demo

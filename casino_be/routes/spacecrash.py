@@ -3,12 +3,12 @@ from flask_jwt_extended import jwt_required, current_user
 from marshmallow import ValidationError
 from datetime import datetime, timezone
 
-from ..models import db, User, SpacecrashGame, SpacecrashBet # Relative import
-from ..schemas import ( # Relative import
+from casino_be.models import db, User, SpacecrashGame, SpacecrashBet # Absolute import
+from casino_be.schemas import ( # Absolute import
     SpacecrashBetSchema, SpacecrashGameSchema,
     SpacecrashGameHistorySchema, SpacecrashPlayerBetSchema
 )
-from ..utils import spacecrash_handler # Relative import
+from casino_be.utils import spacecrash_handler # Absolute import
 from .admin import is_admin # Relative import for sibling module
 
 def get_websocket_manager():

@@ -2,9 +2,9 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from http import HTTPStatus
 
-from ..models import db, User, PlinkoDropLog, Transaction # Relative import
-from ..schemas import PlinkoPlayRequestSchema, PlinkoPlayResponseSchema # Relative import
-from ..utils.plinko_helper import ( # Relative import
+from casino_be.models import db, User, PlinkoDropLog, Transaction # Absolute import
+from casino_be.schemas import PlinkoPlayRequestSchema, PlinkoPlayResponseSchema # Absolute import
+from casino_be.utils.plinko_helper import ( # Absolute import
     validate_plinko_params, calculate_winnings,
     PAYOUT_MULTIPLIERS, SATOSHIS_PER_UNIT
 )

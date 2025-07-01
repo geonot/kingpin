@@ -2,8 +2,8 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, current_user
 from sqlalchemy import select, func # Added for SQLAlchemy 2.0 compatibility
 
-from ..models import db, User, GameSession, Transaction, BonusCode # Relative import
-from ..schemas import ( # Relative import
+from casino_be.models import db, User, GameSession, Transaction, BonusCode # Absolute import
+from casino_be.schemas import ( # Absolute import
     AdminUserSchema, UserListSchema, TransactionSchema, TransactionListSchema,
     BonusCodeSchema, BonusCodeListSchema, AdminCreditDepositSchema
 )
