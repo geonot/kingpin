@@ -12,10 +12,11 @@ from .models import ( # Relative import
     SpacecrashGame, SpacecrashBet,  # Spacecrash models
     PokerTable, PokerHand, PokerPlayerState,  # Poker models
     PlinkoDropLog,  # Plinko models
-    BaccaratTable, BaccaratHand, BaccaratAction # Baccarat models
+    BaccaratTable, BaccaratHand, BaccaratAction, # Baccarat models
+    Sport, League, Team, Event, Market, Odds, SportsBet # Sportsbook models
 )
 from .utils.plinko_helper import STAKE_CONFIG, PAYOUT_MULTIPLIERS # Relative import
-from .utils.security import validate_password_strength, sanitize_input # Relative import
+from .utils.security import is_password_strong, sanitize_input # Updated import
 
 # --- Enhanced Security Validators ---
 def validate_username(username):
@@ -61,9 +62,10 @@ def validate_email_enhanced(email):
 
 def validate_password(password):
     """Enhanced password validation using security utils"""
-    errors = validate_password_strength(password)
-    if errors:
-        raise ValidationError(errors)
+    # Uses is_password_strong which returns (bool, message)
+    strong_enough, message = is_password_strong(password)
+    if not strong_enough:
+        raise ValidationError(message or "Password does not meet complexity requirements.")
 
 def validate_amount(amount):
     """Validate monetary amounts (in satoshis)"""
@@ -757,3 +759,59 @@ class PlaceBaccaratBetSchema(Schema):
         if total_bet <= 0:
             raise ValidationError("At least one bet amount must be positive, and the total bet must be greater than zero.")
         return data
+
+# --- Sportsbook Schemas ---
+
+class SportSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = Sport
+        load_instance = True
+        sqla_session = db.session
+
+class LeagueSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = League
+        load_instance = True
+        sqla_session = db.session
+    sport = fields.Nested(SportSchema, only=("name", "slug"))
+
+class TeamSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = Team
+        load_instance = True
+        sqla_session = db.session
+
+class OddsSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = Odds
+        load_instance = True
+        sqla_session = db.session
+        exclude = ("market",)
+    decimal_value = fields.Float()
+
+class MarketSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = Market
+        load_instance = True
+        sqla_session = db.session
+        exclude = ("event",)
+    odds = fields.Nested(OddsSchema, many=True)
+
+class EventSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = Event
+        load_instance = True
+        sqla_session = db.session
+    home_team = fields.Nested(TeamSchema, only=("name", "slug"))
+    away_team = fields.Nested(TeamSchema, only=("name", "slug"))
+    league = fields.Nested(LeagueSchema, only=("name", "slug"))
+    markets = fields.Nested(MarketSchema, many=True)
+
+class SportsBetSchema(SQLAlchemyAutoSchema):
+    class Meta:
+        model = SportsBet
+        load_instance = True
+        sqla_session = db.session
+
+    odds_line = fields.Nested(OddsSchema)
+    user = fields.Nested(UserSchema, only=("id", "username"))

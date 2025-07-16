@@ -28,6 +28,10 @@
           <i class="fas fa-poker-chip mr-2"></i> <!-- Placeholder for icon -->
           Poker
         </router-link>
+        <router-link to="/sportsbook" exact-active-class="bg-highlight text-accent font-semibold" class="nav-link">
+          <i class="fas fa-football-ball mr-2"></i> <!-- Placeholder for icon -->
+          Sportsbook
+        </router-link>
       </nav>
     </div>
 
@@ -45,6 +49,10 @@
         <router-link to="/transactions" exact-active-class="bg-highlight text-accent font-semibold" class="nav-link">
           <i class="fas fa-history mr-2"></i>
           Transactions
+        </router-link>
+        <router-link to="/my-sports-bets" exact-active-class="bg-highlight text-accent font-semibold" class="nav-link">
+          <i class="fas fa-receipt mr-2"></i>
+          My Sports Bets
         </router-link>
         <router-link to="/bonuses" exact-active-class="bg-highlight text-accent font-semibold" class="nav-link">
           <i class="fas fa-gift mr-2"></i>

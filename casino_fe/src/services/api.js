@@ -224,5 +224,25 @@ export default {
   
   fetchAdminUsers(page = 1, perPage = 20) {
     return apiClient.get(`/admin/users?page=${page}&per_page=${perPage}`);
+  },
+
+  // --- Sportsbook API ---
+  getSports() {
+    return apiClient.get('/sportsbook/sports');
+  },
+  getLeaguesForSport(sportSlug) {
+    return apiClient.get(`/sportsbook/sports/${sportSlug}/leagues`);
+  },
+  getEventsForLeague(leagueSlug) {
+    return apiClient.get(`/sportsbook/leagues/${leagueSlug}/events`);
+  },
+  getEventDetails(eventId) {
+    return apiClient.get(`/sportsbook/events/${eventId}`);
+  },
+  placeBet(betData) {
+    return apiClient.post('/sportsbook/bets', betData);
+  },
+  getMySportsBets() {
+    return apiClient.get('/sportsbook/bets/me');
   }
 };

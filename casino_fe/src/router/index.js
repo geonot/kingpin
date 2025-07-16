@@ -17,6 +17,8 @@ const Settings = () => import('@views/Settings.vue');
 const Spacecrash = () => import('@/views/Spacecrash.vue'); // Import Spacecrash view
 const Plinko = () => import('@views/Plinko.vue'); // Added Plinko
 const Roulette = () => import('@/views/Roulette.vue'); // Added Roulette
+const Sportsbook = () => import('@/views/Sportsbook.vue'); // Added Sportsbook
+const MySportsBets = () => import('@/views/MySportsBets.vue'); // Added MySportsBets
 
 // New Page Imports
 const BonusesPage = () => import('@/views/BonusesPage.vue');
@@ -143,6 +145,18 @@ const routes = [
     name: 'Roulette',
     component: Roulette,
     meta: { title: 'Roulette', requiresAuth: true }
+  },
+  {
+    path: '/sportsbook',
+    name: 'Sportsbook',
+    component: Sportsbook,
+    meta: { title: 'Sportsbook', requiresAuth: true }
+  },
+  {
+    path: '/my-sports-bets',
+    name: 'MySportsBets',
+    component: MySportsBets,
+    meta: { title: 'My Sports Bets', requiresAuth: true }
   },
    // Placeholder routes for footer links
   { path: '/terms', name: 'Terms', component: Terms, meta: { title: 'Terms & Conditions' } },

@@ -31,6 +31,9 @@ class User(db.Model):
     # roulette_games backref will be added by RouletteGame model
     baccarat_hands = db.relationship('BaccaratHand', back_populates='user', lazy='dynamic')
 
+    # Sportsbook relationship
+    sports_bets = db.relationship('SportsBet', back_populates='user', lazy='dynamic')
+
     # Crystal Garden related relationships
     garden = db.relationship("PlayerGarden", back_populates="user", uselist=False)
     crystal_flowers = db.relationship("CrystalFlower", back_populates="user")
@@ -115,6 +118,10 @@ class Transaction(db.Model):
     poker_hand = db.relationship('PokerHand', backref=db.backref('transactions', lazy='dynamic'))
     baccarat_hand_id = db.Column(db.Integer, db.ForeignKey('baccarat_hand.id', ondelete='SET NULL'), nullable=True, index=True)
     baccarat_hand = db.relationship('BaccaratHand', backref=db.backref('transactions', lazy='dynamic'))
+
+    # Sportsbook relationship
+    sports_bet_id = db.Column(db.Integer, db.ForeignKey('sports_bet.id', ondelete='SET NULL'), nullable=True, index=True)
+    sports_bet = db.relationship('SportsBet', backref=db.backref('transactions', lazy='dynamic'))
 
     def __repr__(self):
         return f"<Transaction {self.id} (User: {self.user_id}, Type: {self.transaction_type}, Amount: {self.amount})>"
@@ -629,3 +636,138 @@ class CrystalCodexEntry(db.Model):
             'first_discovered_at': self.first_discovered_at.isoformat() if self.first_discovered_at else None,
             'notes': self.notes
         }
+
+# Sportsbook Models
+
+class Sport(db.Model):
+    __tablename__ = 'sport'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    slug = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+
+    leagues = db.relationship('League', back_populates='sport', lazy='dynamic')
+
+    def __repr__(self):
+        return f"<Sport {self.name} ({self.slug})>"
+
+class League(db.Model):
+    __tablename__ = 'league'
+    id = db.Column(db.Integer, primary_key=True)
+    sport_id = db.Column(db.Integer, db.ForeignKey('sport.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False, index=True)
+    slug = db.Column(db.String(100), nullable=False, index=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+
+    sport = db.relationship('Sport', back_populates='leagues')
+    teams = db.relationship('Team', back_populates='league', lazy='dynamic')
+    events = db.relationship('Event', back_populates='league', lazy='dynamic')
+
+    __table_args__ = (UniqueConstraint('sport_id', 'name', name='uq_league_sport_name'),
+                      UniqueConstraint('slug', name='uq_league_slug'),)
+
+    def __repr__(self):
+        return f"<League {self.name} ({self.slug})>"
+
+class Team(db.Model):
+    __tablename__ = 'team'
+    id = db.Column(db.Integer, primary_key=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('league.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False, index=True)
+    short_name = db.Column(db.String(20), nullable=True)
+    slug = db.Column(db.String(100), nullable=False, index=True)
+    logo_url = db.Column(db.String(255), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+
+    league = db.relationship('League', back_populates='teams')
+    home_events = db.relationship('Event', foreign_keys='Event.home_team_id', back_populates='home_team', lazy='dynamic')
+    away_events = db.relationship('Event', foreign_keys='Event.away_team_id', back_populates='away_team', lazy='dynamic')
+
+    __table_args__ = (UniqueConstraint('league_id', 'name', name='uq_team_league_name'),
+                      UniqueConstraint('slug', name='uq_team_slug'),)
+
+    def __repr__(self):
+        return f"<Team {self.name} ({self.short_name})>"
+
+class Event(db.Model):
+    __tablename__ = 'event'
+    id = db.Column(db.Integer, primary_key=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('league.id', ondelete='CASCADE'), nullable=False, index=True)
+    home_team_id = db.Column(db.Integer, db.ForeignKey('team.id', ondelete='CASCADE'), nullable=False, index=True)
+    away_team_id = db.Column(db.Integer, db.ForeignKey('team.id', ondelete='CASCADE'), nullable=False, index=True)
+    event_datetime = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    status = db.Column(db.String(50), default='Scheduled', nullable=False, index=True) # Scheduled, InProgress, Finished, Postponed, Cancelled
+    home_score = db.Column(db.Integer, nullable=True)
+    away_score = db.Column(db.Integer, nullable=True)
+    winner_team_id = db.Column(db.Integer, db.ForeignKey('team.id', ondelete='SET NULL'), nullable=True)
+    details_json = db.Column(JSON, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    league = db.relationship('League', back_populates='events')
+    home_team = db.relationship('Team', foreign_keys=[home_team_id], back_populates='home_events')
+    away_team = db.relationship('Team', foreign_keys=[away_team_id], back_populates='away_events')
+    winning_team = db.relationship('Team', foreign_keys=[winner_team_id])
+    markets = db.relationship('Market', back_populates='event', lazy='dynamic', cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Event ID {self.id} ({self.home_team.short_name} vs {self.away_team.short_name} at {self.event_datetime})>"
+
+class Market(db.Model):
+    __tablename__ = 'market'
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('event.id', ondelete='CASCADE'), nullable=False, index=True)
+    market_type = db.Column(db.String(100), nullable=False, index=True) # e.g., "moneyline_2way", "spread_2way", "total_2way_points"
+    line_details_json = db.Column(JSON, nullable=True) # For spread HDP, total points, etc.
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    settlement_rules_json = db.Column(JSON, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    event = db.relationship('Event', back_populates='markets')
+    odds = db.relationship('Odds', back_populates='market', lazy='dynamic', cascade="all, delete-orphan")
+
+    __table_args__ = (UniqueConstraint('event_id', 'market_type', 'line_details_json', name='uq_market_event_type_details'),)
+
+
+    def __repr__(self):
+        return f"<Market ID {self.id} ({self.market_type} for Event {self.event_id})>"
+
+class Odds(db.Model):
+    __tablename__ = 'odds'
+    id = db.Column(db.Integer, primary_key=True)
+    market_id = db.Column(db.Integer, db.ForeignKey('market.id', ondelete='CASCADE'), nullable=False, index=True)
+    selection_identifier = db.Column(db.String(100), nullable=False) # e.g., "home", "away", "over", "under", or team_id for player props
+    display_name = db.Column(db.String(255), nullable=False) # e.g., "Team A Win", "Over 2.5 Goals"
+    decimal_value = db.Column(Numeric(10, 4), nullable=False) # Store as decimal for precision
+    american_value = db.Column(db.Integer, nullable=True) # Can be derived or stored
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    last_updated = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    market = db.relationship('Market', back_populates='odds')
+    sports_bets = db.relationship('SportsBet', back_populates='odds_line', lazy='dynamic')
+
+    __table_args__ = (UniqueConstraint('market_id', 'selection_identifier', name='uq_odds_market_selection'),)
+
+    def __repr__(self):
+        return f"<Odds ID {self.id} ({self.display_name} @ {self.decimal_value} for Market {self.market_id})>"
+
+class SportsBet(db.Model):
+    __tablename__ = 'sports_bet'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    odds_id = db.Column(db.Integer, db.ForeignKey('odds.id', ondelete='RESTRICT'), nullable=False, index=True) # Prevent odds deletion if bets exist for it
+    stake_satoshis = db.Column(BigInteger, nullable=False)
+    potential_payout_satoshis = db.Column(BigInteger, nullable=False) # Calculated at time of bet
+    actual_winnings_satoshis = db.Column(BigInteger, nullable=True) # Populated on settlement
+    status = db.Column(db.String(50), default='Pending', nullable=False, index=True) # Pending, Won, Lost, Void/Refunded, CashedOut (future)
+    placed_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    settled_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    bet_slip_details_json = db.Column(JSON, nullable=True) # For multi-bets or more complex scenarios in future
+
+    user = db.relationship('User', back_populates='sports_bets')
+    odds_line = db.relationship('Odds', back_populates='sports_bets')
+    # transactions relationship is backref from Transaction model
+
+    def __repr__(self):
+        return f"<SportsBet ID {self.id} (User: {self.user_id}, Stake: {self.stake_satoshis}, Status: {self.status})>"

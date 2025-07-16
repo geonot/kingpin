@@ -20,7 +20,7 @@ def upgrade():
     # Update the Seven symbol multiplier to match gameConfig.json
     connection.execute(sa.text("""
         UPDATE slot_symbol 
-        SET data = '{"value_multipliers": {"3": 200}}'::jsonb
+        SET data = '{"value_multipliers": {"3": 200}}'
         WHERE slot_id IN (SELECT id FROM slot WHERE short_name = 'classic3x3')
         AND symbol_internal_id = 7
     """))

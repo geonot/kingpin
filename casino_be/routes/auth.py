@@ -13,10 +13,10 @@ import secrets
 from casino_be.models import db, User, TokenBlacklist
 from casino_be.schemas import UserSchema, RegisterSchema, LoginSchema
 from casino_be.utils.bitcoin import generate_bitcoin_wallet
-from casino_be.utils.security import require_csrf_token, generate_csrf_token
+from casino_be.utils.security import require_csrf_token, generate_csrf_token, is_password_strong # Import from new location
 from casino_be.exceptions import AuthenticationException, ValidationException
 from casino_be.error_codes import ErrorCodes
-from casino_be.app import is_password_strong
+# from casino_be.app import is_password_strong # Removed old import
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api')
 

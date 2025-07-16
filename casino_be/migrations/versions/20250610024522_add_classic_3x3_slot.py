@@ -54,7 +54,7 @@ def upgrade():
     for symbol_id, name, icon, value_mult, json_data in symbols:
         connection.execute(sa.text("""
             INSERT INTO slot_symbol (slot_id, symbol_internal_id, name, img_link, value_multiplier, data)
-            VALUES (:slot_id, :symbol_id, :name, :icon, :value_mult, CAST(:data AS jsonb))
+            VALUES (:slot_id, :symbol_id, :name, :icon, :value_mult, :data)
         """), {
             "slot_id": slot_id,
             "symbol_id": symbol_id,
@@ -83,7 +83,7 @@ def upgrade():
     '''
     
     connection.execute(sa.text("""
-        UPDATE slot SET reel_configurations = :config::jsonb WHERE id = :slot_id
+        UPDATE slot SET reel_configurations = :config WHERE id = :slot_id
     """), {"config": reel_config_json, "slot_id": slot_id})
     
     print(f"Classic 3x3 slot added successfully with ID: {slot_id}")

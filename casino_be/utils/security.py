@@ -105,6 +105,8 @@ def secure_headers(response):
     return response
 
 
+import re # Add re for is_password_strong
+
 def log_security_event(event_type, user_id=None, details=None):
     """Log security-related events for monitoring"""
     log_data = {
@@ -118,33 +120,20 @@ def log_security_event(event_type, user_id=None, details=None):
     
     current_app.logger.warning(f"SECURITY_EVENT: {log_data}")
 
-
-def validate_password_strength(password):
-    """Validate password meets security requirements"""
-    errors = []
-    
-    if len(password) < 8:
-        errors.append("Password must be at least 8 characters long")
-    
-    if not any(c.isupper() for c in password):
-        errors.append("Password must contain at least one uppercase letter")
-    
-    if not any(c.islower() for c in password):
-        errors.append("Password must contain at least one lowercase letter")
-    
-    if not any(c.isdigit() for c in password):
-        errors.append("Password must contain at least one digit")
-    
-    if not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
-        errors.append("Password must contain at least one special character")
-    
-    # Check for common passwords
-    common_passwords = ['password', '123456', 'password123', 'admin', 'qwerty']
-    if password.lower() in common_passwords:
-        errors.append("Password is too common")
-    
-    return errors
-
+# Stronger password validation function (moved from app.py)
+def is_password_strong(password):
+    """Checks if the password meets complexity requirements."""
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters long."
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must contain at least one uppercase letter."
+    if not re.search(r"[a-z]", password):
+        return False, "Password must contain at least one lowercase letter."
+    if not re.search(r"\d", password):
+        return False, "Password must contain at least one digit."
+    if not re.search(r"[!@#$%^&*()-_=+[\]{}|;:'\",.<>/?]", password):
+        return False, "Password must contain at least one special character (e.g., !@#$%^&*)."
+    return True, ""
 
 def generate_secure_session_id():
     """Generate a cryptographically secure session ID"""

@@ -86,20 +86,7 @@ from http import HTTPStatus
 import click # For CLI commands
 import re # For password validation
 
-# Password validation function (moved from manage.py)
-def is_password_strong(password):
-    """Checks if the password meets complexity requirements."""
-    if len(password) < 12:
-        return False, "Password must be at least 12 characters long."
-    if not re.search(r"[A-Z]", password):
-        return False, "Password must contain at least one uppercase letter."
-    if not re.search(r"[a-z]", password):
-        return False, "Password must contain at least one lowercase letter."
-    if not re.search(r"\d", password):
-        return False, "Password must contain at least one digit."
-    if not re.search(r"[!@#$%^&*()-_=+[\]{}|;:'\",.<>/?]", password):
-        return False, "Password must contain at least one special character (e.g., !@#$%^&*)."
-    return True, ""
+from casino_be.utils.security import is_password_strong # Moved here
 
 # --- Blueprint Imports (moved to top and made absolute) ---
 from casino_be.routes.auth import auth_bp
@@ -116,6 +103,8 @@ from casino_be.routes.baccarat import baccarat_bp
 from casino_be.routes.internal import internal_bp
 from casino_be.routes.crystal_garden import crystal_garden_bp
 from casino_be.routes.bitcoin import bitcoin_bp
+from casino_be.routes.sportsbook import sportsbook_bp
+from casino_be.routes.admin_sportsbook import admin_sportsbook_bp
 
 def create_app(config_class=Config):
     """Application factory pattern with enhanced security."""
@@ -267,12 +256,12 @@ def create_app(config_class=Config):
                        engineio_logger=app.logger)
     
     # Initialize WebSocket Manager
-    from .services.websocket_manager import websocket_manager
+    from casino_be.services.websocket_manager import websocket_manager # Changed to absolute import
     websocket_manager.socketio = socketio
     websocket_manager.init_app(app)
     
     # Initialize SpaceCrash Game Loop
-    from .services.spacecrash_game_loop import spacecrash_game_loop
+    from casino_be.services.spacecrash_game_loop import spacecrash_game_loop # Changed to absolute import
     spacecrash_game_loop.websocket_manager = websocket_manager
     spacecrash_game_loop.app = app
     
@@ -511,6 +500,8 @@ def create_app(config_class=Config):
     app.register_blueprint(internal_bp) # Register internal blueprint
     app.register_blueprint(crystal_garden_bp) # Register Crystal Garden blueprint
     app.register_blueprint(bitcoin_bp) # Register Bitcoin blueprint
+    app.register_blueprint(sportsbook_bp)
+    app.register_blueprint(admin_sportsbook_bp)
 
     # --- CLI command for creating an admin user (moved from manage.py) ---
     @app.cli.command("create-admin")
